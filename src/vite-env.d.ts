@@ -40,6 +40,7 @@ declare global {
 
 			windowMinimize: () => Promise<boolean>;
 			openMiniWindow: () => Promise<boolean>;
+			openSettingsWindow: () => Promise<boolean>;
 			resizeMiniWindow: (width: number, height: number) => Promise<boolean>;
 			showMainWindow: () => Promise<boolean>;
 			closeMiniWindow: () => Promise<boolean>;

@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld("atlas", {
 
 	windowMinimize: () => ipcRenderer.invoke("window:minimize"),
 	openMiniWindow: () => ipcRenderer.invoke("window:openMini"),
+	openSettingsWindow: () => ipcRenderer.invoke("window:openSettings"),
 	resizeMiniWindow: (width, height) => ipcRenderer.invoke("window:resizeMini", width, height),
 	showMainWindow: () => ipcRenderer.invoke("window:showMain"),
 	closeMiniWindow: () => ipcRenderer.invoke("window:closeMini"),

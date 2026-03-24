@@ -9,6 +9,7 @@ const { ActivityTracker } = require("./activity-tracker.cjs");
 let mainWindow = null;
 let miniWindow = null;
 let welcomeWindow = null;
+let settingsWindow = null;
 let tray = null;
 let isQuitting = false;
 let db = null;
@@ -237,6 +238,62 @@ function createWelcomeWindow() {
 	}
 
 	return welcomeWindow;
+}
+
+function createSettingsWindow(parentWindow = null) {
+	if (settingsWindow && !settingsWindow.isDestroyed()) {
+		settingsWindow.show();
+		settingsWindow.focus();
+		return settingsWindow;
+	}
+
+	settingsWindow = new BrowserWindow({
+		width: 980,
+		height: 680,
+		minWidth: 900,
+		minHeight: 620,
+		maximizable: false,
+		fullscreenable: false,
+		autoHideMenuBar: true,
+		show: false,
+		center: true,
+		backgroundColor: "#070707",
+		icon: isDev
+			? path.join(__dirname, "..", "src", "assets", "logosmall.png")
+			: path.join(__dirname, "..", "dist", "assets", "logosmall.png"),
+		frame: false,
+		titleBarStyle: "hidden",
+		parent: parentWindow && !parentWindow.isDestroyed() ? parentWindow : undefined,
+		modal: Boolean(parentWindow && !parentWindow.isDestroyed()),
+		resizable: true,
+		webPreferences: {
+			preload: path.join(__dirname, "preload.cjs"),
+			contextIsolation: true,
+			nodeIntegration: false,
+		},
+	});
+
+	if (isDev) {
+		settingsWindow.loadURL("http://localhost:5173?mode=settings");
+	} else {
+		settingsWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"), {
+			query: { mode: "settings" },
+		});
+	}
+
+	settingsWindow.once("ready-to-show", () => {
+		if (!settingsWindow || settingsWindow.isDestroyed()) {
+			return;
+		}
+		settingsWindow.show();
+		settingsWindow.focus();
+	});
+
+	settingsWindow.on("closed", () => {
+		settingsWindow = null;
+	});
+
+	return settingsWindow;
 }
 
 function hasAnyMaps() {
@@ -620,6 +677,12 @@ function wireIpc() {
 
 	ipcMain.handle("window:openMini", () => {
 		createMiniWindow();
+		return true;
+	});
+
+	ipcMain.handle("window:openSettings", (event) => {
+		const parentWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow ?? welcomeWindow;
+		createSettingsWindow(parentWindow);
 		return true;
 	});
 

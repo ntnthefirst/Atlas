@@ -35,6 +35,7 @@ import { AtlasHeader } from "./components/AtlasHeader";
 import { AtlasSidebar } from "./components/AtlasSidebar";
 import { AtlasMainContent } from "./components/AtlasMainContent";
 import { MainContentViews } from "./components/main-content";
+import { SettingsWindowApp } from "./components/settings-window/SettingsWindowApp";
 
 const defaultDashboard: DashboardOverview = {
 	totalTodayMs: 0,
@@ -182,7 +183,7 @@ const normalizeColumns = (columns: TaskColumn[]) => {
 	return nextColumns;
 };
 
-function App() {
+function MainAtlasApp() {
 	const isMiniMode = useMemo(() => new URLSearchParams(window.location.search).get("mode") === "mini", []);
 	const isWelcomeMode = useMemo(() => new URLSearchParams(window.location.search).get("mode") === "welcome", []);
 	const [maps, setMaps] = useState<MapItem[]>([]);
@@ -722,6 +723,13 @@ function App() {
 	const isMacPlatform = platform === "darwin";
 	const primaryViews = viewItems.filter((item) => item.id !== "settings");
 	const settingsView = viewItems.find((item) => item.id === "settings");
+	const onChangeView = (nextView: AtlasView) => {
+		if (nextView === "settings") {
+			void window.atlas.openSettingsWindow();
+			return;
+		}
+		setView(nextView);
+	};
 
 	const miniSessionControls = (
 		<div className="mini-session-controls recording-cluster active inline-flex min-w-0 items-center gap-2 rounded-[10px] border border-neutral-200 bg-neutral-0 p-0.5 dark:border-neutral-600 dark:bg-neutral-700/70">
@@ -1115,7 +1123,7 @@ function App() {
 							primaryViews={primaryViews}
 							settingsView={settingsView}
 							activeView={view}
-							onChangeView={setView}
+							onChangeView={onChangeView}
 						/>
 					</div>
 
@@ -1204,6 +1212,16 @@ function App() {
 			</AnimatePresence>
 		</div>
 	);
+}
+
+function App() {
+	const mode = useMemo(() => new URLSearchParams(window.location.search).get("mode"), []);
+
+	if (mode === "settings") {
+		return <SettingsWindowApp />;
+	}
+
+	return <MainAtlasApp />;
 }
 
 export default App;
