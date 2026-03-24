@@ -417,23 +417,44 @@ class AtlasDatabase {
 			return null;
 		}
 
-		const duration = toDurationMs(openBlock.started_at, endedAt);
+		// Get the session to validate block doesn't exceed session bounds
+		const session = this.getSessionById(sessionId);
+
+		// Calculate duration, ensuring it doesn't exceed session window
+		let actualEndTime = endedAt;
+		if (session && session.ended_at) {
+			// If session is already ended, cap the block end time at session end
+			const sessionEnd = new Date(session.ended_at).getTime();
+			const blockEnd = new Date(endedAt).getTime();
+			if (blockEnd > sessionEnd) {
+				actualEndTime = session.ended_at;
+			}
+		}
+
+		const duration = toDurationMs(openBlock.started_at, actualEndTime);
 
 		this.run(
 			`UPDATE activity_blocks
        SET ended_at = ?, duration = ?
        WHERE id = ?`,
-			[endedAt, duration, openBlock.id],
+			[actualEndTime, duration, openBlock.id],
 		);
 
 		return {
 			...openBlock,
-			ended_at: endedAt,
+			ended_at: actualEndTime,
 			duration,
 		};
 	}
 
 	createActivityBlock(sessionId, appName, startedAt) {
+		const session = this.getSessionById(sessionId);
+
+		// Safeguard: don't create activity blocks for ended sessions
+		if (!session || !session.is_active) {
+			return null;
+		}
+
 		const block = {
 			id: randomUUID(),
 			session_id: sessionId,

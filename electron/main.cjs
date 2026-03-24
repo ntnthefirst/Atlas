@@ -460,12 +460,23 @@ function wireIpc() {
 	ipcMain.handle("session:resume", (_event, sessionId) => db.resumeSession(sessionId));
 
 	ipcMain.handle("session:stop", (_event, sessionId) => {
+		// Finalize the last activity block
 		tracker.closeOpenBlockNow(sessionId);
+
+		// Immediately mark session as inactive in tracker to stop accepting new data
+		// This must happen BEFORE db.stopSession to prevent race conditions
+		if (tracker.currentSessionId === sessionId) {
+			tracker.clearCurrentSession();
+		}
+
+		// Mark session as ended in database
 		const session = db.stopSession(sessionId);
-		tracker.clearCurrentSession();
+
+		// Close mini window if open
 		if (miniWindow && !miniWindow.isDestroyed()) {
 			miniWindow.close();
 		}
+
 		return session;
 	});
 
