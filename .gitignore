@@ -1,0 +1,53 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+release
+out
+coverage
+*.tsbuildinfo
+*.local
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Runtime files
+*.pid
+*.pid.lock
+*.seed
+
+# Build/cache output
+.cache
+.parcel-cache
+.vite
+.eslintcache
+
+# Electron artifacts
+*.blockmap
+builder-debug.yml
+builder-effective-config.yaml
+*.asar
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS files
+Thumbs.db
