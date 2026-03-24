@@ -56,6 +56,25 @@ npm run start
 - `npm run lint` - Run ESLint
 - `npm run preview` - Preview Vite production build
 
+## Automatic Versioning and Releases
+
+This repository uses a GitHub Actions workflow on every push to `main`:
+
+- Lint and build are executed first.
+- A semantic version tag is generated automatically.
+- A GitHub Release is created automatically.
+- Old releases/tags from older major versions are removed automatically.
+
+Version bump rules are commit-message based:
+
+- `feat:` -> minor bump
+- `fix:` and other commits -> patch bump
+- `BREAKING CHANGE` or `type(scope)!:` -> major bump
+
+Example:
+
+- New `v2.x.x` release will trigger cleanup of all `v1.x.x` releases/tags.
+
 ## Project Structure
 
 - `src/` - React UI and application state

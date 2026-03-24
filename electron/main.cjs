@@ -1,4 +1,5 @@
 const path = require("node:path");
+const https = require("node:https");
 const { spawn } = require("node:child_process");
 const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, nativeTheme } = require("electron");
 
@@ -16,6 +17,103 @@ let tracker = null;
 const isDev = !app.isPackaged;
 const isMac = process.platform === "darwin";
 const isWindows = process.platform === "win32";
+const GITHUB_OWNER = "ntnthefirst";
+const GITHUB_REPO = "Atlas";
+
+function fetchJson(url) {
+	return new Promise((resolve, reject) => {
+		const request = https.get(
+			url,
+			{
+				headers: {
+					"User-Agent": "Atlas-Version-Check",
+					Accept: "application/vnd.github+json",
+				},
+				timeout: 4000,
+			},
+			(response) => {
+				if (!response || response.statusCode < 200 || response.statusCode >= 300) {
+					reject(new Error(`HTTP ${response?.statusCode ?? "unknown"}`));
+					return;
+				}
+
+				let payload = "";
+				response.on("data", (chunk) => {
+					payload += chunk;
+				});
+				response.on("end", () => {
+					try {
+						resolve(JSON.parse(payload));
+					} catch {
+						reject(new Error("Invalid JSON response."));
+					}
+				});
+			},
+		);
+
+		request.on("timeout", () => {
+			request.destroy(new Error("Version check timeout."));
+		});
+		request.on("error", reject);
+	});
+}
+
+function toSemverTuple(rawVersion) {
+	if (!rawVersion || typeof rawVersion !== "string") {
+		return null;
+	}
+
+	const cleaned = rawVersion.trim().replace(/^v/i, "");
+	if (!cleaned) {
+		return null;
+	}
+
+	const parts = cleaned.split(".").map((part) => Number.parseInt(part, 10));
+	if (parts.some((part) => Number.isNaN(part) || part < 0)) {
+		return null;
+	}
+
+	return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0];
+}
+
+function compareSemver(a, b) {
+	for (let index = 0; index < 3; index += 1) {
+		const left = a[index] ?? 0;
+		const right = b[index] ?? 0;
+		if (left > right) {
+			return 1;
+		}
+		if (left < right) {
+			return -1;
+		}
+	}
+	return 0;
+}
+
+async function checkLatestGitHubVersion() {
+	const localVersion = app.getVersion();
+	const localTuple = toSemverTuple(localVersion);
+	if (!localTuple) {
+		return;
+	}
+
+	try {
+		const latestRelease = await fetchJson(
+			`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`,
+		);
+		const remoteTag = typeof latestRelease?.tag_name === "string" ? latestRelease.tag_name : "";
+		const remoteTuple = toSemverTuple(remoteTag);
+		if (!remoteTuple) {
+			return;
+		}
+
+		if (compareSemver(remoteTuple, localTuple) > 0) {
+			console.log(`[Atlas] New version available: ${remoteTag} (local: v${localVersion}).`);
+		}
+	} catch {
+		console.log("[Atlas] Version check skipped (offline or GitHub unavailable). Continuing startup.");
+	}
+}
 
 function createMainWindow() {
 	if (mainWindow && !mainWindow.isDestroyed()) {
@@ -574,6 +672,7 @@ app.whenReady().then(async () => {
 
 	wireIpc();
 	openPrimaryWindowByMapState();
+	void checkLatestGitHubVersion();
 
 	app.on("activate", () => {
 		if (BrowserWindow.getAllWindows().length === 0) {
