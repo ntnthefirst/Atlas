@@ -582,6 +582,15 @@ function wireIpc() {
 		return db.getDashboardOverview(mapId);
 	});
 
+	ipcMain.handle("data:repairCorruptedSessions", () => {
+		console.log("[Atlas] Starting repair of corrupted session data...");
+		const results = db.repairCorruptedSessions();
+		console.log(
+			`[Atlas] Repair complete: ${results.sessionsRepaired} sessions checked, ${results.blocksNormalized} blocks normalized.`,
+		);
+		return results;
+	});
+
 	ipcMain.handle("app:launch", (_event, command) => {
 		if (!command || !command.trim()) {
 			throw new Error("Command is required.");
@@ -714,6 +723,14 @@ app.whenReady().then(async () => {
 
 	const dbPath = path.join(app.getPath("userData"), "atlas.db");
 	db = await AtlasDatabase.create(dbPath);
+
+	// CRITICAL: Finalize any stranded sessions from crashes or ungraceful shutdowns
+	// This prevents old sessions from being resumed and continuing to accumulate time
+	const repairResults = db.finalizeStrandedSessions();
+	if (repairResults.finalized > 0) {
+		console.log(`[Atlas] Finalized ${repairResults.finalized} stranded session(s) from previous crash.`);
+	}
+
 	tracker = new ActivityTracker(db);
 	tracker.start();
 

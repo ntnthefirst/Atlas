@@ -91,7 +91,16 @@ export function LogbookView({
 	const appTotals = activityBlocks
 		.reduce<Array<{ appName: string; duration: number }>>((entries, block) => {
 			const cleanedName = cleanAppLabel(block.app_name);
-			const blockMs = block.ended_at ? block.duration : Math.max(0, now - new Date(block.started_at).getTime());
+
+			// For completed sessions, always use block.duration (never recalculate from now)
+			// For active sessions, calculate from now if block is open
+			const blockMs =
+				selectedSession && !selectedSession.is_active
+					? block.duration || 0
+					: block.ended_at
+						? block.duration
+						: Math.max(0, now - new Date(block.started_at).getTime());
+
 			const existing = entries.find((entry) => entry.appName === cleanedName);
 			if (existing) {
 				existing.duration += blockMs;

@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld("atlas", {
 	updateNotebookByMap: (mapId, content) => ipcRenderer.invoke("notebook:updateByMap", mapId, content),
 
 	getDashboardOverview: (mapId) => ipcRenderer.invoke("dashboard:overview", mapId),
+	repairCorruptedSessions: () => ipcRenderer.invoke("data:repairCorruptedSessions"),
 
 	launchApp: (command) => ipcRenderer.invoke("app:launch", command),
 	getPlatform: () => ipcRenderer.invoke("app:platform"),
