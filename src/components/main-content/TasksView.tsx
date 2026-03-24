@@ -1,5 +1,5 @@
 import { MinusIcon, PlusIcon } from "@heroicons/react/24/outline";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { MainContentViewsProps } from "./types";
 
 type DropPosition = "before" | "after";
@@ -37,17 +37,12 @@ export function TasksView({
 	const draggedColumnStatusRef = useRef<string | null>(null);
 	const draggedTaskLocalIdRef = useRef<string | null>(null);
 	const composerInputRef = useRef<HTMLInputElement | null>(null);
-
-	useEffect(() => {
-		if (!statusColumns.length) {
-			setComposerStatus("");
-			return;
-		}
-
-		if (!statusColumns.some((column) => column.status === composerStatus)) {
-			setComposerStatus(statusColumns[0].status);
-		}
-	}, [composerStatus, statusColumns]);
+	const safeComposerStatus =
+		statusColumns.length === 0
+			? ""
+			: statusColumns.some((column) => column.status === composerStatus)
+				? composerStatus
+				: statusColumns[0].status;
 
 	const commitColumnRename = (status: string) => {
 		const nextLabel = editingLabel.trim();
@@ -60,10 +55,10 @@ export function TasksView({
 
 	const submitComposerTask = async () => {
 		const title = composerTitle.trim();
-		if (!composerStatus || !title) {
+		if (!safeComposerStatus || !title) {
 			return;
 		}
-		await onCreateTaskInColumn(composerStatus, title);
+		await onCreateTaskInColumn(safeComposerStatus, title);
 		setComposerTitle("");
 		composerInputRef.current?.focus();
 	};
@@ -82,7 +77,7 @@ export function TasksView({
 		});
 	};
 
-	const composerColumn = statusColumns.find((column) => column.status === composerStatus);
+	const composerColumn = statusColumns.find((column) => column.status === safeComposerStatus);
 	const composerPlaceholder = composerColumn ? `Add a task in ${composerColumn.label}` : "Add a task";
 
 	const clearDragState = () => {
@@ -264,9 +259,9 @@ export function TasksView({
 													}`}
 													draggable
 													onDragStart={(event) => {
-													draggedColumnStatusRef.current = null;
+														draggedColumnStatusRef.current = null;
 														setDraggedColumnStatus(null);
-													draggedTaskLocalIdRef.current = task.id;
+														draggedTaskLocalIdRef.current = task.id;
 														setDraggedTaskLocalId(task.id);
 														setDraggedTaskId(task.id);
 														event.dataTransfer.setData("text/plain", `task:${task.id}`);
@@ -278,10 +273,10 @@ export function TasksView({
 													}}
 													onDragOver={(event) => {
 														event.preventDefault();
-													if (
-														!draggedTaskLocalIdRef.current ||
-														draggedTaskLocalIdRef.current === task.id
-													) {
+														if (
+															!draggedTaskLocalIdRef.current ||
+															draggedTaskLocalIdRef.current === task.id
+														) {
 															return;
 														}
 														const rect = event.currentTarget.getBoundingClientRect();
@@ -298,17 +293,17 @@ export function TasksView({
 													}}
 													onDrop={(event) => {
 														event.preventDefault();
-													event.stopPropagation();
-													if (
-														draggedTaskLocalIdRef.current &&
-														draggedTaskLocalIdRef.current !== task.id
-													) {
+														event.stopPropagation();
+														if (
+															draggedTaskLocalIdRef.current &&
+															draggedTaskLocalIdRef.current !== task.id
+														) {
 															const dropPosition =
 																taskDropTarget?.columnStatus === column.status &&
 																taskDropTarget.taskId === task.id
 																	? taskDropTarget.position
 																	: "before";
-														onDropOnTask(task, dropPosition).catch(console.error);
+															onDropOnTask(task, dropPosition).catch(console.error);
 															setTaskDropTarget(null);
 														}
 													}}

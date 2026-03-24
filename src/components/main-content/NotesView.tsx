@@ -272,14 +272,6 @@ export function NotesView({ notebook, onUpdateNotebookByMap }: MainContentViewsP
 		});
 	};
 
-	useEffect(() => {
-		setDoc(parseNotebook(notebook?.content ?? ""));
-		setSelectedNodeId("");
-		setEditingNodeId("");
-		setSaveState("saved");
-		setIsDirty(false);
-	}, [notebook?.id]);
-
 	const touchDoc = (nextDoc: NotebookDocument) => {
 		setDoc(nextDoc);
 		setIsDirty(true);

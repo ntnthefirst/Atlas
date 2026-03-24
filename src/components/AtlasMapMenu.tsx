@@ -95,12 +95,14 @@ export function AtlasMapMenu({
 
 	useEffect(() => {
 		if (!showMapMenu) {
-			setMenuScreen("default");
-			setActiveItemIndex(0);
-			setMapSearch("");
-			setCreateMapError("");
-			setRenameMapError("");
-			return;
+			const frameId = window.requestAnimationFrame(() => {
+				setMenuScreen("default");
+				setActiveItemIndex(0);
+				setMapSearch("");
+				setCreateMapError("");
+				setRenameMapError("");
+			});
+			return () => window.cancelAnimationFrame(frameId);
 		}
 
 		if (menuScreen === "default") {
@@ -142,12 +144,16 @@ export function AtlasMapMenu({
 			return;
 		}
 
-		setActiveItemIndex((current) => {
-			if (!defaultNavItems.length) {
-				return 0;
-			}
-			return Math.min(current, defaultNavItems.length - 1);
+		const frameId = window.requestAnimationFrame(() => {
+			setActiveItemIndex((current) => {
+				if (!defaultNavItems.length) {
+					return 0;
+				}
+				return Math.min(current, defaultNavItems.length - 1);
+			});
 		});
+
+		return () => window.cancelAnimationFrame(frameId);
 	}, [defaultNavItems, menuScreen]);
 
 	const getActionNavIndex = (action: DefaultAction) =>
