@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld("atlas", {
 	launchApp: (command) => ipcRenderer.invoke("app:launch", command),
 	getPlatform: () => ipcRenderer.invoke("app:platform"),
 	setNativeTheme: (theme) => ipcRenderer.invoke("window:setTheme", theme),
+	getAppVersion: () => ipcRenderer.invoke("app:version"),
+	checkForUpdates: () => ipcRenderer.invoke("app:checkUpdates"),
 
 	windowMinimize: () => ipcRenderer.invoke("window:minimize"),
 	openMiniWindow: () => ipcRenderer.invoke("window:openMini"),

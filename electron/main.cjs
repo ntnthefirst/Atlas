@@ -646,6 +646,47 @@ function wireIpc() {
 		}
 		return true;
 	});
+
+	ipcMain.handle("app:version", () => {
+		return app.getVersion();
+	});
+
+	ipcMain.handle("app:checkUpdates", async () => {
+		const localVersion = app.getVersion();
+		const localTuple = toSemverTuple(localVersion);
+		if (!localTuple) {
+			return { hasUpdate: false, local: localVersion, latest: null, error: "Invalid local version" };
+		}
+
+		try {
+			const latestRelease = await fetchJson(
+				`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`,
+			);
+			const remoteTag = typeof latestRelease?.tag_name === "string" ? latestRelease.tag_name : "";
+			const remoteTuple = toSemverTuple(remoteTag);
+			if (!remoteTuple) {
+				return { hasUpdate: false, local: localVersion, latest: null, error: "Invalid remote version" };
+			}
+
+			const isOutdated = compareSemver(remoteTuple, localTuple) > 0;
+			const cleanRemote = remoteTag.replace(/^v/i, "");
+			const downloadUrl = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest/download/Atlas-Setup-latest.exe`;
+
+			return {
+				hasUpdate: isOutdated,
+				local: localVersion,
+				latest: cleanRemote,
+				downloadUrl: isOutdated ? downloadUrl : undefined,
+			};
+		} catch (error) {
+			return {
+				hasUpdate: false,
+				local: localVersion,
+				latest: null,
+				error: error instanceof Error ? error.message : "Unknown error",
+			};
+		}
+	});
 }
 
 app.whenReady().then(async () => {
