@@ -29,6 +29,7 @@ const readStorage = <T,>(key: string, fallback: T): T => {
 
 export function SettingsWindowApp() {
 	const [activeTab, setActiveTab] = useState<SettingsTab>("general");
+	const [platform, setPlatform] = useState("win32");
 	const [theme, setTheme] = useState<ThemeOption>(() => readStorage("atlas.theme", "light"));
 	const [resolvedTheme, setResolvedTheme] = useState<"dark" | "light">("light");
 	const [timeFormat, setTimeFormat] = useState(() => readStorage("atlas.settings.timeFormat", "24h"));
@@ -43,6 +44,15 @@ export function SettingsWindowApp() {
 	const [commandPalette, setCommandPalette] = useState(() => readStorage("atlas.settings.commandPalette", true));
 
 	const tabLabel = useMemo(() => settingsTabs.find((tab) => tab.id === activeTab)?.label ?? "General", [activeTab]);
+	const isMacPlatform = platform === "darwin";
+	const hasNativeControls = platform === "darwin" || platform === "win32";
+
+	useEffect(() => {
+		window.atlas
+			.getPlatform()
+			.then((value) => setPlatform(value || "win32"))
+			.catch(() => setPlatform("win32"));
+	}, []);
 
 	useEffect(() => {
 		if (theme !== "system") {
@@ -86,7 +96,11 @@ export function SettingsWindowApp() {
 				animate={{ opacity: 1 }}
 				transition={{ duration: 0.2, ease: "easeOut" }}
 			>
-				<header className="titlebar sticky top-0 z-40 grid h-[50px] grid-cols-[1fr_1fr] items-center border-b border-neutral-200 bg-neutral-50 px-2.5 text-neutral-700 backdrop-blur-md [-webkit-app-region:drag] dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200 pr-[88px]">
+				<header
+					className={`titlebar sticky top-0 z-40 grid h-[50px] grid-cols-[1fr_1fr] items-center border-b border-neutral-200 bg-neutral-50 px-2.5 text-neutral-700 backdrop-blur-md [-webkit-app-region:drag] dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200 ${
+						isMacPlatform ? "pl-[84px]" : hasNativeControls ? "pr-[146px]" : "pr-[88px]"
+					}`}
+				>
 					<div className="titlebar-left no-drag flex min-w-0 items-center gap-2 text-base">
 						<img
 							src={logo}
@@ -95,28 +109,35 @@ export function SettingsWindowApp() {
 						/>
 						<span>Atlas</span>
 					</div>
-					<div className="titlebar-right no-drag absolute right-2 top-[9px] inline-flex gap-1">
-						<button
-							type="button"
-							className="atlas-window-control"
-							onClick={() => {
-								void window.atlas.windowMinimize();
-							}}
-							aria-label="Minimize"
-						>
-							<MinusIcon className="h-4 w-4" />
-						</button>
-						<button
-							type="button"
-							className="atlas-window-control atlas-window-control-close"
-							onClick={() => {
-								void window.atlas.windowClose();
-							}}
-							aria-label="Close"
-						>
-							<XMarkIcon className="h-4 w-4" />
-						</button>
+					<div className="titlebar-center absolute left-1/2 w-2/5 max-w-2xl min-w-72 -translate-x-1/2">
+						<div className="inline-flex h-6 w-full items-center justify-center rounded-lg border border-neutral-300 px-2.5 py-0.5 text-body-small text-neutral-700 dark:border-neutral-500 dark:text-neutral-50">
+							<span className="truncate text-neutral-800 dark:text-neutral-50">Settings</span>
+						</div>
 					</div>
+					{!hasNativeControls && (
+						<div className="titlebar-right no-drag absolute right-2 top-[9px] inline-flex gap-1">
+							<button
+								type="button"
+								className="atlas-window-control"
+								onClick={() => {
+									void window.atlas.windowMinimize();
+								}}
+								aria-label="Minimize"
+							>
+								<MinusIcon className="h-4 w-4" />
+							</button>
+							<button
+								type="button"
+								className="atlas-window-control atlas-window-control-close"
+								onClick={() => {
+									void window.atlas.windowClose();
+								}}
+								aria-label="Close"
+							>
+								<XMarkIcon className="h-4 w-4" />
+							</button>
+						</div>
+					)}
 				</header>
 
 				<div className="atlas-settings-body">

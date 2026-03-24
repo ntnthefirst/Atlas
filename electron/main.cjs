@@ -261,8 +261,15 @@ function createSettingsWindow(parentWindow = null) {
 		icon: isDev
 			? path.join(__dirname, "..", "src", "assets", "logosmall.png")
 			: path.join(__dirname, "..", "dist", "assets", "logosmall.png"),
-		frame: false,
-		titleBarStyle: "hidden",
+		frame: isMac,
+		titleBarStyle: isMac ? "hiddenInset" : "hidden",
+		titleBarOverlay: isWindows
+			? {
+					color: "#2a2a2a",
+					symbolColor: "#e2e2e2",
+					height: 49,
+				}
+			: false,
 		parent: parentWindow && !parentWindow.isDestroyed() ? parentWindow : undefined,
 		modal: Boolean(parentWindow && !parentWindow.isDestroyed()),
 		resizable: true,
@@ -309,7 +316,7 @@ function openPrimaryWindowByMapState() {
 }
 
 function applyNativeTheme(theme) {
-	if (!mainWindow || !isWindows) {
+	if (!isWindows) {
 		return;
 	}
 
@@ -321,20 +328,26 @@ function applyNativeTheme(theme) {
 	}
 
 	nativeTheme.themeSource = theme;
-	if (theme === "light") {
-		mainWindow.setTitleBarOverlay({
-			color: "#f7f7f7",
-			symbolColor: "#4a4a4a",
-			height: 49,
-		});
-		return;
+	const overlay =
+		theme === "light"
+			? {
+					color: "#f7f7f7",
+					symbolColor: "#4a4a4a",
+					height: 49,
+				}
+			: {
+					color: "#2a2a2a",
+					symbolColor: "#e2e2e2",
+					height: 49,
+				};
+
+	if (mainWindow && !mainWindow.isDestroyed()) {
+		mainWindow.setTitleBarOverlay(overlay);
 	}
 
-	mainWindow.setTitleBarOverlay({
-		color: "#2a2a2a",
-		symbolColor: "#e2e2e2",
-		height: 49,
-	});
+	if (settingsWindow && !settingsWindow.isDestroyed()) {
+		settingsWindow.setTitleBarOverlay(overlay);
+	}
 }
 
 nativeTheme.on("updated", () => {
