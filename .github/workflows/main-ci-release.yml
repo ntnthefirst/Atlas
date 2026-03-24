@@ -38,9 +38,9 @@ jobs:
         name: Version, Release and Cleanup
         runs-on: ubuntu-latest
         needs: quality
-      outputs:
-        created: ${{ steps.version.outputs.created }}
-        version: ${{ steps.version.outputs.version }}
+        outputs:
+            created: ${{ steps.version.outputs.created }}
+            version: ${{ steps.version.outputs.version }}
         permissions:
             contents: write
 
