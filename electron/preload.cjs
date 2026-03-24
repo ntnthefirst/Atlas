@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("atlas", {
 	pauseSession: (sessionId) => ipcRenderer.invoke("session:pause", sessionId),
 	resumeSession: (sessionId) => ipcRenderer.invoke("session:resume", sessionId),
 	stopSession: (sessionId) => ipcRenderer.invoke("session:stop", sessionId),
+	deleteSession: (sessionId) => ipcRenderer.invoke("session:delete", sessionId),
 	listSessionsByMap: (mapId) => ipcRenderer.invoke("session:listByMap", mapId),
 
 	listActivityBySession: (sessionId) => ipcRenderer.invoke("activity:listBySession", sessionId),

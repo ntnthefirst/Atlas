@@ -476,6 +476,13 @@ function wireIpc() {
 		return db.listSessionsByMap(mapId);
 	});
 
+	ipcMain.handle("session:delete", (_event, sessionId) => {
+		if (!sessionId) {
+			throw new Error("Session id missing.");
+		}
+		return db.deleteSession(sessionId);
+	});
+
 	ipcMain.handle("activity:listBySession", (_event, sessionId) => {
 		if (!sessionId) {
 			return [];

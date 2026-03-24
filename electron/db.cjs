@@ -168,13 +168,7 @@ class AtlasDatabase {
         updated_at TEXT NOT NULL
       )`,
 		);
-
-
 	}
-
-
-
-
 
 	listMaps() {
 		return this.all("SELECT id, name, created_at FROM maps ORDER BY created_at ASC");
@@ -366,6 +360,25 @@ class AtlasDatabase {
        ORDER BY created_at DESC`,
 			[mapId],
 		).map(normalizeSession);
+	}
+
+	deleteSession(sessionId) {
+		const session = this.getSessionById(sessionId);
+		if (!session) {
+			throw new Error("Session not found.");
+		}
+
+		if (session.is_active) {
+			throw new Error("Cannot delete an active session. Stop it first.");
+		}
+
+		this.run(`DELETE FROM pauses WHERE session_id = ?`, [sessionId]);
+
+		this.run(`DELETE FROM activity_blocks WHERE session_id = ?`, [sessionId]);
+
+		this.run(`DELETE FROM sessions WHERE id = ?`, [sessionId]);
+
+		return true;
 	}
 
 	listSessionsInRange(startIso, endIso) {

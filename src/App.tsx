@@ -115,7 +115,7 @@ const sessionElapsedMs = (session: Session, now: number) => {
 	const started = new Date(session.started_at).getTime();
 	const ended = session.ended_at ? new Date(session.ended_at).getTime() : now;
 	let paused = session.paused_duration;
-	if (session.is_paused && session.pause_started_at) {
+	if (session.is_active && session.is_paused && session.pause_started_at) {
 		paused += Math.max(0, now - new Date(session.pause_started_at).getTime());
 	}
 	return Math.max(0, ended - started - paused);
@@ -701,6 +701,24 @@ function App() {
 		}
 	};
 
+	const onDeleteSession = async (sessionId: string) => {
+		if (!selectedMapId || !window.confirm("Are you sure you want to delete this session? This cannot be undone.")) {
+			return;
+		}
+
+		try {
+			await window.atlas.deleteSession(sessionId);
+			if (selectedSessionId === sessionId) {
+				setSelectedSessionId("");
+				setActivityBlocks([]);
+			}
+			await refreshMapData(selectedMapId);
+			setErrorMessage("");
+		} catch (error) {
+			setErrorMessage(error instanceof Error ? error.message : "Unable to delete session.");
+		}
+	};
+
 	const isMacPlatform = platform === "darwin";
 	const primaryViews = viewItems.filter((item) => item.id !== "settings");
 	const settingsView = viewItems.find((item) => item.id === "settings");
@@ -1118,6 +1136,7 @@ function App() {
 								sessions={sessions}
 								selectedSession={selectedSession}
 								onOpenSession={openSession}
+								onDeleteSession={onDeleteSession}
 								activityBlocks={activityBlocks}
 								now={now}
 								formatDuration={formatDuration}

@@ -631,8 +631,9 @@ select {
 	width: 100%;
 	text-align: left;
 	padding: 10px 12px;
-	display: flex;
-	justify-content: space-between;
+	display: grid;
+	grid-template-columns: 1fr auto;
+	align-items: center;
 	gap: 10px;
 	border: 1px solid var(--neutral-200);
 	border-radius: 12px;

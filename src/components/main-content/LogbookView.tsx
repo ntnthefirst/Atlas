@@ -1,6 +1,8 @@
 import type { MainContentViewsProps } from "./types";
 import { Tooltip } from "../ui";
 import { useState } from "react";
+import { TrashIcon } from "@heroicons/react/24/outline";
+import { TrashIcon as TrashIconSolid } from "@heroicons/react/24/solid";
 
 const cleanAppLabel = (value: string) => {
 	const cleaned = value
@@ -62,6 +64,7 @@ export function LogbookView({
 	sessions,
 	selectedSession,
 	onOpenSession,
+	onDeleteSession,
 	activityBlocks,
 	now,
 	formatClock,
@@ -108,23 +111,51 @@ export function LogbookView({
 					<span className="text-data-small">{sessions.length} total</span>
 				</header>
 				<div className={`stack-list ${scrollAreaClasses} p-0.5`}>
-					{sessions.map((session) => (
-						<button
-							key={session.id}
-							onClick={() => onOpenSession(session.id)}
-							className={`session-item ${selectedSession?.id === session.id ? "active" : ""}`}
-						>
-							<div>
-								<p className="text-body-small">{new Date(session.started_at).toLocaleString()}</p>
-								<small className="text-data-small">{session.is_active ? "Running" : "Completed"}</small>
-							</div>
-							<strong className="text-data-regular">
-								{formatClock(
-									session.is_active ? sessionElapsedMs(session, now) : session.total_duration,
+					{sessions.map((session) => {
+						const isSelected = selectedSession?.id === session.id;
+						return (
+							<div
+								key={session.id}
+								className={`group session-item grid grid-cols-[1fr_auto] items-center gap-2 ${isSelected ? "active" : ""}`}
+							>
+								<button
+									onClick={() => onOpenSession(session.id)}
+									className="col-span-1 text-left"
+								>
+									<div>
+										<p className="text-body-small">
+											{new Date(session.started_at).toLocaleString()}
+										</p>
+										<small className="text-data-small">
+											{session.is_active ? "Running" : "Completed"}
+										</small>
+									</div>
+									<strong className="text-data-regular">
+										{formatClock(
+											session.is_active ? sessionElapsedMs(session, now) : session.total_duration,
+										)}
+									</strong>
+								</button>
+								{!session.is_active && (
+									<Tooltip content="Delete session">
+										<button
+											onClick={(e) => {
+												e.stopPropagation();
+												void onDeleteSession(session.id);
+											}}
+											className="group/delete col-span-1 opacity-0 transition-opacity group-hover:opacity-100 inline-flex h-7 w-7 items-center justify-center rounded border border-transparent text-neutral-400 hover:bg-neutral-200 hover:text-red-600 dark:hover:bg-neutral-700 dark:hover:text-red-400"
+											aria-label="Delete session"
+										>
+											<span className="relative h-4 w-4">
+												<TrashIcon className="absolute inset-0 h-4 w-4 transition-opacity group-hover/delete:opacity-0" />
+												<TrashIconSolid className="absolute inset-0 h-4 w-4 opacity-0 transition-opacity group-hover/delete:opacity-100" />
+											</span>
+										</button>
+									</Tooltip>
 								)}
-							</strong>
-						</button>
-					))}
+							</div>
+						);
+					})}
 					{!sessions.length && <p className="empty">Start your first session to build a logbook.</p>}
 				</div>
 			</section>

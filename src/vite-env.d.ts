@@ -15,6 +15,7 @@ declare global {
 			pauseSession: (sessionId: string) => Promise<Session>;
 			resumeSession: (sessionId: string) => Promise<Session>;
 			stopSession: (sessionId: string) => Promise<Session>;
+			deleteSession: (sessionId: string) => Promise<boolean>;
 			listSessionsByMap: (mapId: string) => Promise<Session[]>;
 
 			listActivityBySession: (sessionId: string) => Promise<ActivityBlock[]>;
