@@ -75,6 +75,19 @@ Example:
 
 - New `v2.x.x` release will trigger cleanup of all `v1.x.x` releases/tags.
 
+## Install in 1-2 Clicks (GitHub)
+
+- Latest release page:
+    - https://github.com/ntnthefirst/Atlas/releases/latest
+- Direct Windows installer download:
+    - https://github.com/ntnthefirst/Atlas/releases/latest/download/Atlas-Setup-latest.exe
+
+How it works:
+
+- On every push to `main`, GitHub Actions builds a Windows installer.
+- The installer is attached to the new release.
+- A stable file name `Atlas-Setup-latest.exe` is uploaded so users always have a single direct link.
+
 ## Project Structure
 
 - `src/` - React UI and application state
