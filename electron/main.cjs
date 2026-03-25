@@ -18,8 +18,15 @@ let tracker = null;
 const isDev = !app.isPackaged;
 const isMac = process.platform === "darwin";
 const isWindows = process.platform === "win32";
+const APP_USER_MODEL_ID = isDev ? "com.atlas.app.dev" : "com.atlas.app";
 const GITHUB_OWNER = "ntnthefirst";
 const GITHUB_REPO = "Atlas";
+
+if (isDev) {
+	// Keep development state fully isolated from the installed production app.
+	const devUserDataPath = path.join(app.getPath("appData"), "Atlas-Dev");
+	app.setPath("userData", devUserDataPath);
+}
 
 function fetchJson(url) {
 	return new Promise((resolve, reject) => {
@@ -819,7 +826,7 @@ app.whenReady().then(async () => {
 	if (isMac) {
 		app.dock.setIcon(iconPath);
 	} else {
-		app.setAppUserModelId("com.atlas.app");
+		app.setAppUserModelId(APP_USER_MODEL_ID);
 	}
 
 	wireIpc();
