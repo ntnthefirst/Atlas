@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { MinusIcon, XMarkIcon, PauseIcon, PlayIcon, StopIcon } from "@heroicons/react/24/outline";
-import type { AtlasView, TaskStatus, TaskItem } from "./types";
+import type { AtlasView, TaskStatus, TaskItem, TaskColumn } from "./types";
 import { AtlasHeader } from "./components/AtlasHeader";
 import { AtlasSidebar } from "./components/AtlasSidebar";
 import { AtlasMainContent } from "./components/AtlasMainContent";
@@ -141,7 +141,7 @@ function MainAtlasApp() {
 			.getPlatform()
 			.then((value) => setPlatform(value || "win32"))
 			.catch(() => setPlatform("win32"));
-	}, []);
+	}, [setPlatform]);
 
 	// Time sync
 	useEffect(() => {
@@ -161,7 +161,7 @@ function MainAtlasApp() {
 			if (timeoutId !== null) window.clearTimeout(timeoutId);
 			if (intervalId !== null) window.clearInterval(intervalId);
 		};
-	}, []);
+	}, [setNow]);
 
 	// Session sync
 	useEffect(() => {
@@ -189,7 +189,7 @@ function MainAtlasApp() {
 			window.clearInterval(sessionSync);
 			window.clearInterval(dataSync);
 		};
-	}, [selectedMapId, selectedSessionId]);
+	}, [selectedMapId, selectedSessionId, setActiveSession, setCurrentAppName, setDashboard, setActivityBlocks]);
 
 	// Active session change
 	useEffect(() => {
@@ -200,19 +200,62 @@ function MainAtlasApp() {
 		const previousSessionId = previousActiveSessionIdRef.current;
 		const currentSessionId = activeSession?.id ?? null;
 		if (previousSessionId !== currentSessionId) {
-			void refreshMapData(selectedMapId);
-			if (currentSessionId) void refreshActivity(currentSessionId);
+			void (async () => {
+				const [nextSessions, nextTasks, nextNotebook, nextDashboard] = await Promise.all([
+					window.atlas.listSessionsByMap(selectedMapId),
+					window.atlas.listTasksByMap(selectedMapId),
+					window.atlas.getNotebookByMap(selectedMapId),
+					window.atlas.getDashboardOverview(selectedMapId),
+				]);
+				setTaskColumnsByMap((current) => {
+					const existing = normalizeColumns(current[selectedMapId] ?? defaultTaskColumns, defaultTaskColumns);
+					const knownStatuses = new Set(existing.map((column) => column.status));
+					const missingStatuses = nextTasks
+						.map((task) => task.status)
+						.filter((status, index, all) => all.indexOf(status) === index)
+						.filter((status) => !knownStatuses.has(status));
+					if (!missingStatuses.length && current[selectedMapId]) return current;
+					const merged = normalizeColumns(
+						[...existing, ...missingStatuses.map((status) => ({ status, label: status }))],
+						defaultTaskColumns,
+					);
+					return { ...current, [selectedMapId]: merged };
+				});
+				setSessions(nextSessions);
+				const mapOrder = taskOrderByMap[selectedMapId] ?? [];
+				setTasks(sortTasksByOrder(nextTasks, mapOrder));
+				setNotebook(nextNotebook);
+				setDashboard(nextDashboard);
+				if (nextSessions.length && !selectedSessionId) setSelectedSessionId(nextSessions[0].id);
+				if (currentSessionId) {
+					const blocks = await window.atlas.listActivityBySession(currentSessionId);
+					setActivityBlocks(blocks);
+				}
+			})();
 		}
 		previousActiveSessionIdRef.current = currentSessionId;
-	}, [activeSession?.id, isMiniMode, selectedMapId]);
+	}, [
+		activeSession?.id,
+		isMiniMode,
+		selectedMapId,
+		selectedSessionId,
+		taskOrderByMap,
+		setSessions,
+		setTaskColumnsByMap,
+		setTasks,
+		setNotebook,
+		setDashboard,
+		setSelectedSessionId,
+		setActivityBlocks,
+	]);
 
 	// Initialize
 	useEffect(() => {
 		const start = async () => {
 			try {
 				const persistedOrder = readStorage(TASK_ORDER_KEY, {} as Record<string, string[]>);
-				const persistedColumns = readStorage(TASK_COLUMNS_KEY, {} as Record<string, Record<string, unknown>[]>);
-				setTaskColumnsByMap(persistedColumns as any);
+				const persistedColumns = readStorage(TASK_COLUMNS_KEY, {} as Record<string, TaskColumn[]>);
+				setTaskColumnsByMap(persistedColumns);
 				const [mapList, active, appName] = await Promise.all([
 					window.atlas.listMaps(),
 					window.atlas.getActiveSession(),
@@ -241,14 +284,28 @@ function MainAtlasApp() {
 					...nextTasks.map((task) => task.id).filter((id) => !existingOrder.includes(id)),
 				];
 				setTaskOrderByMap((current) => ({ ...current, [preferredMapId]: normalizedOrder }));
-				syncColumnsForMap(preferredMapId, nextTasks);
+				const existing = normalizeColumns(
+					persistedColumns[preferredMapId] ?? defaultTaskColumns,
+					defaultTaskColumns,
+				);
+				const knownStatuses = new Set(existing.map((column) => column.status));
+				const missingStatuses = nextTasks
+					.map((task) => task.status)
+					.filter((status, index, all) => all.indexOf(status) === index)
+					.filter((status) => !knownStatuses.has(status));
+				const merged = normalizeColumns(
+					[...existing, ...missingStatuses.map((status) => ({ status, label: status }))],
+					defaultTaskColumns,
+				);
+				setTaskColumnsByMap((current) => ({ ...current, [preferredMapId]: merged }));
 				setTasks(sortTasksByOrder(nextTasks, normalizedOrder));
 				setNotebook(nextNotebook);
 				setDashboard(nextDashboard);
 				if (nextSessions.length) setSelectedSessionId(nextSessions[0].id);
 				if (active) {
 					setSelectedSessionId(active.id);
-					await refreshActivity(active.id);
+					const blocks = await window.atlas.listActivityBySession(active.id);
+					setActivityBlocks(blocks);
 				}
 			} catch (error) {
 				setErrorMessage(error instanceof Error ? error.message : "Failed to initialize Atlas.");
@@ -257,7 +314,23 @@ function MainAtlasApp() {
 			}
 		};
 		start().catch(console.error);
-	}, []);
+	}, [
+		setTaskColumnsByMap,
+		setMaps,
+		setActiveSession,
+		setCurrentAppName,
+		setShowFirstLaunch,
+		setSelectedMapId,
+		setSessions,
+		setTaskOrderByMap,
+		setTasks,
+		setNotebook,
+		setDashboard,
+		setSelectedSessionId,
+		setActivityBlocks,
+		setErrorMessage,
+		setHasBootstrapped,
+	]);
 
 	// Helpers
 	const refreshMapData = async (mapId: string) => {

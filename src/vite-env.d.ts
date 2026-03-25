@@ -5,6 +5,13 @@ import type { ActivityBlock, DashboardOverview, MapItem, NoteItem, Session, Task
 declare global {
 	interface Window {
 		atlas: {
+			checkForUpdates: () => Promise<{
+				hasUpdate: boolean;
+				local: string;
+				latest: string | null;
+				downloadUrl?: string;
+				error?: string;
+			}>;
 			listMaps: () => Promise<MapItem[]>;
 			createMap: (name: string) => Promise<MapItem>;
 			renameMap: (mapId: string, name: string) => Promise<MapItem>;

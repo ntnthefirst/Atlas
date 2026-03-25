@@ -42,9 +42,9 @@ export function SettingsView({
 	const handleCheckUpdates = async () => {
 		setIsCheckingUpdates(true);
 		try {
-			const result = await (window as any).atlas.checkForUpdates();
+			const result = await window.atlas.checkForUpdates();
 			setUpdateInfo(result);
-		} catch (error) {
+		} catch {
 			setUpdateInfo({
 				hasUpdate: false,
 				local: "unknown",
@@ -58,7 +58,7 @@ export function SettingsView({
 
 	const handleDownloadUpdate = () => {
 		if (updateInfo?.downloadUrl) {
-			(window as any).atlas.launchApp(`start ${updateInfo.downloadUrl}`);
+			void window.atlas.launchApp(`start ${updateInfo.downloadUrl}`);
 		}
 	};
 
@@ -225,9 +225,7 @@ export function SettingsView({
 
 					{updateInfo?.error && (
 						<div className="rounded-lg border border-neutral-200 bg-neutral-100 p-3 dark:border-neutral-600 dark:bg-neutral-800">
-							<p className="text-xs text-neutral-600 dark:text-neutral-400">
-								{updateInfo.error}
-							</p>
+							<p className="text-xs text-neutral-600 dark:text-neutral-400">{updateInfo.error}</p>
 						</div>
 					)}
 

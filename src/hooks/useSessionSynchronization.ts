@@ -1,13 +1,14 @@
 import { useEffect } from "react";
-import type { Session } from "../types";
+import { normalizeTrackedAppName } from "../utils";
+import type { ActivityBlock, DashboardOverview, Session } from "../types";
 
 interface UseSessionSynchronizationProps {
 	selectedMapId: string;
 	selectedSessionId: string;
 	setActiveSession: (session: Session | null) => void;
 	setCurrentAppName: (name: string) => void;
-	setDashboard: (dashboard: Record<string, any>) => void;
-	setActivityBlocks: (blocks: Array<Record<string, any>>) => void;
+	setDashboard: (dashboard: DashboardOverview) => void;
+	setActivityBlocks: (blocks: ActivityBlock[]) => void;
 }
 
 export const useSessionSynchronization = ({
@@ -20,8 +21,12 @@ export const useSessionSynchronization = ({
 }: UseSessionSynchronizationProps) => {
 	useEffect(() => {
 		const sessionSync = window.setInterval(async () => {
-			const active = await window.atlas.getActiveSession();
+			const [active, appName] = await Promise.all([
+				window.atlas.getActiveSession(),
+				window.atlas.getCurrentApp(),
+			]);
 			setActiveSession(active);
+			setCurrentAppName(normalizeTrackedAppName(appName));
 		}, 500);
 
 		const dataSync = window.setInterval(async () => {

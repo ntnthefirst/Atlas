@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, MouseEvent } from "react";
 import { PhotoIcon, RectangleStackIcon } from "@heroicons/react/24/outline";
 import type { NotebookDocument, NotebookNode } from "../../types";
@@ -240,7 +240,7 @@ export function NotesView({ notebook, onUpdateNotebookByMap }: MainContentViewsP
 		() => doc.nodes.find((node) => node.id === selectedNodeId) ?? null,
 		[doc.nodes, selectedNodeId],
 	);
-	const nextZ = () => Math.max(0, ...doc.nodes.map((node) => node.z)) + 1;
+	const nextZ = useCallback(() => Math.max(0, ...doc.nodes.map((node) => node.z)) + 1, [doc.nodes]);
 	const toWorldDelta = (delta: number) => delta / doc.viewport.zoom;
 	const stepByArrow = (isFast: boolean) => (isFast ? 42 : 18);
 	const selectedTextSize =
@@ -248,35 +248,38 @@ export function NotesView({ notebook, onUpdateNotebookByMap }: MainContentViewsP
 			? normalizeFontSize(selectedNode)
 			: DEFAULT_TEXT_SIZE;
 
-	const zoomByFactorAtCenter = (factor: number) => {
-		const rect = sceneRef.current?.getBoundingClientRect();
-		if (!rect) {
-			return;
-		}
-		const oldZoom = doc.viewport.zoom;
-		const newZoom = clamp(oldZoom * factor, 0.3, 2.5);
-		if (newZoom === oldZoom) {
-			return;
-		}
-		const centerX = rect.width / 2;
-		const centerY = rect.height / 2;
-		const worldX = centerX / oldZoom - doc.viewport.x;
-		const worldY = centerY / oldZoom - doc.viewport.y;
-		touchDoc({
-			...doc,
-			viewport: {
-				x: centerX / newZoom - worldX,
-				y: centerY / newZoom - worldY,
-				zoom: newZoom,
-			},
-		});
-	};
-
-	const touchDoc = (nextDoc: NotebookDocument) => {
+	const touchDoc = useCallback((nextDoc: NotebookDocument) => {
 		setDoc(nextDoc);
 		setIsDirty(true);
 		setSaveState("saving");
-	};
+	}, []);
+
+	const zoomByFactorAtCenter = useCallback(
+		(factor: number) => {
+			const rect = sceneRef.current?.getBoundingClientRect();
+			if (!rect) {
+				return;
+			}
+			const oldZoom = doc.viewport.zoom;
+			const newZoom = clamp(oldZoom * factor, 0.3, 2.5);
+			if (newZoom === oldZoom) {
+				return;
+			}
+			const centerX = rect.width / 2;
+			const centerY = rect.height / 2;
+			const worldX = centerX / oldZoom - doc.viewport.x;
+			const worldY = centerY / oldZoom - doc.viewport.y;
+			touchDoc({
+				...doc,
+				viewport: {
+					x: centerX / newZoom - worldX,
+					y: centerY / newZoom - worldY,
+					zoom: newZoom,
+				},
+			});
+		},
+		[doc, touchDoc],
+	);
 
 	const clearPendingDragTimer = () => {
 		if (dragTimerRef.current !== null) {
@@ -302,9 +305,12 @@ export function NotesView({ notebook, onUpdateNotebookByMap }: MainContentViewsP
 		return () => window.clearTimeout(timeout);
 	}, [doc, isDirty, notebook, onUpdateNotebookByMap]);
 
-	const updateNode = (id: string, updater: (node: NotebookNode) => NotebookNode) => {
-		touchDoc({ ...doc, nodes: doc.nodes.map((node) => (node.id === id ? updater(node) : node)) });
-	};
+	const updateNode = useCallback(
+		(id: string, updater: (node: NotebookNode) => NotebookNode) => {
+			touchDoc({ ...doc, nodes: doc.nodes.map((node) => (node.id === id ? updater(node) : node)) });
+		},
+		[doc, touchDoc],
+	);
 
 	const addTextNode = () => {
 		const size = measureTextNodeSize("", DEFAULT_TEXT_SIZE);
@@ -345,62 +351,71 @@ export function NotesView({ notebook, onUpdateNotebookByMap }: MainContentViewsP
 		setEditingNodeId(node.id);
 	};
 
-	const addMediaNode = (dataUrl: string, mimeType: string, name: string) => {
-		const mediaNode: NotebookNode = {
-			id: crypto.randomUUID(),
-			type: "media",
-			x: 130 - doc.viewport.x,
-			y: 130 - doc.viewport.y,
-			w: 380,
-			h: 260,
-			z: nextZ(),
-			dataUrl,
-			mimeType,
-			name,
-		};
-		touchDoc({ ...doc, nodes: [...doc.nodes, mediaNode] });
-		setSelectedNodeId(mediaNode.id);
-		setEditingNodeId("");
-	};
+	const addMediaNode = useCallback(
+		(dataUrl: string, mimeType: string, name: string) => {
+			const mediaNode: NotebookNode = {
+				id: crypto.randomUUID(),
+				type: "media",
+				x: 130 - doc.viewport.x,
+				y: 130 - doc.viewport.y,
+				w: 380,
+				h: 260,
+				z: nextZ(),
+				dataUrl,
+				mimeType,
+				name,
+			};
+			touchDoc({ ...doc, nodes: [...doc.nodes, mediaNode] });
+			setSelectedNodeId(mediaNode.id);
+			setEditingNodeId("");
+		},
+		[doc, touchDoc, nextZ],
+	);
 
-	const addPastedNode = (source: NotebookNode) => {
-		const clone = cloneNodeForPaste(source, nextZ());
-		if (clone.type === "text") {
-			const size = measureTextNodeSize(clone.text ?? "", normalizeFontSize(clone));
-			clone.w = size.w;
-			clone.h = size.h;
-		}
-		touchDoc({ ...doc, nodes: [...doc.nodes, clone] });
-		setSelectedNodeId(clone.id);
-		setEditingNodeId(clone.type === "text" || clone.type === "postit" ? clone.id : "");
-	};
+	const addPastedNode = useCallback(
+		(source: NotebookNode) => {
+			const clone = cloneNodeForPaste(source, nextZ());
+			if (clone.type === "text") {
+				const size = measureTextNodeSize(clone.text ?? "", normalizeFontSize(clone));
+				clone.w = size.w;
+				clone.h = size.h;
+			}
+			touchDoc({ ...doc, nodes: [...doc.nodes, clone] });
+			setSelectedNodeId(clone.id);
+			setEditingNodeId(clone.type === "text" || clone.type === "postit" ? clone.id : "");
+		},
+		[doc, touchDoc, nextZ],
+	);
 
-	const addPastedText = (rawText: string) => {
-		const text = rawText.replace(/\r\n/g, "\n").trimEnd();
-		if (!text) {
-			return;
-		}
-		const size = measureTextNodeSize(text, DEFAULT_TEXT_SIZE);
+	const addPastedText = useCallback(
+		(rawText: string) => {
+			const text = rawText.replace(/\r\n/g, "\n").trimEnd();
+			if (!text) {
+				return;
+			}
+			const size = measureTextNodeSize(text, DEFAULT_TEXT_SIZE);
 
-		const node: NotebookNode = {
-			id: crypto.randomUUID(),
-			type: "text",
-			x: 130 - doc.viewport.x,
-			y: 130 - doc.viewport.y,
-			w: size.w,
-			h: size.h,
-			z: nextZ(),
-			text,
-			textColor: DEFAULT_TEXT_COLOR,
-			boxColor: "transparent",
-			fontSize: DEFAULT_TEXT_SIZE,
-		};
-		touchDoc({ ...doc, nodes: [...doc.nodes, node] });
-		setSelectedNodeId(node.id);
-		setEditingNodeId(node.id);
-	};
+			const node: NotebookNode = {
+				id: crypto.randomUUID(),
+				type: "text",
+				x: 130 - doc.viewport.x,
+				y: 130 - doc.viewport.y,
+				w: size.w,
+				h: size.h,
+				z: nextZ(),
+				text,
+				textColor: DEFAULT_TEXT_COLOR,
+				boxColor: "transparent",
+				fontSize: DEFAULT_TEXT_SIZE,
+			};
+			touchDoc({ ...doc, nodes: [...doc.nodes, node] });
+			setSelectedNodeId(node.id);
+			setEditingNodeId(node.id);
+		},
+		[doc, touchDoc, nextZ],
+	);
 
-	const resetViewport = () => {
+	const resetViewport = useCallback(() => {
 		const rect = sceneRef.current?.getBoundingClientRect();
 		if (!rect || !doc.nodes.length) {
 			touchDoc({
@@ -423,7 +438,7 @@ export function NotesView({ notebook, onUpdateNotebookByMap }: MainContentViewsP
 				zoom: 1,
 			},
 		});
-	};
+	}, [doc, touchDoc]);
 
 	const startPan = (event: MouseEvent<HTMLDivElement>) => {
 		if (event.button !== 0) {
@@ -920,7 +935,18 @@ export function NotesView({ notebook, onUpdateNotebookByMap }: MainContentViewsP
 			window.removeEventListener("copy", onCopy);
 			window.removeEventListener("paste", onPasteEvent);
 		};
-	}, [doc, selectedNode, selectedNodeId]);
+	}, [
+		doc,
+		selectedNode,
+		selectedNodeId,
+		addMediaNode,
+		addPastedNode,
+		addPastedText,
+		resetViewport,
+		touchDoc,
+		updateNode,
+		zoomByFactorAtCenter,
+	]);
 
 	return (
 		<div className="notebook-layout">
