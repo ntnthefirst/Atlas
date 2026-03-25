@@ -82,6 +82,28 @@
 
 * {
 	box-sizing: border-box;
+	scrollbar-color: var(--neutral-300) var(--neutral-50);
+	scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+	background: var(--neutral-50);
+	border-radius: 4px;
+}
+
+*::-webkit-scrollbar-thumb {
+	background: var(--neutral-300);
+	border-radius: 4px;
+	border: 2px solid var(--neutral-50);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+	background: var(--neutral-400);
 }
 
 body {

@@ -97,15 +97,15 @@ export function SettingsWindowApp() {
 				transition={{ duration: 0.2, ease: "easeOut" }}
 			>
 				<header
-					className={`titlebar sticky top-0 z-40 grid h-[50px] grid-cols-[1fr_1fr] items-center border-b border-neutral-200 bg-neutral-50 px-2.5 text-neutral-700 backdrop-blur-md [-webkit-app-region:drag] dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200 ${
-						isMacPlatform ? "pl-[84px]" : hasNativeControls ? "pr-[146px]" : "pr-[88px]"
+					className={`titlebar sticky top-0 z-40 grid h-12.5 grid-cols-[1fr_1fr] items-center border-b border-neutral-200 bg-neutral-50 px-2.5 text-neutral-700 backdrop-blur-md [-webkit-app-region:drag] dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200 ${
+						isMacPlatform ? "pl-21" : hasNativeControls ? "pr-36.5" : "pr-22"
 					}`}
 				>
 					<div className="titlebar-left no-drag flex min-w-0 items-center gap-2 text-base">
 						<img
 							src={logo}
 							alt="Atlas Logo"
-							className="h-7 w-7 flex-shrink-0"
+							className="h-7 w-7 shrink-0"
 						/>
 						<span>Atlas</span>
 					</div>
@@ -115,7 +115,7 @@ export function SettingsWindowApp() {
 						</div>
 					</div>
 					{!hasNativeControls && (
-						<div className="titlebar-right no-drag absolute right-2 top-[9px] inline-flex gap-1">
+						<div className="titlebar-right no-drag absolute right-2 top-2.25 inline-flex gap-1">
 							<button
 								type="button"
 								className="atlas-window-control"
