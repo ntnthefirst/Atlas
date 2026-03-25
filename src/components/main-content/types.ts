@@ -21,6 +21,7 @@ export type MainContentViewsProps = {
 	sessions: Session[];
 	selectedSession: Session | null;
 	onOpenSession: (sessionId: string) => void;
+	onDeleteSession: (sessionId: string) => Promise<void>;
 	activityBlocks: ActivityBlock[];
 	now: number;
 	formatDuration: (ms: number) => string;

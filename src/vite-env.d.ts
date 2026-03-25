@@ -15,6 +15,7 @@ declare global {
 			pauseSession: (sessionId: string) => Promise<Session>;
 			resumeSession: (sessionId: string) => Promise<Session>;
 			stopSession: (sessionId: string) => Promise<Session>;
+			deleteSession: (sessionId: string) => Promise<boolean>;
 			listSessionsByMap: (mapId: string) => Promise<Session[]>;
 
 			listActivityBySession: (sessionId: string) => Promise<ActivityBlock[]>;
@@ -39,6 +40,7 @@ declare global {
 
 			windowMinimize: () => Promise<boolean>;
 			openMiniWindow: () => Promise<boolean>;
+			openSettingsWindow: () => Promise<boolean>;
 			resizeMiniWindow: (width: number, height: number) => Promise<boolean>;
 			showMainWindow: () => Promise<boolean>;
 			closeMiniWindow: () => Promise<boolean>;

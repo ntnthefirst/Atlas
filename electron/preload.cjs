@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("atlas", {
 	pauseSession: (sessionId) => ipcRenderer.invoke("session:pause", sessionId),
 	resumeSession: (sessionId) => ipcRenderer.invoke("session:resume", sessionId),
 	stopSession: (sessionId) => ipcRenderer.invoke("session:stop", sessionId),
+	deleteSession: (sessionId) => ipcRenderer.invoke("session:delete", sessionId),
 	listSessionsByMap: (mapId) => ipcRenderer.invoke("session:listByMap", mapId),
 
 	listActivityBySession: (sessionId) => ipcRenderer.invoke("activity:listBySession", sessionId),
@@ -28,6 +29,7 @@ contextBridge.exposeInMainWorld("atlas", {
 	updateNotebookByMap: (mapId, content) => ipcRenderer.invoke("notebook:updateByMap", mapId, content),
 
 	getDashboardOverview: (mapId) => ipcRenderer.invoke("dashboard:overview", mapId),
+	repairCorruptedSessions: () => ipcRenderer.invoke("data:repairCorruptedSessions"),
 
 	launchApp: (command) => ipcRenderer.invoke("app:launch", command),
 	getPlatform: () => ipcRenderer.invoke("app:platform"),
@@ -37,6 +39,7 @@ contextBridge.exposeInMainWorld("atlas", {
 
 	windowMinimize: () => ipcRenderer.invoke("window:minimize"),
 	openMiniWindow: () => ipcRenderer.invoke("window:openMini"),
+	openSettingsWindow: () => ipcRenderer.invoke("window:openSettings"),
 	resizeMiniWindow: (width, height) => ipcRenderer.invoke("window:resizeMini", width, height),
 	showMainWindow: () => ipcRenderer.invoke("window:showMain"),
 	closeMiniWindow: () => ipcRenderer.invoke("window:closeMini"),

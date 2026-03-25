@@ -53,6 +53,8 @@ class ActivityTracker {
 		this.intervalId = null;
 		this.currentAppName = "Unknown";
 		this.currentSessionId = null;
+		this.isSessionActive = false;
+		this.isTickInProgress = false;
 	}
 
 	start() {
@@ -76,10 +78,12 @@ class ActivityTracker {
 
 	setCurrentSession(sessionId) {
 		this.currentSessionId = sessionId;
+		this.isSessionActive = true;
 	}
 
 	clearCurrentSession() {
 		this.currentSessionId = null;
+		this.isSessionActive = false;
 	}
 
 	getCurrentAppName() {
@@ -119,36 +123,48 @@ class ActivityTracker {
 	}
 
 	async tick() {
-		if (!this.currentSessionId) {
+		// Safeguard: if session is marked as inactive, do not track
+		if (!this.isSessionActive || !this.currentSessionId) {
 			return;
 		}
 
-		const session = this.db.getSessionById(this.currentSessionId);
-		if (!session || !session.is_active || session.is_paused) {
+		// Prevent concurrent tick operations
+		if (this.isTickInProgress) {
 			return;
 		}
 
-		const appInfo = await this.getForegroundAppInfo();
-		const now = new Date().toISOString();
+		this.isTickInProgress = true;
 
-		if (this.isIgnoredProcess(appInfo.processName)) {
-			this.currentAppName = "No tracked app";
-			this.db.closeOpenActivityBlock(session.id, now);
-			return;
-		}
+		try {
+			const session = this.db.getSessionById(this.currentSessionId);
+			if (!session || !session.is_active || session.is_paused) {
+				return;
+			}
 
-		const appName = appInfo.label;
-		this.currentAppName = appName;
-		const openBlock = this.db.getOpenActivityBlock(session.id);
+			const appInfo = await this.getForegroundAppInfo();
+			const now = new Date().toISOString();
 
-		if (!openBlock) {
-			this.db.createActivityBlock(session.id, appName, now);
-			return;
-		}
+			if (this.isIgnoredProcess(appInfo.processName)) {
+				this.currentAppName = "No tracked app";
+				this.db.closeOpenActivityBlock(session.id, now);
+				return;
+			}
 
-		if (openBlock.app_name !== appName) {
-			this.db.closeOpenActivityBlock(session.id, now);
-			this.db.createActivityBlock(session.id, appName, now);
+			const appName = appInfo.label;
+			this.currentAppName = appName;
+			const openBlock = this.db.getOpenActivityBlock(session.id);
+
+			if (!openBlock) {
+				this.db.createActivityBlock(session.id, appName, now);
+				return;
+			}
+
+			if (openBlock.app_name !== appName) {
+				this.db.closeOpenActivityBlock(session.id, now);
+				this.db.createActivityBlock(session.id, appName, now);
+			}
+		} finally {
+			this.isTickInProgress = false;
 		}
 	}
 

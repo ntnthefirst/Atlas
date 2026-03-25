@@ -168,13 +168,170 @@ class AtlasDatabase {
         updated_at TEXT NOT NULL
       )`,
 		);
-
-
 	}
 
+	/**
+	 * Finalize any stranded sessions marked as active but actually ended.
+	 * Called on app startup to handle crash scenarios or stale data.
+	 */
+	finalizeStrandedSessions() {
+		const strandedSessions = this.all(
+			`SELECT * FROM sessions
+       WHERE is_active = 1
+       ORDER BY created_at DESC`,
+		);
 
+		const results = {
+			finalized: 0,
+			blocksRepairedWithSessionEnd: 0,
+		};
 
+		for (const session of strandedSessions) {
+			// Check if session has any activity blocks
+			const blocks = this.listActivityBlocksBySession(session.id);
+			if (blocks.length === 0) {
+				// No activity tracked, mark session as ended with 0 duration
+				this.run(
+					`UPDATE sessions
+           SET is_active = 0, ended_at = ?, total_duration = 0
+           WHERE id = ?`,
+					[session.started_at, session.id],
+				);
+				results.finalized++;
+				continue;
+			}
 
+			// Get the most recent block to determine when activity ended
+			const lastBlock = blocks[blocks.length - 1];
+			const assumedEndTime = lastBlock.ended_at || lastBlock.started_at;
+
+			// Mark session as ended
+			const totalDuration = Math.max(
+				0,
+				toDurationMs(session.started_at, assumedEndTime) - session.paused_duration,
+			);
+			this.run(
+				`UPDATE sessions
+         SET is_active = 0, ended_at = ?, total_duration = ?
+         WHERE id = ?`,
+				[assumedEndTime, totalDuration, session.id],
+			);
+
+			// Repair any unclosed blocks
+			for (const block of blocks) {
+				if (!block.ended_at) {
+					const validEndTime = Math.min(block.started_at, assumedEndTime);
+					const blockDuration = toDurationMs(block.started_at, validEndTime);
+					this.run(
+						`UPDATE activity_blocks
+             SET ended_at = ?, duration = ?
+             WHERE id = ?`,
+						[validEndTime, blockDuration, block.id],
+					);
+					results.blocksRepairedWithSessionEnd++;
+				}
+			}
+
+			results.finalized++;
+		}
+
+		return results;
+	}
+
+	/**
+	 * Repair corrupted session data where app durations exceed session duration.
+	 * Rebuilds app durations from activity block timestamps.
+	 */
+	repairCorruptedSessions() {
+		const results = {
+			sessionsRepaired: 0,
+			blocksNormalized: 0,
+		};
+
+		// Find all completed sessions
+		const completedSessions = this.all(
+			`SELECT id, started_at, ended_at, total_duration FROM sessions
+       WHERE is_active = 0 AND ended_at IS NOT NULL`,
+		);
+
+		for (const session of completedSessions) {
+			const sessionStart = new Date(session.started_at).getTime();
+			const sessionEnd = new Date(session.ended_at).getTime();
+			const sessionDurationMs = Math.max(0, sessionEnd - sessionStart);
+
+			// Get all blocks for this session
+			const blocks = this.listActivityBlocksBySession(session.id);
+
+			let hasCorruption = false;
+			let totalAppDuration = 0;
+
+			// Validate and repair each block
+			for (const block of blocks) {
+				const blockStart = new Date(block.started_at).getTime();
+				let blockEnd = block.ended_at ? new Date(block.ended_at).getTime() : blockStart;
+
+				// Ensure block is within session bounds
+				if (blockStart > sessionEnd) {
+					blockEnd = sessionEnd;
+					hasCorruption = true;
+				} else if (blockEnd > sessionEnd) {
+					blockEnd = sessionEnd;
+					hasCorruption = true;
+				}
+
+				// Also ensure block didn't start before session started
+				const actualStart = Math.max(blockStart, sessionStart);
+				const actualEnd = Math.min(blockEnd, sessionEnd);
+
+				const blockDuration = Math.max(0, actualEnd - actualStart);
+				if (blockDuration !== block.duration || !block.ended_at) {
+					this.run(
+						`UPDATE activity_blocks
+             SET started_at = ?, ended_at = ?, duration = ?
+             WHERE id = ?`,
+						[
+							new Date(actualStart).toISOString(),
+							new Date(actualEnd).toISOString(),
+							blockDuration,
+							block.id,
+						],
+					);
+					hasCorruption = true;
+					results.blocksNormalized++;
+				}
+
+				totalAppDuration += blockDuration;
+			}
+
+			// If total app duration exceeds session, that's data corruption
+			if (totalAppDuration > sessionDurationMs * 1.05) {
+				hasCorruption = true;
+			}
+
+			if (hasCorruption) {
+				results.sessionsRepaired++;
+			}
+		}
+
+		return results;
+	}
+
+	/**
+	 * Validate that a session is truly active and can accept new data.
+	 * Returns the session if valid, throws otherwise.
+	 */
+	validateActiveSession(sessionId) {
+		const session = this.getSessionById(sessionId);
+		if (!session) {
+			throw new Error("Session not found.");
+		}
+		if (!session.is_active || session.ended_at) {
+			throw new Error(
+				`Session is no longer active (is_active=${session.is_active}, ended_at=${session.ended_at}). Cannot modify.`,
+			);
+		}
+		return session;
+	}
 
 	listMaps() {
 		return this.all("SELECT id, name, created_at FROM maps ORDER BY created_at ASC");
@@ -368,6 +525,25 @@ class AtlasDatabase {
 		).map(normalizeSession);
 	}
 
+	deleteSession(sessionId) {
+		const session = this.getSessionById(sessionId);
+		if (!session) {
+			throw new Error("Session not found.");
+		}
+
+		if (session.is_active) {
+			throw new Error("Cannot delete an active session. Stop it first.");
+		}
+
+		this.run(`DELETE FROM pauses WHERE session_id = ?`, [sessionId]);
+
+		this.run(`DELETE FROM activity_blocks WHERE session_id = ?`, [sessionId]);
+
+		this.run(`DELETE FROM sessions WHERE id = ?`, [sessionId]);
+
+		return true;
+	}
+
 	listSessionsInRange(startIso, endIso) {
 		return this.all(
 			`SELECT s.*, m.name AS map_name
@@ -404,23 +580,47 @@ class AtlasDatabase {
 			return null;
 		}
 
-		const duration = toDurationMs(openBlock.started_at, endedAt);
+		// Get the session to validate block doesn't exceed session bounds
+		const session = this.getSessionById(sessionId);
+		if (!session) {
+			return null;
+		}
+
+		// Calculate duration, ensuring it doesn't exceed session window
+		let actualEndTime = endedAt;
+		if (session.ended_at) {
+			// If session is already ended, cap the block end time at session end
+			const sessionEnd = new Date(session.ended_at).getTime();
+			const blockEnd = new Date(endedAt).getTime();
+			if (blockEnd > sessionEnd) {
+				actualEndTime = session.ended_at;
+			}
+		}
+
+		const duration = toDurationMs(openBlock.started_at, actualEndTime);
 
 		this.run(
 			`UPDATE activity_blocks
        SET ended_at = ?, duration = ?
        WHERE id = ?`,
-			[endedAt, duration, openBlock.id],
+			[actualEndTime, duration, openBlock.id],
 		);
 
 		return {
 			...openBlock,
-			ended_at: endedAt,
+			ended_at: actualEndTime,
 			duration,
 		};
 	}
 
 	createActivityBlock(sessionId, appName, startedAt) {
+		const session = this.getSessionById(sessionId);
+
+		// Safeguard: don't create activity blocks for ended sessions
+		if (!session || !session.is_active || session.ended_at) {
+			return null;
+		}
+
 		const block = {
 			id: randomUUID(),
 			session_id: sessionId,
@@ -585,11 +785,13 @@ class AtlasDatabase {
 		for (const session of mapSessions) {
 			const blocks = this.listActivityBlocksBySession(session.id);
 			for (const block of blocks) {
-				const amount = block.ended_at
-					? block.duration
-					: session.is_active
-						? toDurationMs(block.started_at, nowIso())
-						: block.duration;
+				// For completed sessions: always use block.duration, never recalculate from now
+				// For active sessions: can recalculate open blocks from now
+				const amount = session.is_active
+					? block.ended_at
+						? block.duration
+						: toDurationMs(block.started_at, nowIso())
+					: block.duration || 0;
 				appTotals[block.app_name] = (appTotals[block.app_name] ?? 0) + amount;
 			}
 		}

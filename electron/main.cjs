@@ -9,6 +9,7 @@ const { ActivityTracker } = require("./activity-tracker.cjs");
 let mainWindow = null;
 let miniWindow = null;
 let welcomeWindow = null;
+let settingsWindow = null;
 let tray = null;
 let isQuitting = false;
 let db = null;
@@ -17,8 +18,15 @@ let tracker = null;
 const isDev = !app.isPackaged;
 const isMac = process.platform === "darwin";
 const isWindows = process.platform === "win32";
+const APP_USER_MODEL_ID = isDev ? "com.atlas.app.dev" : "com.atlas.app";
 const GITHUB_OWNER = "ntnthefirst";
 const GITHUB_REPO = "Atlas";
+
+if (isDev) {
+	// Keep development state fully isolated from the installed production app.
+	const devUserDataPath = path.join(app.getPath("appData"), "Atlas-Dev");
+	app.setPath("userData", devUserDataPath);
+}
 
 function fetchJson(url) {
 	return new Promise((resolve, reject) => {
@@ -193,10 +201,10 @@ function createWelcomeWindow() {
 	}
 
 	welcomeWindow = new BrowserWindow({
-		width: 520,
-		height: 760,
-		minWidth: 460,
-		minHeight: 660,
+		width: 700,
+		height: 540,
+		minWidth: 620,
+		minHeight: 500,
 		resizable: false,
 		maximizable: false,
 		fullscreenable: false,
@@ -207,7 +215,13 @@ function createWelcomeWindow() {
 			: path.join(__dirname, "..", "dist", "assets", "logosmall.png"),
 		frame: isMac,
 		titleBarStyle: isMac ? "hiddenInset" : "hidden",
-		titleBarOverlay: false,
+		titleBarOverlay: isWindows
+			? {
+					color: "#2a2a2a",
+					symbolColor: "#e2e2e2",
+					height: 49,
+				}
+			: false,
 		autoHideMenuBar: true,
 		webPreferences: {
 			preload: path.join(__dirname, "preload.cjs"),
@@ -239,6 +253,69 @@ function createWelcomeWindow() {
 	return welcomeWindow;
 }
 
+function createSettingsWindow(parentWindow = null) {
+	if (settingsWindow && !settingsWindow.isDestroyed()) {
+		settingsWindow.show();
+		settingsWindow.focus();
+		return settingsWindow;
+	}
+
+	settingsWindow = new BrowserWindow({
+		width: 980,
+		height: 680,
+		minWidth: 900,
+		minHeight: 620,
+		maximizable: false,
+		fullscreenable: false,
+		autoHideMenuBar: true,
+		show: false,
+		center: true,
+		backgroundColor: "#070707",
+		icon: isDev
+			? path.join(__dirname, "..", "src", "assets", "logosmall.png")
+			: path.join(__dirname, "..", "dist", "assets", "logosmall.png"),
+		frame: isMac,
+		titleBarStyle: isMac ? "hiddenInset" : "hidden",
+		titleBarOverlay: isWindows
+			? {
+					color: "#2a2a2a",
+					symbolColor: "#e2e2e2",
+					height: 49,
+				}
+			: false,
+		parent: parentWindow && !parentWindow.isDestroyed() ? parentWindow : undefined,
+		modal: Boolean(parentWindow && !parentWindow.isDestroyed()),
+		resizable: true,
+		webPreferences: {
+			preload: path.join(__dirname, "preload.cjs"),
+			contextIsolation: true,
+			nodeIntegration: false,
+		},
+	});
+
+	if (isDev) {
+		settingsWindow.loadURL("http://localhost:5173?mode=settings");
+	} else {
+		settingsWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"), {
+			query: { mode: "settings" },
+		});
+	}
+
+	settingsWindow.once("ready-to-show", () => {
+		if (!settingsWindow || settingsWindow.isDestroyed()) {
+			return;
+		}
+		settingsWindow.show();
+		settingsWindow.focus();
+	});
+
+	settingsWindow.on("closed", () => {
+		settingsWindow = null;
+	});
+
+	return settingsWindow;
+}
+
 function hasAnyMaps() {
 	return Boolean(db && db.listMaps().length > 0);
 }
@@ -252,7 +329,7 @@ function openPrimaryWindowByMapState() {
 }
 
 function applyNativeTheme(theme) {
-	if (!mainWindow || !isWindows) {
+	if (!isWindows) {
 		return;
 	}
 
@@ -264,20 +341,30 @@ function applyNativeTheme(theme) {
 	}
 
 	nativeTheme.themeSource = theme;
-	if (theme === "light") {
-		mainWindow.setTitleBarOverlay({
-			color: "#f7f7f7",
-			symbolColor: "#4a4a4a",
-			height: 49,
-		});
-		return;
+	const overlay =
+		theme === "light"
+			? {
+					color: "#f7f7f7",
+					symbolColor: "#4a4a4a",
+					height: 49,
+				}
+			: {
+					color: "#2a2a2a",
+					symbolColor: "#e2e2e2",
+					height: 49,
+				};
+
+	if (mainWindow && !mainWindow.isDestroyed()) {
+		mainWindow.setTitleBarOverlay(overlay);
 	}
 
-	mainWindow.setTitleBarOverlay({
-		color: "#2a2a2a",
-		symbolColor: "#e2e2e2",
-		height: 49,
-	});
+	if (settingsWindow && !settingsWindow.isDestroyed()) {
+		settingsWindow.setTitleBarOverlay(overlay);
+	}
+
+	if (welcomeWindow && !welcomeWindow.isDestroyed()) {
+		welcomeWindow.setTitleBarOverlay(overlay);
+	}
 }
 
 nativeTheme.on("updated", () => {
@@ -460,12 +547,23 @@ function wireIpc() {
 	ipcMain.handle("session:resume", (_event, sessionId) => db.resumeSession(sessionId));
 
 	ipcMain.handle("session:stop", (_event, sessionId) => {
+		// Finalize the last activity block
 		tracker.closeOpenBlockNow(sessionId);
+
+		// Immediately mark session as inactive in tracker to stop accepting new data
+		// This must happen BEFORE db.stopSession to prevent race conditions
+		if (tracker.currentSessionId === sessionId) {
+			tracker.clearCurrentSession();
+		}
+
+		// Mark session as ended in database
 		const session = db.stopSession(sessionId);
-		tracker.clearCurrentSession();
+
+		// Close mini window if open
 		if (miniWindow && !miniWindow.isDestroyed()) {
 			miniWindow.close();
 		}
+
 		return session;
 	});
 
@@ -474,6 +572,13 @@ function wireIpc() {
 			return [];
 		}
 		return db.listSessionsByMap(mapId);
+	});
+
+	ipcMain.handle("session:delete", (_event, sessionId) => {
+		if (!sessionId) {
+			throw new Error("Session id missing.");
+		}
+		return db.deleteSession(sessionId);
 	});
 
 	ipcMain.handle("activity:listBySession", (_event, sessionId) => {
@@ -564,6 +669,15 @@ function wireIpc() {
 		return db.getDashboardOverview(mapId);
 	});
 
+	ipcMain.handle("data:repairCorruptedSessions", () => {
+		console.log("[Atlas] Starting repair of corrupted session data...");
+		const results = db.repairCorruptedSessions();
+		console.log(
+			`[Atlas] Repair complete: ${results.sessionsRepaired} sessions checked, ${results.blocksNormalized} blocks normalized.`,
+		);
+		return results;
+	});
+
 	ipcMain.handle("app:launch", (_event, command) => {
 		if (!command || !command.trim()) {
 			throw new Error("Command is required.");
@@ -593,6 +707,12 @@ function wireIpc() {
 
 	ipcMain.handle("window:openMini", () => {
 		createMiniWindow();
+		return true;
+	});
+
+	ipcMain.handle("window:openSettings", (event) => {
+		const parentWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow ?? welcomeWindow;
+		createSettingsWindow(parentWindow);
 		return true;
 	});
 
@@ -696,6 +816,14 @@ app.whenReady().then(async () => {
 
 	const dbPath = path.join(app.getPath("userData"), "atlas.db");
 	db = await AtlasDatabase.create(dbPath);
+
+	// CRITICAL: Finalize any stranded sessions from crashes or ungraceful shutdowns
+	// This prevents old sessions from being resumed and continuing to accumulate time
+	const repairResults = db.finalizeStrandedSessions();
+	if (repairResults.finalized > 0) {
+		console.log(`[Atlas] Finalized ${repairResults.finalized} stranded session(s) from previous crash.`);
+	}
+
 	tracker = new ActivityTracker(db);
 	tracker.start();
 
@@ -708,7 +836,7 @@ app.whenReady().then(async () => {
 	if (isMac) {
 		app.dock.setIcon(iconPath);
 	} else {
-		app.setAppUserModelId("com.atlas.app");
+		app.setAppUserModelId(APP_USER_MODEL_ID);
 	}
 
 	wireIpc();

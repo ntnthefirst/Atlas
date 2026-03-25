@@ -67,15 +67,15 @@ export function AtlasHeader({
 
 	return (
 		<header
-			className={`titlebar sticky top-0 z-40 grid h-[50px] grid-cols-[1fr_1fr] items-center border-b border-neutral-200 bg-neutral-50 px-2.5 text-neutral-700 backdrop-blur-md [-webkit-app-region:drag] dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200 ${
-				isMacPlatform ? "pl-[84px]" : "pr-[146px]"
+			className={`titlebar sticky top-0 z-40 grid h-12.5 grid-cols-[1fr_1fr] items-center border-b border-neutral-200 bg-neutral-50 px-2.5 text-neutral-700 backdrop-blur-md [-webkit-app-region:drag] dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200 ${
+				isMacPlatform ? "pl-21" : "pr-36.5"
 			}`}
 		>
 			<div className="titlebar-left text-hero-small text-base flex min-w-0 items-center gap-2">
 				<img
 					src={logo}
 					alt="Atlas Logo"
-					className="h-7 w-7 flex-shrink-0"
+					className="h-7 w-7 shrink-0"
 				/>
 				<span>Atlas</span>
 			</div>
@@ -117,7 +117,7 @@ export function AtlasHeader({
 			<div className="titlebar-right no-drag flex min-w-0 items-center justify-self-end gap-2">
 				{activeSession ? (
 					<div className="recording-cluster active inline-flex min-w-0 items-center gap-2 rounded-[10px] border border-neutral-200 bg-neutral-0 p-0.5 dark:border-neutral-600 dark:bg-neutral-700/70">
-						<span className="recording-timer top whitespace-nowrap rounded-lg border border-neutral-200 bg-neutral-50 px-2.5 py-[5px] font-data text-data-regular text-neutral-700 dark:border-neutral-600 dark:bg-neutral-700/90 dark:text-neutral-100">
+						<span className="recording-timer top whitespace-nowrap rounded-lg border border-neutral-200 bg-neutral-50 px-2.5 py-1.25 font-data text-data-regular text-neutral-700 dark:border-neutral-600 dark:bg-neutral-700/90 dark:text-neutral-100">
 							{activeElapsed}
 						</span>
 						<Tooltip content={activeSession.is_paused ? "Resume recording" : "Pause recording"}>
@@ -143,7 +143,7 @@ export function AtlasHeader({
 						</Tooltip>
 						<Tooltip content="Stop recording">
 							<button
-								className="group inline-flex h-[31px] w-[31px] items-center justify-center rounded-lg border border-transparent bg-transparent text-neutral-700 transition-colors hover:bg-transparent hover:text-secondary-hover dark:text-neutral-100 dark:hover:bg-transparent dark:hover:text-secondary-hover"
+								className="group inline-flex h-7.75 w-7.75 items-center justify-center rounded-lg border border-transparent bg-transparent text-neutral-700 transition-colors hover:bg-transparent hover:text-secondary-hover dark:text-neutral-100 dark:hover:bg-transparent dark:hover:text-secondary-hover"
 								onClick={onStopSession}
 								aria-label="Stop recording"
 							>
