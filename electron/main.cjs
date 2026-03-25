@@ -201,10 +201,10 @@ function createWelcomeWindow() {
 	}
 
 	welcomeWindow = new BrowserWindow({
-		width: 520,
-		height: 760,
-		minWidth: 460,
-		minHeight: 660,
+		width: 700,
+		height: 540,
+		minWidth: 620,
+		minHeight: 500,
 		resizable: false,
 		maximizable: false,
 		fullscreenable: false,
@@ -215,7 +215,13 @@ function createWelcomeWindow() {
 			: path.join(__dirname, "..", "dist", "assets", "logosmall.png"),
 		frame: isMac,
 		titleBarStyle: isMac ? "hiddenInset" : "hidden",
-		titleBarOverlay: false,
+		titleBarOverlay: isWindows
+			? {
+					color: "#2a2a2a",
+					symbolColor: "#e2e2e2",
+					height: 49,
+				}
+			: false,
 		autoHideMenuBar: true,
 		webPreferences: {
 			preload: path.join(__dirname, "preload.cjs"),
@@ -354,6 +360,10 @@ function applyNativeTheme(theme) {
 
 	if (settingsWindow && !settingsWindow.isDestroyed()) {
 		settingsWindow.setTitleBarOverlay(overlay);
+	}
+
+	if (welcomeWindow && !welcomeWindow.isDestroyed()) {
+		welcomeWindow.setTitleBarOverlay(overlay);
 	}
 }
 

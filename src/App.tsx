@@ -36,6 +36,7 @@ import { AtlasSidebar } from "./components/AtlasSidebar";
 import { AtlasMainContent } from "./components/AtlasMainContent";
 import { MainContentViews } from "./components/main-content";
 import { SettingsWindowApp } from "./components/settings-window/SettingsWindowApp";
+import logo from "./assets/logosmall.png";
 
 const defaultDashboard: DashboardOverview = {
 	totalTodayMs: 0,
@@ -721,6 +722,7 @@ function MainAtlasApp() {
 	};
 
 	const isMacPlatform = platform === "darwin";
+	const hasNativeWindowControls = platform === "darwin" || platform === "win32";
 	const primaryViews = viewItems.filter((item) => item.id !== "settings");
 	const settingsView = viewItems.find((item) => item.id === "settings");
 	const onChangeView = (nextView: AtlasView) => {
@@ -1013,13 +1015,21 @@ function MainAtlasApp() {
 	if (isWelcomeMode) {
 		return (
 			<div className="atlas-welcome-root bg-neutral-50 text-neutral-900 dark:bg-neutral-900 dark:text-neutral-50">
-				<header className={`atlas-welcome-titlebar ${isMacPlatform ? "pl-[84px]" : "pr-[94px]"}`}>
-					<div className="atlas-welcome-titlebar-left">
-						<Squares2X2Icon className="h-4 w-4" />
+				<header
+					className={`atlas-welcome-titlebar ${
+						isMacPlatform ? "pl-[84px]" : hasNativeWindowControls ? "pr-[146px]" : "pr-[94px]"
+					}`}
+				>
+					<div className="no-drag inline-flex items-center gap-2 font-data text-[12px] uppercase tracking-[0.04em]">
+						<img
+							src={logo}
+							alt="Atlas Logo"
+							className="h-5 w-5 flex-shrink-0"
+						/>
 						<span>Atlas</span>
 					</div>
-					{!isMacPlatform && (
-						<div className="atlas-welcome-window-controls">
+					{!hasNativeWindowControls && (
+						<div className="no-drag absolute right-2 top-[9px] inline-flex gap-1">
 							<button
 								type="button"
 								className="atlas-window-control"
@@ -1045,11 +1055,10 @@ function MainAtlasApp() {
 				</header>
 
 				<div className="atlas-welcome-shell">
-					<div className="atlas-welcome-orb" />
 					<header className="atlas-welcome-header">
-						<div className="atlas-welcome-eyebrow">Nieuwe Workspace</div>
-						<h1>Welkom</h1>
-						<p>Start met het maken van een nieuwe map om je sessies, taken en notities te bundelen.</p>
+						<div className="atlas-welcome-eyebrow">Welkom</div>
+						<h1>Start je eerste project</h1>
+						<p>Maak een map aan om direct te beginnen.</p>
 					</header>
 
 					<section className="atlas-welcome-card">
@@ -1058,7 +1067,7 @@ function MainAtlasApp() {
 							id="welcome-map-name"
 							value={newMapName}
 							onChange={(event) => setNewMapName(event.target.value)}
-							placeholder="Client Sprint"
+							placeholder="Bijv. Client Sprint"
 							autoFocus
 							onKeyDown={(event) => {
 								if (event.key === "Enter") {
