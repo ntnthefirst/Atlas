@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { MinusIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { CommandLineIcon, PaintBrushIcon, WrenchScrewdriverIcon } from "@heroicons/react/24/solid";
@@ -31,7 +31,16 @@ export function SettingsWindowApp() {
 	const [activeTab, setActiveTab] = useState<SettingsTab>("general");
 	const [platform, setPlatform] = useState("win32");
 	const [theme, setTheme] = useState<ThemeOption>(() => readStorage("atlas.theme", "light"));
-	const [resolvedTheme, setResolvedTheme] = useState<"dark" | "light">("light");
+	const prefersDark = useSyncExternalStore(
+		(onStoreChange) => {
+			const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+			mediaQuery.addEventListener("change", onStoreChange);
+			return () => mediaQuery.removeEventListener("change", onStoreChange);
+		},
+		() => window.matchMedia("(prefers-color-scheme: dark)").matches,
+		() => false,
+	);
+	const resolvedTheme: "dark" | "light" = theme === "system" ? (prefersDark ? "dark" : "light") : theme;
 	const [timeFormat, setTimeFormat] = useState(() => readStorage("atlas.settings.timeFormat", "24h"));
 	const [startWeekOn, setStartWeekOn] = useState(() => readStorage("atlas.settings.startWeekOn", "monday"));
 	const [density, setDensity] = useState(() => readStorage("atlas.settings.density", "comfortable"));
@@ -53,22 +62,6 @@ export function SettingsWindowApp() {
 			.then((value) => setPlatform(value || "win32"))
 			.catch(() => setPlatform("win32"));
 	}, []);
-
-	useEffect(() => {
-		if (theme !== "system") {
-			setResolvedTheme(theme);
-			return;
-		}
-
-		const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-		const updateResolvedTheme = (event?: MediaQueryListEvent) => {
-			setResolvedTheme(event ? (event.matches ? "dark" : "light") : mediaQuery.matches ? "dark" : "light");
-		};
-		updateResolvedTheme();
-		mediaQuery.addEventListener("change", updateResolvedTheme);
-
-		return () => mediaQuery.removeEventListener("change", updateResolvedTheme);
-	}, [theme]);
 
 	useEffect(() => {
 		document.documentElement.dataset.theme = resolvedTheme;

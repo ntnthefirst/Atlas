@@ -1,26 +1,19 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useSyncExternalStore } from "react";
 import { THEME_KEY, QUICK_ACTIONS_KEY } from "../constants";
 import { readStorage } from "../utils/storage";
 
 export const useThemeManagement = () => {
 	const [theme, setTheme] = useState<"dark" | "light" | "system">(() => readStorage(THEME_KEY, "light"));
-	const [resolvedTheme, setResolvedTheme] = useState<"dark" | "light">("light");
-
-	useEffect(() => {
-		if (theme !== "system") {
-			setResolvedTheme(theme);
-			return;
-		}
-
-		const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-		const updateResolvedTheme = (event?: MediaQueryListEvent) => {
-			setResolvedTheme(event ? (event.matches ? "dark" : "light") : mediaQuery.matches ? "dark" : "light");
-		};
-		updateResolvedTheme();
-		mediaQuery.addEventListener("change", updateResolvedTheme);
-
-		return () => mediaQuery.removeEventListener("change", updateResolvedTheme);
-	}, [theme]);
+	const prefersDark = useSyncExternalStore(
+		(onStoreChange) => {
+			const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+			mediaQuery.addEventListener("change", onStoreChange);
+			return () => mediaQuery.removeEventListener("change", onStoreChange);
+		},
+		() => window.matchMedia("(prefers-color-scheme: dark)").matches,
+		() => false,
+	);
+	const resolvedTheme: "dark" | "light" = theme === "system" ? (prefersDark ? "dark" : "light") : theme;
 
 	useEffect(() => {
 		document.documentElement.dataset.theme = resolvedTheme;

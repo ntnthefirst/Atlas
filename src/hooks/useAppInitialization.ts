@@ -118,5 +118,20 @@ export const useAppInitialization = ({
 		};
 
 		start().catch(console.error);
-	}, []);
+	}, [
+		setMaps,
+		setActiveSession,
+		setCurrentAppName,
+		setSelectedMapId,
+		setSelectedSessionId,
+		setErrorMessage,
+		setHasBootstrapped,
+		setShowFirstLaunch,
+		setSessions,
+		setTasks,
+		setNotebook,
+		setDashboard,
+		setTaskColumnsByMap,
+		setTaskOrderByMap,
+	]);
 };
