@@ -12,6 +12,63 @@ const cleanAppLabel = (value: string) => {
 	return cleaned || "Unknown";
 };
 
+const dutchTimeFormatter = new Intl.DateTimeFormat("nl-NL", {
+	hour: "2-digit",
+	minute: "2-digit",
+});
+
+const dutchWeekdayFormatter = new Intl.DateTimeFormat("nl-NL", {
+	weekday: "long",
+});
+
+const dutchDateFormatter = new Intl.DateTimeFormat("nl-NL", {
+	day: "numeric",
+	month: "long",
+});
+
+const dutchDateWithYearFormatter = new Intl.DateTimeFormat("nl-NL", {
+	day: "numeric",
+	month: "long",
+	year: "numeric",
+});
+
+const isSameCalendarDay = (left: Date, right: Date) =>
+	left.getFullYear() === right.getFullYear() &&
+	left.getMonth() === right.getMonth() &&
+	left.getDate() === right.getDate();
+
+const formatSessionDateLabel = (sessionDate: Date, referenceDate: Date) => {
+	const weekday = dutchWeekdayFormatter.format(sessionDate);
+	const datePart =
+		sessionDate.getFullYear() === referenceDate.getFullYear()
+			? dutchDateFormatter.format(sessionDate)
+			: dutchDateWithYearFormatter.format(sessionDate);
+
+	if (isSameCalendarDay(sessionDate, referenceDate)) {
+		return "Vandaag";
+	}
+
+	const yesterday = new Date(referenceDate);
+	yesterday.setDate(referenceDate.getDate() - 1);
+	if (isSameCalendarDay(sessionDate, yesterday)) {
+		return "Gisteren";
+	}
+
+	const dayBeforeYesterday = new Date(referenceDate);
+	dayBeforeYesterday.setDate(referenceDate.getDate() - 2);
+	if (isSameCalendarDay(sessionDate, dayBeforeYesterday)) {
+		return "Eergisteren";
+	}
+
+	return `${weekday} ${datePart}`;
+};
+
+const formatSessionTimeRange = (startDate: Date, endDate?: Date) => {
+	const start = dutchTimeFormatter.format(startDate);
+	const end = endDate ? dutchTimeFormatter.format(endDate) : "nu";
+	return `${start} -> ${end}`;
+};
+
 const getAppColor = (appName: string) => {
 	const normalized = appName.toLowerCase();
 
@@ -73,6 +130,7 @@ export function LogbookView({
 	const [hoveredAppName, setHoveredAppName] = useState<string>("");
 	const formatElapsed = (ms: number) => formatClock(ms);
 	const formatPercent = (value: number) => `${value.toFixed(value >= 10 ? 1 : 2)}%`;
+	const nowDate = new Date(now);
 	const scrollAreaClasses =
 		"min-h-0 overflow-auto pr-1 [scrollbar-width:thin] [scrollbar-color:var(--neutral-400)_transparent] dark:[scrollbar-color:var(--neutral-500)_transparent] [&::-webkit-scrollbar]:h-2.5 [&::-webkit-scrollbar]:w-2.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:border-2 [&::-webkit-scrollbar-thumb]:border-transparent [&::-webkit-scrollbar-thumb]:bg-[linear-gradient(180deg,var(--neutral-400),var(--neutral-500))] [&::-webkit-scrollbar-thumb]:bg-clip-padding [&::-webkit-scrollbar-thumb:hover]:bg-[linear-gradient(180deg,var(--primary-hover),var(--primary-active))] dark:[&::-webkit-scrollbar-thumb]:bg-[linear-gradient(180deg,var(--neutral-500),var(--neutral-600))] dark:[&::-webkit-scrollbar-thumb:hover]:bg-[linear-gradient(180deg,var(--primary-soft),var(--primary))]";
 
@@ -122,30 +180,40 @@ export function LogbookView({
 				<div className={`stack-list ${scrollAreaClasses} p-0.5`}>
 					{sessions.map((session) => {
 						const isSelected = selectedSession?.id === session.id;
+						const isLive = Boolean(session.is_active);
+						const sessionStart = new Date(session.started_at);
+						const sessionEnd = session.ended_at ? new Date(session.ended_at) : undefined;
 						return (
 							<div
 								key={session.id}
-								className={`group session-item grid grid-cols-[1fr_auto] items-center gap-2 ${isSelected ? "active" : ""}`}
+								className={`group session-item relative grid grid-cols-[1fr_auto] items-center gap-2 ${isSelected ? "active" : ""}`}
 							>
+								{isLive && (
+									<span
+										className="pointer-events-none absolute right-3 top-3 inline-flex h-2.5 w-2.5 items-center justify-center"
+										aria-label="Live session"
+									>
+										<span className="absolute left-1/2 top-1/2 inline-flex h-3 w-3 -translate-x-1/2 -translate-y-1/2 animate-ping rounded-full bg-red-500/30" />
+										<span className="absolute left-1/2 top-1/2 inline-flex h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-red-600" />
+									</span>
+								)}
 								<button
 									onClick={() => onOpenSession(session.id)}
 									className="col-span-1 text-left"
 								>
 									<div>
 										<p className="text-body-small">
-											{new Date(session.started_at).toLocaleString()}
+											{formatSessionDateLabel(sessionStart, nowDate)}
 										</p>
 										<small className="text-data-small">
-											{session.is_active ? "Running" : "Completed"}
+											{formatSessionTimeRange(sessionStart, sessionEnd)}
 										</small>
 									</div>
 									<strong className="text-data-regular">
-										{formatClock(
-											session.is_active ? sessionElapsedMs(session, now) : session.total_duration,
-										)}
+										{formatClock(isLive ? sessionElapsedMs(session, now) : session.total_duration)}
 									</strong>
 								</button>
-								{!session.is_active && (
+								{!isLive && (
 									<Tooltip content="Delete session">
 										<button
 											onClick={(e) => {
