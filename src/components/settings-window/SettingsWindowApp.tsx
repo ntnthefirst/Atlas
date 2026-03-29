@@ -55,23 +55,39 @@ export function SettingsWindowApp() {
 	const [commandPalette, setCommandPalette] = useState(() => readStorage("atlas.settings.commandPalette", true));
 	const [autoUpdates, setAutoUpdates] = useState(() => readStorage("atlas.autoUpdates", true));
 	const [includeBetaUpdates, setIncludeBetaUpdates] = useState(() => readStorage("atlas.includeBetaUpdates", false));
+	const [appVersion, setAppVersion] = useState<string | null>(null);
 	const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
 	const [releaseHistory, setReleaseHistory] = useState<AppRelease[]>([]);
 	const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
 	const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
 	const [updatesError, setUpdatesError] = useState<string | null>(null);
 
+	const normalizeVersion = useCallback((value?: string | null) => {
+		if (!value || typeof value !== "string") {
+			return null;
+		}
+
+		const cleaned = value.trim().replace(/^v/i, "");
+		return cleaned || null;
+	}, []);
+
+	const localDisplayVersion = useMemo(
+		() => normalizeVersion(updateInfo?.local) ?? normalizeVersion(appVersion),
+		[appVersion, normalizeVersion, updateInfo?.local],
+	);
+
 	const tabLabel = useMemo(() => settingsTabs.find((tab) => tab.id === activeTab)?.label ?? "General", [activeTab]);
 	const currentRelease = useMemo(() => {
-		const localVersion = updateInfo?.local?.replace(/^v/i, "");
+		const localVersion = localDisplayVersion;
 		if (!localVersion) {
 			return null;
 		}
 
 		return (
-			releaseHistory.find((release) => release.version === localVersion || release.tag === `v${localVersion}`) ?? null
+			releaseHistory.find((release) => release.version === localVersion || release.tag === `v${localVersion}`) ??
+			null
 		);
-	}, [releaseHistory, updateInfo?.local]);
+	}, [localDisplayVersion, releaseHistory]);
 	const isMacPlatform = platform === "darwin";
 	const hasNativeControls = platform === "darwin" || platform === "win32";
 
@@ -110,6 +126,17 @@ export function SettingsWindowApp() {
 
 	useEffect(() => {
 		window.atlas
+			.getAppVersion()
+			.then((version) => {
+				setAppVersion(version || null);
+			})
+			.catch(() => {
+				setAppVersion(null);
+			});
+	}, []);
+
+	useEffect(() => {
+		window.atlas
 			.getUpdatePreferences()
 			.then((preferences) => {
 				setAutoUpdates(preferences.autoCheck);
@@ -120,36 +147,40 @@ export function SettingsWindowApp() {
 			});
 	}, []);
 
-	const loadUpdatesData = useCallback(async (withVersionScan = true) => {
-		setIsCheckingUpdates(true);
-		setUpdatesError(null);
+	const loadUpdatesData = useCallback(
+		async (withVersionScan = true) => {
+			setIsCheckingUpdates(true);
+			setUpdatesError(null);
 
-		try {
-			const [version, historyResponse] = await Promise.all([
-				window.atlas.getAppVersion(),
-				window.atlas.listReleaseHistory({ includePrerelease: includeBetaUpdates }),
-			]);
+			try {
+				const [version, historyResponse] = await Promise.all([
+					window.atlas.getAppVersion(),
+					window.atlas.listReleaseHistory({ includePrerelease: includeBetaUpdates }),
+				]);
 
-			const latestCheck = withVersionScan
-				? await window.atlas.checkForUpdates({ includePrerelease: includeBetaUpdates })
-				: {
-						local: version,
-						hasUpdate: false,
-						latest: null,
-				  	};
+				const latestCheck = withVersionScan
+					? await window.atlas.checkForUpdates({ includePrerelease: includeBetaUpdates })
+					: {
+							local: version,
+							hasUpdate: false,
+							latest: null,
+						};
 
-			setUpdateInfo({ ...latestCheck, local: latestCheck.local || version });
-			setReleaseHistory(historyResponse.releases ?? []);
+				setUpdateInfo({ ...latestCheck, local: latestCheck.local || version });
+				setAppVersion(version || null);
+				setReleaseHistory(historyResponse.releases ?? []);
 
-			if (historyResponse.error) {
-				setUpdatesError(historyResponse.error);
+				if (historyResponse.error) {
+					setUpdatesError(historyResponse.error);
+				}
+			} catch {
+				setUpdatesError("Failed to load update information.");
+			} finally {
+				setIsCheckingUpdates(false);
 			}
-		} catch {
-			setUpdatesError("Failed to load update information.");
-		} finally {
-			setIsCheckingUpdates(false);
-		}
-	}, [includeBetaUpdates]);
+		},
+		[includeBetaUpdates],
+	);
 
 	useEffect(() => {
 		if (activeTab !== "updates") {
@@ -435,7 +466,7 @@ export function SettingsWindowApp() {
 														Current version
 													</p>
 													<p className="mt-1 mb-0 text-sm font-medium text-neutral-800 dark:text-neutral-100">
-														v{updateInfo?.local ?? "Loading..."}
+														{localDisplayVersion ? `v${localDisplayVersion}` : "Loading..."}
 													</p>
 													<p className="mt-1 mb-0 text-xs text-neutral-500 dark:text-neutral-300">
 														Published:{" "}
@@ -451,7 +482,9 @@ export function SettingsWindowApp() {
 													Update available: v{updateInfo.latest}
 												</p>
 											) : (
-												<p className="mt-3 mb-0 text-xs text-neutral-500 dark:text-neutral-300">Up to date</p>
+												<p className="mt-3 mb-0 text-xs text-neutral-500 dark:text-neutral-300">
+													Up to date
+												</p>
 											)}
 											{updateInfo?.hasUpdate && updateInfo.downloadUrl && (
 												<button
@@ -488,7 +521,9 @@ export function SettingsWindowApp() {
 																<button
 																	type="button"
 																	onClick={() => {
-																		void window.atlas.launchApp(`start "" "${release.url}"`);
+																		void window.atlas.launchApp(
+																			`start "" "${release.url}"`,
+																		);
 																	}}
 																	className="action-btn"
 																>
@@ -504,7 +539,9 @@ export function SettingsWindowApp() {
 												</p>
 											)}
 											{updatesError && (
-												<p className="mt-2 mb-0 text-xs text-orange-700 dark:text-orange-300">{updatesError}</p>
+												<p className="mt-2 mb-0 text-xs text-orange-700 dark:text-orange-300">
+													{updatesError}
+												</p>
 											)}
 										</div>
 									</div>
