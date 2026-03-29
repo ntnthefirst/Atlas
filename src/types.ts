@@ -91,3 +91,21 @@ export type DashboardOverview = {
 };
 
 export type AtlasView = "dashboard" | "logbook" | "tasks" | "analysis" | "notes" | "settings";
+
+export type UpdateCheckResult = {
+	hasUpdate: boolean;
+	local: string;
+	latest: string | null;
+	downloadUrl?: string;
+	error?: string;
+};
+
+export type AppRelease = {
+	tag: string;
+	version: string;
+	name: string;
+	publishedAt: string | null;
+	prerelease: boolean;
+	draft: boolean;
+	url: string;
+};

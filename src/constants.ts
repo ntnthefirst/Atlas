@@ -53,7 +53,7 @@ export const viewItems: AtlasNavItem[] = [
 		outlineIcon: ClipboardDocumentListIcon,
 		solidIcon: ClipboardDocumentListIconSolid,
 	},
-	{ id: "analysis", label: "Analyse", outlineIcon: ChartBarIcon, solidIcon: ChartBarIconSolid },
+	{ id: "analysis", label: "Tijd Analyse", outlineIcon: ChartBarIcon, solidIcon: ChartBarIconSolid },
 	{ id: "notes", label: "Notes", outlineIcon: DocumentTextIcon, solidIcon: DocumentTextIconSolid },
 	{ id: "settings", label: "Settings", outlineIcon: Cog6ToothIcon, solidIcon: Cog6ToothIconSolid },
 ];
