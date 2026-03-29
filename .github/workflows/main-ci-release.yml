@@ -184,9 +184,6 @@ jobs:
                     - name: macOS
                       os: macos-latest
                       script: npm run dist:ci:mac
-                    - name: Linux
-                      os: ubuntu-latest
-                      script: npm run dist:ci:linux
 
         steps:
             - name: Checkout

@@ -15,7 +15,6 @@
 		"dist": "npm run build && electron-builder --win --publish never",
 		"dist:ci:win": "npm run build && electron-builder --win --publish always",
 		"dist:ci:mac": "npm run build && electron-builder --mac --publish always",
-		"dist:ci:linux": "npm run build && electron-builder --linux --publish always",
 		"dist:portable": "npm run build && electron-builder --win portable --publish never",
 		"lint": "eslint .",
 		"preview": "vite preview"
@@ -58,14 +57,6 @@
 				"dmg",
 				"zip"
 			]
-		},
-		"linux": {
-			"artifactName": "Atlas-Setup-Linux-${arch}.${ext}",
-			"target": [
-				"AppImage",
-				"deb"
-			],
-			"category": "Utility"
 		},
 		"nsis": {
 			"oneClick": false,

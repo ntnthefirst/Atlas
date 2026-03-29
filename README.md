@@ -18,7 +18,6 @@ Latest release page:
 Direct latest asset links:
 - Windows installer: https://github.com/ntnthefirst/Atlas/releases/latest/download/Atlas-Setup-Windows-x64.exe
 - macOS DMG: https://github.com/ntnthefirst/Atlas/releases/latest/download/Atlas-Setup-macOS-arm64.dmg
-- Linux AppImage: https://github.com/ntnthefirst/Atlas/releases/latest/download/Atlas-Setup-Linux-x86_64.AppImage
 
 Notes:
 - Each GitHub release keeps its own installer assets (stable and beta/prerelease).
@@ -56,7 +55,6 @@ npm run dev
 - `npm run dist`: local Windows build (no publish)
 - `npm run dist:ci:win`: CI publish Windows installers
 - `npm run dist:ci:mac`: CI publish macOS installers
-- `npm run dist:ci:linux`: CI publish Linux installers
 - `npm run lint`: ESLint
 
 ## CI/CD Overview
@@ -68,7 +66,7 @@ npm run dev
 - Computes semantic version automatically
 - Supports `stable` and `beta` channels
 - Creates release tags and GitHub Releases
-- Builds and publishes installers for Windows, macOS, and Linux
+- Builds and publishes installers for Windows and macOS
 - Keeps all historical releases/tags (no cleanup deletion)
 
 ### PR Guard Workflow

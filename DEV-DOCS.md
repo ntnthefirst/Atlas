@@ -13,10 +13,9 @@ Main workflow: `.github/workflows/main-ci-release.yml`
 1. Lint + build quality gate
 2. Auto version calculation
 3. Tag + GitHub Release creation
-4. Installer builds on all platforms:
+4. Installer builds on supported platforms:
    - Windows (`nsis`)
    - macOS (`dmg`, `zip`)
-   - Linux (`AppImage`, `deb`)
 5. Asset publishing to the release through electron-builder
 
 ### Channels
@@ -117,3 +116,4 @@ npm run dist
 
 - GitHub always exposes source archive attachments on releases (`zip`, `tar.gz`); these are platform defaults and not custom upload artifacts.
 - macOS signing/notarization is not configured in this repo by default.
+- Linux installers are intentionally not built or published in CI.
