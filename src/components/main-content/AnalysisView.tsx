@@ -1,4 +1,10 @@
-import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, CalendarDaysIcon } from "@heroicons/react/24/outline";
+import {
+	CalendarDaysIcon,
+	ChevronDownIcon,
+	ChevronLeftIcon,
+	ChevronRightIcon,
+	ChevronUpIcon,
+} from "@heroicons/react/24/outline";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ActivityBlock, Session } from "../../types";
 import type { MainContentViewsProps } from "./types";
@@ -77,6 +83,7 @@ export function AnalysisView({
 	const [selectedStartDay, setSelectedStartDay] = useState<string | null>(null);
 	const [selectedEndDay, setSelectedEndDay] = useState<string | null>(null);
 	const [displayedMonth, setDisplayedMonth] = useState(() => toMonthStart(new Date(now)));
+	const [isCalendarCollapsed, setIsCalendarCollapsed] = useState(false);
 	const [monthDropdownOpen, setMonthDropdownOpen] = useState(false);
 	const [yearDropdownOpen, setYearDropdownOpen] = useState(false);
 	const monthDropdownRef = useRef<HTMLDivElement | null>(null);
@@ -373,6 +380,17 @@ export function AnalysisView({
 		setMonthDropdownOpen(false);
 	};
 
+	const toggleCalendarCollapsed = () => {
+		setIsCalendarCollapsed((current) => {
+			const next = !current;
+			if (next) {
+				setMonthDropdownOpen(false);
+				setYearDropdownOpen(false);
+			}
+			return next;
+		});
+	};
+
 	return (
 		<div className="grid h-full min-h-0 gap-3 overflow-hidden">
 			<div className="grid min-h-0 gap-3 overflow-auto pr-1">
@@ -385,6 +403,18 @@ export function AnalysisView({
 							</p>
 						</div>
 						<div className="flex items-center gap-1.5">
+							<button
+								type="button"
+								onClick={toggleCalendarCollapsed}
+								className="inline-flex items-center gap-1 rounded-full border border-neutral-200 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-neutral-500 hover:border-neutral-300 dark:border-neutral-600 dark:text-neutral-300"
+							>
+								{isCalendarCollapsed ? "Openklappen" : "Inklappen"}
+								{isCalendarCollapsed ? (
+									<ChevronDownIcon className="h-3.5 w-3.5" />
+								) : (
+									<ChevronUpIcon className="h-3.5 w-3.5" />
+								)}
+							</button>
 							<button
 								type="button"
 								onClick={() => setDisplayedMonth(toMonthStart(new Date(now)))}
@@ -407,149 +437,161 @@ export function AnalysisView({
 						</div>
 					</div>
 
-					<div className="flex flex-wrap items-center justify-between gap-2">
-						<div className="flex items-center gap-1">
-							<button
-								type="button"
-								onClick={goToPreviousMonth}
-								className="rounded-full p-1 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-700 dark:hover:text-neutral-100"
-								aria-label="Vorige maand"
-							>
-								<ChevronLeftIcon className="h-4 w-4" />
-							</button>
-
-							<div
-								ref={monthDropdownRef}
-								className="relative"
-							>
-								<button
-									type="button"
-									onClick={() => {
-										setMonthDropdownOpen((open) => !open);
-										setYearDropdownOpen(false);
-									}}
-									className="group inline-flex items-center gap-0.5 rounded-md px-1 py-0.5 text-base font-semibold capitalize tracking-tight text-neutral-800 transition hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-700"
-								>
-									{MONTH_OPTIONS[displayedMonth.getMonth()]}
-									<ChevronDownIcon className="h-3.5 w-3.5 text-neutral-400 transition group-hover:text-neutral-600 dark:group-hover:text-neutral-200" />
-								</button>
-								{monthDropdownOpen ? (
-									<div className="absolute left-0 z-20 mt-1 grid w-40 grid-cols-2 gap-1 rounded-xl border border-neutral-200 bg-white p-2 shadow-lg dark:border-neutral-600 dark:bg-neutral-800">
-										{MONTH_OPTIONS.map((month, index) => (
-											<button
-												key={month}
-												type="button"
-												onClick={() => setDisplayedMonthIndex(index)}
-												className={`rounded-lg px-2 py-1 text-left text-xs capitalize ${
-													index === displayedMonth.getMonth()
-														? "bg-primary/10 text-primary"
-														: "text-neutral-600 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-700"
-												}`}
-											>
-												{month}
-											</button>
-										))}
-									</div>
-								) : null}
-							</div>
-
-							<div
-								ref={yearDropdownRef}
-								className="relative"
-							>
-								<button
-									type="button"
-									onClick={() => {
-										setYearDropdownOpen((open) => !open);
-										setMonthDropdownOpen(false);
-									}}
-									className="group inline-flex items-center gap-0.5 rounded-md px-1 py-0.5 text-base font-semibold tracking-tight text-neutral-800 transition hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-700"
-								>
-									{displayedMonth.getFullYear()}
-									<ChevronDownIcon className="h-3.5 w-3.5 text-neutral-400 transition group-hover:text-neutral-600 dark:group-hover:text-neutral-200" />
-								</button>
-								{yearDropdownOpen ? (
-									<div className="absolute left-0 z-20 mt-1 grid max-h-44 w-28 gap-1 overflow-auto rounded-xl border border-neutral-200 bg-white p-2 shadow-lg dark:border-neutral-600 dark:bg-neutral-800">
-										{yearOptions.map((year) => (
-											<button
-												key={year}
-												type="button"
-												onClick={() => setDisplayedYear(year)}
-												className={`rounded-lg px-2 py-1 text-left text-xs ${
-													year === displayedMonth.getFullYear()
-														? "bg-primary/10 text-primary"
-														: "text-neutral-600 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-700"
-												}`}
-											>
-												{year}
-											</button>
-										))}
-									</div>
-								) : null}
-							</div>
-
-							<button
-								type="button"
-								onClick={goToNextMonth}
-								className="rounded-full p-1 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-700 dark:hover:text-neutral-100"
-								aria-label="Volgende maand"
-							>
-								<ChevronRightIcon className="h-4 w-4" />
-							</button>
-						</div>
-					</div>
-
-					<div className="grid gap-2">
-						<div className="grid grid-cols-7 gap-2">
-							{WEEKDAY_LABELS.map((label) => (
-								<span
-									key={label}
-									className="px-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-neutral-500 dark:text-neutral-300"
-								>
-									{label}
-								</span>
-							))}
-						</div>
-						<div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7">
-							{calendarData.cells.map((cell) =>
-								cell.isEmpty ? (
-									<div
-										key={cell.key}
-										aria-hidden
-										className="min-h-20 rounded-xl border border-transparent"
-									/>
-								) : (
+					{!isCalendarCollapsed ? (
+						<>
+							<div className="flex flex-wrap items-center justify-between gap-2">
+								<div className="flex items-center gap-1">
 									<button
-										key={cell.key}
 										type="button"
-										onClick={(event) => handleDaySelect(cell.day, event.shiftKey)}
-										className={`grid min-h-20 content-between gap-1 rounded-xl border bg-neutral-50 p-2 text-left transition dark:bg-neutral-700 ${
-											cell.isSelected
-												? "border-primary/80 ring-1 ring-primary/50"
-												: cell.isInRange
-													? "border-primary/40 bg-primary/5"
-													: "border-neutral-200 hover:border-neutral-300 dark:border-neutral-600"
-										}`}
+										onClick={goToPreviousMonth}
+										className="rounded-full p-1 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-700 dark:hover:text-neutral-100"
+										aria-label="Vorige maand"
 									>
-										<div className="flex items-center justify-between">
-											<span className="text-data-small font-semibold">{cell.dayNumber}</span>
-											{cell.isToday ? (
-												<span className="text-[10px] uppercase tracking-[0.06em] text-primary">
-													Vandaag
-												</span>
-											) : null}
-										</div>
-										<p className="text-body-small font-medium text-neutral-700 dark:text-neutral-100">
-											{formatHours(cell.clockMs)}
-										</p>
+										<ChevronLeftIcon className="h-4 w-4" />
 									</button>
-								),
-							)}
-						</div>
-					</div>
 
-					{activityError ? <p className="text-[12px] text-amber-600">{activityError}</p> : null}
-					{isLoadingBlocks ? <p className="text-[12px] text-neutral-500">Activiteit laden...</p> : null}
+									<div
+										ref={monthDropdownRef}
+										className="relative"
+									>
+										<button
+											type="button"
+											onClick={() => {
+												setMonthDropdownOpen((open) => !open);
+												setYearDropdownOpen(false);
+											}}
+											className="group inline-flex items-center gap-0.5 rounded-md px-1 py-0.5 text-base font-semibold capitalize tracking-tight text-neutral-800 transition hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-700"
+										>
+											{MONTH_OPTIONS[displayedMonth.getMonth()]}
+											<ChevronDownIcon className="h-3.5 w-3.5 text-neutral-400 transition group-hover:text-neutral-600 dark:group-hover:text-neutral-200" />
+										</button>
+										{monthDropdownOpen ? (
+											<div className="absolute left-0 z-20 mt-1 grid w-40 grid-cols-2 gap-1 rounded-xl border border-neutral-200 bg-white p-2 shadow-lg dark:border-neutral-600 dark:bg-neutral-800">
+												{MONTH_OPTIONS.map((month, index) => (
+													<button
+														key={month}
+														type="button"
+														onClick={() => setDisplayedMonthIndex(index)}
+														className={`rounded-lg px-2 py-1 text-left text-xs capitalize ${
+															index === displayedMonth.getMonth()
+																? "bg-primary/10 text-primary"
+																: "text-neutral-600 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-700"
+														}`}
+													>
+														{month}
+													</button>
+												))}
+											</div>
+										) : null}
+									</div>
+
+									<div
+										ref={yearDropdownRef}
+										className="relative"
+									>
+										<button
+											type="button"
+											onClick={() => {
+												setYearDropdownOpen((open) => !open);
+												setMonthDropdownOpen(false);
+											}}
+											className="group inline-flex items-center gap-0.5 rounded-md px-1 py-0.5 text-base font-semibold tracking-tight text-neutral-800 transition hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-700"
+										>
+											{displayedMonth.getFullYear()}
+											<ChevronDownIcon className="h-3.5 w-3.5 text-neutral-400 transition group-hover:text-neutral-600 dark:group-hover:text-neutral-200" />
+										</button>
+										{yearDropdownOpen ? (
+											<div className="absolute left-0 z-20 mt-1 grid max-h-44 w-28 gap-1 overflow-auto rounded-xl border border-neutral-200 bg-white p-2 shadow-lg dark:border-neutral-600 dark:bg-neutral-800">
+												{yearOptions.map((year) => (
+													<button
+														key={year}
+														type="button"
+														onClick={() => setDisplayedYear(year)}
+														className={`rounded-lg px-2 py-1 text-left text-xs ${
+															year === displayedMonth.getFullYear()
+																? "bg-primary/10 text-primary"
+																: "text-neutral-600 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-700"
+														}`}
+													>
+														{year}
+													</button>
+												))}
+											</div>
+										) : null}
+									</div>
+
+									<button
+										type="button"
+										onClick={goToNextMonth}
+										className="rounded-full p-1 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-700 dark:hover:text-neutral-100"
+										aria-label="Volgende maand"
+									>
+										<ChevronRightIcon className="h-4 w-4" />
+									</button>
+								</div>
+							</div>
+
+							<div className="grid gap-2">
+								<div className="grid grid-cols-7 gap-2">
+									{WEEKDAY_LABELS.map((label) => (
+										<span
+											key={label}
+											className="px-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-neutral-500 dark:text-neutral-300"
+										>
+											{label}
+										</span>
+									))}
+								</div>
+								<div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7">
+									{calendarData.cells.map((cell) =>
+										cell.isEmpty ? (
+											<div
+												key={cell.key}
+												aria-hidden
+												className="min-h-20 rounded-xl border border-transparent"
+											/>
+										) : (
+											<button
+												key={cell.key}
+												type="button"
+												onClick={(event) => handleDaySelect(cell.day, event.shiftKey)}
+												className={`grid min-h-20 content-between gap-1 rounded-xl border bg-neutral-50 p-2 text-left transition dark:bg-neutral-700 ${
+													cell.isSelected
+														? "border-primary/80 ring-1 ring-primary/50"
+														: cell.isInRange
+															? "border-primary/40 bg-primary/5"
+															: "border-neutral-200 hover:border-neutral-300 dark:border-neutral-600"
+												}`}
+											>
+												<div className="flex items-center justify-between">
+													<span className="text-data-small font-semibold">
+														{cell.dayNumber}
+													</span>
+													{cell.isToday ? (
+														<span className="text-[10px] uppercase tracking-[0.06em] text-primary">
+															Vandaag
+														</span>
+													) : null}
+												</div>
+												<p className="text-body-small font-medium text-neutral-700 dark:text-neutral-100">
+													{formatHours(cell.clockMs)}
+												</p>
+											</button>
+										),
+									)}
+								</div>
+							</div>
+
+							{activityError ? <p className="text-[12px] text-amber-600">{activityError}</p> : null}
+							{isLoadingBlocks ? (
+								<p className="text-[12px] text-neutral-500">Activiteit laden...</p>
+							) : null}
+						</>
+					) : (
+						<p className="text-data-small text-neutral-500 dark:text-neutral-300">
+							Kalender is ingeklapt. Gebruik Openklappen om dagen te selecteren.
+						</p>
+					)}
 				</section>
 
 				<section className="atlas-card grid gap-3">
