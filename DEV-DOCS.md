@@ -14,8 +14,8 @@ Main workflow: `.github/workflows/main-ci-release.yml`
 2. Auto version calculation
 3. Tag + GitHub Release creation
 4. Installer builds on supported platforms:
-   - Windows (`nsis`)
-   - macOS (`dmg`, `zip`)
+    - Windows (`nsis`)
+    - macOS (`dmg`, `zip`)
 5. Asset publishing to the release through electron-builder
 
 ### Channels
@@ -24,10 +24,12 @@ Main workflow: `.github/workflows/main-ci-release.yml`
 - Beta/prerelease: `vX.Y.Z-beta.N`
 
 `workflow_dispatch` inputs:
+
 - `release_channel`: `stable` or `beta`
-- `bump`: `auto`, `none`, `patch`, `minor`, `major`
+- `bump`: `auto`, `patch`, `minor`, `major`
 
 `auto` bump behavior is based on commit messages:
+
 - Breaking (`!` or `BREAKING CHANGE`) -> major
 - `feat:` -> minor
 - everything else -> patch
@@ -37,13 +39,21 @@ Main workflow: `.github/workflows/main-ci-release.yml`
 PR workflow: `.github/workflows/pr-release-guard.yml`
 
 PRs to `main` must include exactly one label:
+
 - `release:patch`
 - `release:minor`
 - `release:major`
-- `release:none`
 
-Optional channel signal label:
-- `release:beta`
+Beta labels:
+
+- `release:beta` (start beta from a bumped stable line, or continue when latest release is beta)
+- `release:finalize-beta` (only valid when latest release is beta; publishes stable for that same base version)
+
+State rules:
+
+- If latest release is stable: exactly one bump label is required (`patch|minor|major`), `release:beta` optional.
+- If latest release is beta: no bump labels are allowed.
+- If latest release is beta: exactly one of `release:beta` (continue) or `release:finalize-beta` (finalize) is required.
 
 This enforces version intent without manually editing versions in files.
 
@@ -59,10 +69,12 @@ Main process file: `electron/main.cjs`
 ### Preferences
 
 Stored in `userData/update-preferences.json`:
+
 - `autoCheck`
 - `includeBeta`
 
 IPC endpoints:
+
 - `app:getUpdatePreferences`
 - `app:setUpdatePreferences`
 - `app:checkUpdates`
@@ -72,6 +84,7 @@ IPC endpoints:
 ### Renderer bridge
 
 Preload exports in `electron/preload.cjs`:
+
 - `getUpdatePreferences`
 - `setUpdatePreferences`
 - `checkForUpdates({ includePrerelease })`
@@ -81,6 +94,7 @@ Preload exports in `electron/preload.cjs`:
 ### Settings UI
 
 `src/components/settings-window/SettingsWindowApp.tsx` includes:
+
 - Current version + publish timestamp
 - `Scan for updates`
 - `Automatic update checks`
@@ -92,6 +106,7 @@ Preload exports in `electron/preload.cjs`:
 Build config lives in `package.json` under `build`.
 
 Important keys:
+
 - `publish.provider = github`
 - platform-specific `artifactName` values
 - Windows target: `nsis` (required for best auto-update flow)
@@ -99,11 +114,13 @@ Important keys:
 ## Local Testing Tips
 
 1. Run app in dev mode:
+
 ```bash
 npm run dev
 ```
 
 2. Build local installer without publishing:
+
 ```bash
 npm run dist
 ```

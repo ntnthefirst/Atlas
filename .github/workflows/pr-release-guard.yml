@@ -32,8 +32,9 @@ jobs:
               with:
                   script: |
                       const labels = (context.payload.pull_request.labels || []).map((label) => label.name);
-                      const bumpLabels = ["release:patch", "release:minor", "release:major", "release:none"];
+                      const bumpLabels = ["release:patch", "release:minor", "release:major"];
                       const betaLabel = "release:beta";
+                      const finalizeBetaLabel = "release:finalize-beta";
                       const marker = "<!-- atlas-release-preview -->";
 
                       const { execSync } = require("node:child_process");
@@ -46,6 +47,19 @@ jobs:
                         const cleaned = tag.replace(/^v/, "");
                         const [major, minor, patch] = cleaned.split(".").map((value) => Number.parseInt(value, 10));
                         return { major, minor, patch };
+                      }
+
+                      function parseTag(tag) {
+                        const match = tag.match(/^v(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$/);
+                        if (!match) {
+                          return null;
+                        }
+                        return {
+                          major: Number.parseInt(match[1], 10),
+                          minor: Number.parseInt(match[2], 10),
+                          patch: Number.parseInt(match[3], 10),
+                          beta: match[4] ? Number.parseInt(match[4], 10) : null,
+                        };
                       }
 
                       function bumpBaseVersion(tag, bumpLabel) {
@@ -63,6 +77,10 @@ jobs:
                         return `${version.major}.${version.minor}.${version.patch}`;
                       }
 
+                      function formatBaseVersion(parsedTag) {
+                        return `${parsedTag.major}.${parsedTag.minor}.${parsedTag.patch}`;
+                      }
+
                       let latestStable = "v0.0.0";
                       try {
                         const stable = run("git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\\.[0-9]+\\.[0-9]+$' | head -n1");
@@ -71,22 +89,38 @@ jobs:
                         latestStable = "v0.0.0";
                       }
 
+                      let latestAny = "v0.0.0";
+                      try {
+                        const any = run("git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\\.[0-9]+\\.[0-9]+(-beta\\.[0-9]+)?$' | head -n1");
+                        if (any) latestAny = any;
+                      } catch {
+                        latestAny = latestStable;
+                      }
+
                       const selectedBumps = labels.filter((label) => bumpLabels.includes(label));
                       const hasBeta = labels.includes(betaLabel);
+                      const hasFinalizeBeta = labels.includes(finalizeBetaLabel);
+
+                      const parsedLatestAny = parseTag(latestAny);
+                      const latestIsBeta = Boolean(parsedLatestAny && parsedLatestAny.beta !== null);
+                      const activeBetaBase = latestIsBeta ? formatBaseVersion(parsedLatestAny) : null;
 
                       let predictedVersion = "(cannot determine - fix labels first)";
                       let labelError = null;
+                      let releaseMode = "unknown";
 
-                      if (selectedBumps.length !== 1) {
-                        labelError = `A PR to main must have exactly one bump label: ${bumpLabels.join(", ")}. Found: ${selectedBumps.join(", ") || "none"}.`;
-                      } else if (selectedBumps[0] === "release:none") {
-                        predictedVersion = "No release (release:none)";
-                      } else {
-                        const baseVersion = bumpBaseVersion(latestStable, selectedBumps[0]);
-                        if (hasBeta) {
+                      if (latestIsBeta) {
+                        if (selectedBumps.length > 0) {
+                          labelError = `Latest release is beta (${latestAny}). Bump labels (${bumpLabels.join(", ")}) are blocked until beta is finalized.`;
+                        } else if (hasBeta && hasFinalizeBeta) {
+                          labelError = `Use either ${betaLabel} (continue beta) or ${finalizeBetaLabel} (finalize beta), not both.`;
+                        } else if (!hasBeta && !hasFinalizeBeta) {
+                          labelError = `Latest release is beta (${latestAny}). Add exactly one of ${betaLabel} or ${finalizeBetaLabel}.`;
+                        } else if (hasBeta) {
+                          releaseMode = "beta-continue";
                           let nextBeta = 1;
                           try {
-                            const latestBeta = run(`git tag --list 'v${baseVersion}-beta.*' --sort=-v:refname | grep -E '^v${baseVersion}-beta\\.[0-9]+$' | head -n1`);
+                            const latestBeta = run(`git tag --list 'v${activeBetaBase}-beta.*' --sort=-v:refname | grep -E '^v${activeBetaBase}-beta\\.[0-9]+$' | head -n1`);
                             if (latestBeta) {
                               const match = latestBeta.match(/-beta\.(\d+)$/);
                               if (match) nextBeta = Number.parseInt(match[1], 10) + 1;
@@ -94,9 +128,35 @@ jobs:
                           } catch {
                             nextBeta = 1;
                           }
-                          predictedVersion = `v${baseVersion}-beta.${nextBeta}`;
+                          predictedVersion = `v${activeBetaBase}-beta.${nextBeta}`;
                         } else {
-                          predictedVersion = `v${baseVersion}`;
+                          releaseMode = "beta-finalize";
+                          predictedVersion = `v${activeBetaBase}`;
+                        }
+                      } else {
+                        if (hasFinalizeBeta) {
+                          labelError = `${finalizeBetaLabel} is only allowed when the latest release is beta.`;
+                        } else if (selectedBumps.length !== 1) {
+                          labelError = `A PR to main must have exactly one bump label: ${bumpLabels.join(", ")}. Found: ${selectedBumps.join(", ") || "none"}.`;
+                        } else {
+                          const baseVersion = bumpBaseVersion(latestStable, selectedBumps[0]);
+                          if (hasBeta) {
+                            releaseMode = "beta-start";
+                            let nextBeta = 1;
+                            try {
+                              const latestBeta = run(`git tag --list 'v${baseVersion}-beta.*' --sort=-v:refname | grep -E '^v${baseVersion}-beta\\.[0-9]+$' | head -n1`);
+                              if (latestBeta) {
+                                const match = latestBeta.match(/-beta\.(\d+)$/);
+                                if (match) nextBeta = Number.parseInt(match[1], 10) + 1;
+                              }
+                            } catch {
+                              nextBeta = 1;
+                            }
+                            predictedVersion = `v${baseVersion}-beta.${nextBeta}`;
+                          } else {
+                            releaseMode = "stable";
+                            predictedVersion = `v${baseVersion}`;
+                          }
                         }
                       }
 
@@ -104,9 +164,13 @@ jobs:
                         marker,
                         "## Atlas release preview",
                         "",
+                        `- Latest release tag: ${latestAny}`,
                         `- Latest stable tag: ${latestStable}`,
+                        `- Beta state: ${latestIsBeta ? `active (${activeBetaBase})` : "inactive"}`,
                         `- Selected bump label: ${selectedBumps[0] || "none"}`,
-                        `- Beta channel: ${hasBeta ? "enabled (release:beta)" : "disabled"}`,
+                        `- Beta continue label: ${hasBeta ? "yes (release:beta)" : "no"}`,
+                        `- Beta finalize label: ${hasFinalizeBeta ? "yes (release:finalize-beta)" : "no"}`,
+                        `- Resolved mode: ${releaseMode}`,
                         `- Predicted next version: **${predictedVersion}**`,
                       ];
 
@@ -153,7 +217,9 @@ jobs:
 
                       const summary = [
                         `Selected bump: ${selectedBumps[0]}`,
-                        `Beta channel enabled: ${hasBeta ? "yes" : "no"}`,
+                        `Beta continue label: ${hasBeta ? "yes" : "no"}`,
+                        `Beta finalize label: ${hasFinalizeBeta ? "yes" : "no"}`,
+                        `Resolved mode: ${releaseMode}`,
                         `Predicted next version: ${predictedVersion}`,
                         "When merged, push-triggered release remains automatic. Use workflow_dispatch for manual beta cuts when needed.",
                       ];

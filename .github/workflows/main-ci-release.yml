@@ -83,9 +83,88 @@ jobs:
                         ? "${{ github.event.inputs.bump }}"
                         : "auto";
 
+                      const { execSync } = require("node:child_process");
+
+                      function run(command) {
+                        return execSync(command, { encoding: "utf8" }).trim();
+                      }
+
+                      function parseTag(tag) {
+                        const match = tag.match(/^v(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$/);
+                        if (!match) {
+                          return null;
+                        }
+                        return {
+                          major: Number.parseInt(match[1], 10),
+                          minor: Number.parseInt(match[2], 10),
+                          patch: Number.parseInt(match[3], 10),
+                          beta: match[4] ? Number.parseInt(match[4], 10) : null,
+                        };
+                      }
+
+                      function parseStable(tag) {
+                        const match = tag.match(/^v(\d+)\.(\d+)\.(\d+)$/);
+                        if (!match) {
+                          return { major: 0, minor: 0, patch: 0 };
+                        }
+                        return {
+                          major: Number.parseInt(match[1], 10),
+                          minor: Number.parseInt(match[2], 10),
+                          patch: Number.parseInt(match[3], 10),
+                        };
+                      }
+
+                      function bumpBaseVersion(latestStableTag, bump) {
+                        const version = parseStable(latestStableTag);
+                        if (bump === "major") {
+                          version.major += 1;
+                          version.minor = 0;
+                          version.patch = 0;
+                        } else if (bump === "minor") {
+                          version.minor += 1;
+                          version.patch = 0;
+                        } else {
+                          version.patch += 1;
+                        }
+                        return `${version.major}.${version.minor}.${version.patch}`;
+                      }
+
+                      let latestStable = "v0.0.0";
+                      try {
+                        const stable = run("git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\\.[0-9]+\\.[0-9]+$' | head -n1");
+                        if (stable) latestStable = stable;
+                      } catch {
+                        latestStable = "v0.0.0";
+                      }
+
+                      let latestAny = latestStable;
+                      try {
+                        const any = run("git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\\.[0-9]+\\.[0-9]+(-beta\\.[0-9]+)?$' | head -n1");
+                        if (any) latestAny = any;
+                      } catch {
+                        latestAny = latestStable;
+                      }
+
+                      const parsedLatestAny = parseTag(latestAny);
+                      const latestIsBeta = Boolean(parsedLatestAny && parsedLatestAny.beta !== null);
+                      const activeBetaBase = latestIsBeta
+                        ? `${parsedLatestAny.major}.${parsedLatestAny.minor}.${parsedLatestAny.patch}`
+                        : "";
+
                       let channel = channelInput;
                       let bump = bumpInput;
-                      let skipRelease = false;
+                      let mode = "stable";
+                      let source = context.eventName;
+
+                      if (context.eventName === "workflow_dispatch") {
+                        source = "workflow_dispatch";
+                        if (latestIsBeta) {
+                          mode = channelInput === "beta" ? "beta-continue" : "beta-finalize";
+                          bump = "locked";
+                        } else {
+                          mode = channelInput === "beta" ? "beta-start" : "stable";
+                        }
+                      }
 
                       if (context.eventName === "push" && context.ref === "refs/heads/main") {
                         const { owner, repo } = context.repo;
@@ -100,30 +179,69 @@ jobs:
 
                         if (mergedPr) {
                           const labels = (mergedPr.labels || []).map((label) => label.name);
-                          const bumpLabels = ["release:patch", "release:minor", "release:major", "release:none"];
+                          const bumpLabels = ["release:patch", "release:minor", "release:major"];
+                          const betaLabel = "release:beta";
+                          const finalizeBetaLabel = "release:finalize-beta";
                           const selected = labels.filter((label) => bumpLabels.includes(label));
+                          const hasBeta = labels.includes(betaLabel);
+                          const hasFinalizeBeta = labels.includes(finalizeBetaLabel);
 
-                          if (selected.length === 1) {
-                            if (selected[0] === "release:none") {
-                              skipRelease = true;
-                            } else {
-                              bump = selected[0].replace("release:", "");
+                          if (latestIsBeta) {
+                            if (selected.length > 0) {
+                              core.setFailed(`Latest release is beta (${latestAny}). Bump labels are blocked until beta is finalized.`);
+                              return;
                             }
+                            if (hasBeta && hasFinalizeBeta) {
+                              core.setFailed(`Use either ${betaLabel} or ${finalizeBetaLabel}, not both.`);
+                              return;
+                            }
+                            if (!hasBeta && !hasFinalizeBeta) {
+                              core.setFailed(`Latest release is beta (${latestAny}). Add exactly one of ${betaLabel} or ${finalizeBetaLabel}.`);
+                              return;
+                            }
+
+                            bump = "locked";
+                            channel = hasBeta ? "beta" : "stable";
+                            mode = hasBeta ? "beta-continue" : "beta-finalize";
+                          } else {
+                            if (hasFinalizeBeta) {
+                              core.setFailed(`${finalizeBetaLabel} is only allowed when the latest release is beta.`);
+                              return;
+                            }
+                            if (selected.length !== 1) {
+                              core.setFailed(`A PR to main must have exactly one bump label: ${bumpLabels.join(", ")}. Found: ${selected.join(", ") || "none"}.`);
+                              return;
+                            }
+
+                            bump = selected[0].replace("release:", "");
+                            channel = hasBeta ? "beta" : "stable";
+                            mode = hasBeta ? "beta-start" : "stable";
                           }
 
-                          if (labels.includes("release:beta")) {
-                            channel = "beta";
-                          }
-
-                          core.info(`Resolved from PR #${mergedPr.number}: bump=${selected[0] || "auto"}, channel=${channel}, skip=${skipRelease}`);
+                          core.info(`Resolved from PR #${mergedPr.number}: mode=${mode}, bump=${bump}, channel=${channel}, latest=${latestAny}`);
                         } else {
                           core.info("No associated PR found for this commit; falling back to existing auto strategy.");
+                          if (latestIsBeta) {
+                            core.setFailed(`Latest release is beta (${latestAny}) and no PR labels were found to determine whether to continue beta or finalize beta.`);
+                            return;
+                          }
+                          mode = channel === "beta" ? "beta-start" : "stable";
+                        }
+
+                        if (mode === "stable" || mode === "beta-start") {
+                          const effectiveBump = bump === "auto" ? "patch (auto)" : bump;
+                          const resolvedBase = bump === "auto" ? "computed in version step" : bumpBaseVersion(latestStable, bump);
+                          core.info(`Stable-track resolution: bump=${effectiveBump}, base=${resolvedBase}`);
                         }
                       }
 
                       core.setOutput("channel", channel);
                       core.setOutput("bump", bump);
-                      core.setOutput("skip", String(skipRelease));
+                      core.setOutput("mode", mode);
+                      core.setOutput("latest_stable", latestStable);
+                      core.setOutput("latest_any", latestAny);
+                      core.setOutput("active_beta_base", activeBetaBase);
+                      core.setOutput("source", source);
 
             - name: Determine next release version
               id: version
@@ -133,14 +251,9 @@ jobs:
 
                   channel="${{ steps.strategy.outputs.channel }}"
                   bump_input="${{ steps.strategy.outputs.bump }}"
-                  skip_release="${{ steps.strategy.outputs.skip }}"
-
-                  if [ "$skip_release" = "true" ]; then
-                    echo "created=false" >> "$GITHUB_OUTPUT"
-                    echo "version=" >> "$GITHUB_OUTPUT"
-                    echo "prerelease=false" >> "$GITHUB_OUTPUT"
-                    exit 0
-                  fi
+                  mode="${{ steps.strategy.outputs.mode }}"
+                  active_beta_base="${{ steps.strategy.outputs.active_beta_base }}"
+                  latest_stable="${{ steps.strategy.outputs.latest_stable }}"
 
                   if git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$' >/dev/null; then
                     echo "created=false" >> "$GITHUB_OUTPUT"
@@ -149,7 +262,6 @@ jobs:
                     exit 0
                   fi
 
-                  latest_stable=$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)
                   if [ -z "$latest_stable" ]; then
                     latest_stable="v0.0.0"
                   fi
@@ -189,19 +301,39 @@ jobs:
                       ;;
                   esac
 
-                  base_version="${major}.${minor}.${patch}"
+                  computed_base_version="${major}.${minor}.${patch}"
 
-                  if [ "$channel" = "beta" ]; then
-                    latest_beta=$(git tag --list "v${base_version}-beta.*" --sort=-v:refname | grep -E "^v${base_version}-beta\.[0-9]+$" | head -n1 || true)
+                  if [ "$mode" = "beta-continue" ]; then
+                    if [ -z "$active_beta_base" ]; then
+                      echo "Missing active_beta_base for beta-continue mode"
+                      exit 1
+                    fi
+                    latest_beta=$(git tag --list "v${active_beta_base}-beta.*" --sort=-v:refname | grep -E "^v${active_beta_base}-beta\.[0-9]+$" | head -n1 || true)
                     beta_number=1
                     if [ -n "$latest_beta" ]; then
                       beta_number=$(echo "$latest_beta" | sed -E 's/.*-beta\.([0-9]+)$/\1/')
                       beta_number=$((beta_number + 1))
                     fi
-                    next_version="v${base_version}-beta.${beta_number}"
+                    next_version="v${active_beta_base}-beta.${beta_number}"
+                    is_prerelease="true"
+                  elif [ "$mode" = "beta-finalize" ]; then
+                    if [ -z "$active_beta_base" ]; then
+                      echo "Missing active_beta_base for beta-finalize mode"
+                      exit 1
+                    fi
+                    next_version="v${active_beta_base}"
+                    is_prerelease="false"
+                  elif [ "$channel" = "beta" ]; then
+                    latest_beta=$(git tag --list "v${computed_base_version}-beta.*" --sort=-v:refname | grep -E "^v${computed_base_version}-beta\.[0-9]+$" | head -n1 || true)
+                    beta_number=1
+                    if [ -n "$latest_beta" ]; then
+                      beta_number=$(echo "$latest_beta" | sed -E 's/.*-beta\.([0-9]+)$/\1/')
+                      beta_number=$((beta_number + 1))
+                    fi
+                    next_version="v${computed_base_version}-beta.${beta_number}"
                     is_prerelease="true"
                   else
-                    next_version="v${base_version}"
+                    next_version="v${computed_base_version}"
                     is_prerelease="false"
                   fi
 

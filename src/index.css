@@ -447,31 +447,6 @@ select {
 	background: var(--neutral-800);
 }
 
-.metric-card {
-	grid-column: span 5;
-}
-
-.metric-value {
-	margin: 0;
-	font-family: var(--font-data);
-	font-size: clamp(36px, 5vw, 52px);
-	line-height: 1;
-}
-
-.metric-sub,
-.card-kicker {
-	margin: 8px 0 0;
-	font-size: 12px;
-	color: var(--neutral-500);
-	text-transform: uppercase;
-	letter-spacing: 0.12em;
-}
-
-.dark .metric-sub,
-.dark .card-kicker {
-	color: var(--neutral-300);
-}
-
 .view-grid > .atlas-card:nth-child(2) {
 	grid-column: span 7;
 }
