@@ -408,11 +408,11 @@ export function AnalysisView({
 					</div>
 
 					<div className="flex flex-wrap items-center justify-between gap-2">
-						<div className="flex items-center gap-1.5">
+						<div className="flex items-center gap-1">
 							<button
 								type="button"
 								onClick={goToPreviousMonth}
-								className="rounded-full border border-neutral-200 p-1.5 text-neutral-500 hover:border-neutral-300 dark:border-neutral-600 dark:text-neutral-300"
+								className="rounded-full p-1 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-700 dark:hover:text-neutral-100"
 								aria-label="Vorige maand"
 							>
 								<ChevronLeftIcon className="h-4 w-4" />
@@ -428,10 +428,10 @@ export function AnalysisView({
 										setMonthDropdownOpen((open) => !open);
 										setYearDropdownOpen(false);
 									}}
-									className="inline-flex items-center gap-1 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-1.5 text-sm font-semibold capitalize text-neutral-700 dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-100"
+									className="group inline-flex items-center gap-0.5 rounded-md px-1 py-0.5 text-base font-semibold capitalize tracking-tight text-neutral-800 transition hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-700"
 								>
 									{MONTH_OPTIONS[displayedMonth.getMonth()]}
-									<ChevronDownIcon className="h-4 w-4" />
+									<ChevronDownIcon className="h-3.5 w-3.5 text-neutral-400 transition group-hover:text-neutral-600 dark:group-hover:text-neutral-200" />
 								</button>
 								{monthDropdownOpen ? (
 									<div className="absolute left-0 z-20 mt-1 grid w-40 grid-cols-2 gap-1 rounded-xl border border-neutral-200 bg-white p-2 shadow-lg dark:border-neutral-600 dark:bg-neutral-800">
@@ -463,10 +463,10 @@ export function AnalysisView({
 										setYearDropdownOpen((open) => !open);
 										setMonthDropdownOpen(false);
 									}}
-									className="inline-flex items-center gap-1 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-1.5 text-sm font-semibold text-neutral-700 dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-100"
+									className="group inline-flex items-center gap-0.5 rounded-md px-1 py-0.5 text-base font-semibold tracking-tight text-neutral-800 transition hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-700"
 								>
 									{displayedMonth.getFullYear()}
-									<ChevronDownIcon className="h-4 w-4" />
+									<ChevronDownIcon className="h-3.5 w-3.5 text-neutral-400 transition group-hover:text-neutral-600 dark:group-hover:text-neutral-200" />
 								</button>
 								{yearDropdownOpen ? (
 									<div className="absolute left-0 z-20 mt-1 grid max-h-44 w-28 gap-1 overflow-auto rounded-xl border border-neutral-200 bg-white p-2 shadow-lg dark:border-neutral-600 dark:bg-neutral-800">
@@ -491,7 +491,7 @@ export function AnalysisView({
 							<button
 								type="button"
 								onClick={goToNextMonth}
-								className="rounded-full border border-neutral-200 p-1.5 text-neutral-500 hover:border-neutral-300 dark:border-neutral-600 dark:text-neutral-300"
+								className="rounded-full p-1 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-700 dark:hover:text-neutral-100"
 								aria-label="Volgende maand"
 							>
 								<ChevronRightIcon className="h-4 w-4" />
