@@ -180,10 +180,18 @@ jobs:
                 include:
                     - name: Windows
                       os: windows-latest
-                      script: npm run dist:ci:win
+                      script: npm run build && electron-builder --win --publish never
+                      asset_glob: |
+                          release/Atlas-Setup-Windows-*.exe
+                          release/Atlas-Setup-Windows-*.exe.blockmap
+                          release/latest*.yml
                     - name: macOS
                       os: macos-latest
-                      script: npm run dist:ci:mac
+                      script: npm run build && electron-builder --mac --arm64 --publish never
+                      asset_glob: |
+                          release/Atlas-Setup-macOS-*.dmg
+                          release/Atlas-Setup-macOS-*.zip
+                          release/latest*.yml
 
         steps:
             - name: Checkout
@@ -203,3 +211,9 @@ jobs:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                   CSC_IDENTITY_AUTO_DISCOVERY: false
               run: ${{ matrix.script }}
+
+            - name: Upload installer assets to release
+              uses: softprops/action-gh-release@v2
+              with:
+                  tag_name: ${{ needs.release.outputs.version }}
+                  files: ${{ matrix.asset_glob }}
