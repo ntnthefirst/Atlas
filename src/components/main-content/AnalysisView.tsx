@@ -2,34 +2,23 @@ import { useEffect, useMemo, useState } from "react";
 import type { ActivityBlock, Session } from "../../types";
 import type { MainContentViewsProps } from "./types";
 
-type PeriodKey = "today" | "7d" | "30d" | "all";
-
 type SessionStats = {
 	session: Session;
 	clockMs: number;
 	focusMs: number;
-	pausedMs: number;
 };
 
-const PERIOD_OPTIONS: Array<{ id: PeriodKey; label: string }> = [
-	{ id: "today", label: "Vandaag" },
-	{ id: "7d", label: "Laatste 7 dagen" },
-	{ id: "30d", label: "Laatste 30 dagen" },
-	{ id: "all", label: "Alles" },
-];
-
-const dutchDayFormatter = new Intl.DateTimeFormat("nl-NL", {
-	weekday: "short",
-	day: "2-digit",
-	month: "2-digit",
+const dutchMonthYearFormatter = new Intl.DateTimeFormat("nl-NL", {
+	month: "long",
+	year: "numeric",
 });
 
-const dutchDateTimeFormatter = new Intl.DateTimeFormat("nl-NL", {
-	day: "2-digit",
-	month: "2-digit",
-	hour: "2-digit",
-	minute: "2-digit",
+const dutchHourFormatter = new Intl.NumberFormat("nl-NL", {
+	minimumFractionDigits: 1,
+	maximumFractionDigits: 1,
 });
+
+const WEEKDAY_LABELS = ["Ma", "Di", "Wo", "Do", "Vr", "Za", "Zo"];
 
 const toInputDate = (value: Date) => {
 	const year = value.getFullYear();
@@ -38,27 +27,11 @@ const toInputDate = (value: Date) => {
 	return `${year}-${month}-${day}`;
 };
 
-const toDayStartMs = (value: number) => {
-	const date = new Date(value);
-	date.setHours(0, 0, 0, 0);
-	return date.getTime();
-};
-
-const getPeriodStartMs = (period: PeriodKey, now: number) => {
-	const dayStart = toDayStartMs(now);
-	if (period === "today") {
-		return dayStart;
-	}
-	if (period === "7d") {
-		return dayStart - 6 * 24 * 60 * 60 * 1000;
-	}
-	if (period === "30d") {
-		return dayStart - 29 * 24 * 60 * 60 * 1000;
-	}
-	return Number.NEGATIVE_INFINITY;
-};
+const toMonthStart = (value: Date) => new Date(value.getFullYear(), value.getMonth(), 1);
 
 const formatPercent = (value: number) => `${Math.round(value)}%`;
+
+const formatHours = (valueMs: number) => `${dutchHourFormatter.format(valueMs / 3_600_000)}u`;
 
 const cleanAppLabel = (value: string) => {
 	const cleaned = value
@@ -86,7 +59,10 @@ export function AnalysisView({
 	const [blocksBySessionId, setBlocksBySessionId] = useState<Record<string, ActivityBlock[]>>({});
 	const [isLoadingBlocks, setIsLoadingBlocks] = useState(false);
 	const [activityError, setActivityError] = useState("");
-	const [period, setPeriod] = useState<PeriodKey>("7d");
+	const [selectedStartDay, setSelectedStartDay] = useState<string | null>(null);
+	const [selectedEndDay, setSelectedEndDay] = useState<string | null>(null);
+	const [displayedMonth, setDisplayedMonth] = useState(() => toMonthStart(new Date(now)));
+
 	const resolvedBlocksBySessionId = useMemo(() => {
 		if (!selectedSession) {
 			return blocksBySessionId;
@@ -152,64 +128,90 @@ export function AnalysisView({
 		};
 	}, [sessions, resolvedBlocksBySessionId]);
 
-	const periodStartMs = useMemo(() => getPeriodStartMs(period, now), [period, now]);
-
-	const sessionsInPeriod = useMemo(
+	const allSessionStats = useMemo<SessionStats[]>(
 		() =>
 			sessions
-				.filter((session) => new Date(session.started_at).getTime() >= periodStartMs)
-				.sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime()),
-		[sessions, periodStartMs],
+				.slice()
+				.sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime())
+				.map((session) => {
+					const clockMs = session.is_active ? sessionElapsedMs(session, now) : session.total_duration;
+					const pausedMs = Math.max(0, session.paused_duration);
+					return {
+						session,
+						clockMs: Math.max(0, clockMs),
+						focusMs: Math.max(0, clockMs - pausedMs),
+					};
+				}),
+		[sessions, sessionElapsedMs, now],
 	);
 
-	const sessionStats = useMemo<SessionStats[]>(
-		() =>
-			sessionsInPeriod.map((session) => {
-				const clockMs = session.is_active ? sessionElapsedMs(session, now) : session.total_duration;
-				const pausedMs = Math.max(0, session.paused_duration);
-				return {
-					session,
-					clockMs: Math.max(0, clockMs),
-					pausedMs,
-					focusMs: Math.max(0, clockMs - pausedMs),
-				};
-			}),
-		[sessionsInPeriod, sessionElapsedMs, now],
+	const selectedRange = useMemo(() => {
+		if (!selectedStartDay) {
+			return null;
+		}
+
+		if (!selectedEndDay) {
+			return {
+				startDay: selectedStartDay,
+				endDay: selectedStartDay,
+				isRange: false,
+			};
+		}
+
+		const startDay = selectedStartDay <= selectedEndDay ? selectedStartDay : selectedEndDay;
+		const endDay = selectedStartDay <= selectedEndDay ? selectedEndDay : selectedStartDay;
+
+		return {
+			startDay,
+			endDay,
+			isRange: startDay !== endDay,
+		};
+	}, [selectedStartDay, selectedEndDay]);
+
+	const filteredSessionStats = useMemo(() => {
+		if (!selectedRange) {
+			return allSessionStats;
+		}
+
+		return allSessionStats.filter((entry) => {
+			const day = toInputDate(new Date(entry.session.started_at));
+			return day >= selectedRange.startDay && day <= selectedRange.endDay;
+		});
+	}, [allSessionStats, selectedRange]);
+
+	const filteredSessionIds = useMemo(
+		() => new Set(filteredSessionStats.map((entry) => entry.session.id)),
+		[filteredSessionStats],
 	);
 
-	const sessionIdSet = useMemo(() => new Set(sessionStats.map((entry) => entry.session.id)), [sessionStats]);
-
-	const periodBlocks = useMemo(
+	const filteredBlocks = useMemo(
 		() =>
 			Object.entries(resolvedBlocksBySessionId)
-				.filter(([sessionId]) => sessionIdSet.has(sessionId))
+				.filter(([sessionId]) => filteredSessionIds.has(sessionId))
 				.flatMap(([, blocks]) => blocks),
-		[resolvedBlocksBySessionId, sessionIdSet],
+		[resolvedBlocksBySessionId, filteredSessionIds],
 	);
 
 	const totals = useMemo(() => {
-		const totalClockMs = sessionStats.reduce((sum, entry) => sum + entry.clockMs, 0);
-		const totalFocusMs = sessionStats.reduce((sum, entry) => sum + entry.focusMs, 0);
-		const totalPausedMs = sessionStats.reduce((sum, entry) => sum + entry.pausedMs, 0);
-		const averageSessionMs = sessionStats.length ? totalClockMs / sessionStats.length : 0;
-		const activeDays = new Set(sessionStats.map((entry) => toInputDate(new Date(entry.session.started_at)))).size;
+		const totalClockMs = filteredSessionStats.reduce((sum, entry) => sum + entry.clockMs, 0);
+		const totalFocusMs = filteredSessionStats.reduce((sum, entry) => sum + entry.focusMs, 0);
+		const averageSessionMs = filteredSessionStats.length ? totalClockMs / filteredSessionStats.length : 0;
+		const activeDays = new Set(filteredSessionStats.map((entry) => toInputDate(new Date(entry.session.started_at))))
+			.size;
 		const focusRatio = totalClockMs > 0 ? (totalFocusMs / totalClockMs) * 100 : 0;
-		const pauseRatio = totalClockMs > 0 ? (totalPausedMs / totalClockMs) * 100 : 0;
 
 		return {
 			totalClockMs,
 			totalFocusMs,
-			totalPausedMs,
 			averageSessionMs,
 			activeDays,
 			focusRatio,
-			pauseRatio,
 		};
-	}, [sessionStats]);
+	}, [filteredSessionStats]);
 
 	const topApps = useMemo(() => {
 		const appTotals = new Map<string, number>();
-		for (const block of periodBlocks) {
+		for (const block of filteredBlocks) {
 			const appName = cleanAppLabel(block.app_name);
 			const durationMs = blockDurationMs(block, now);
 			appTotals.set(appName, (appTotals.get(appName) ?? 0) + durationMs);
@@ -220,273 +222,246 @@ export function AnalysisView({
 			.sort((a, b) => b.durationMs - a.durationMs)
 			.slice(0, 6);
 
-		const topDuration = rows[0]?.durationMs ?? 1;
-		return { rows, topDuration };
-	}, [periodBlocks, now]);
+		return {
+			rows,
+			topDuration: rows[0]?.durationMs ?? 1,
+		};
+	}, [filteredBlocks, now]);
 
-	const dailyFocus = useMemo(() => {
+	const calendarData = useMemo(() => {
 		const totalsByDay = new Map<string, number>();
-		for (const entry of sessionStats) {
+		for (const entry of allSessionStats) {
 			const day = toInputDate(new Date(entry.session.started_at));
-			totalsByDay.set(day, (totalsByDay.get(day) ?? 0) + entry.focusMs);
+			totalsByDay.set(day, (totalsByDay.get(day) ?? 0) + entry.clockMs);
 		}
 
-		const rows = Array.from(totalsByDay.entries())
-			.map(([day, focusMs]) => ({
+		const monthStart = toMonthStart(displayedMonth);
+		const year = monthStart.getFullYear();
+		const month = monthStart.getMonth();
+		const daysInMonth = new Date(year, month + 1, 0).getDate();
+		const leadingEmptyCells = (monthStart.getDay() + 6) % 7;
+		const todayKey = toInputDate(new Date(now));
+
+		const cells: Array<
+			| { key: string; isEmpty: true }
+			| {
+					key: string;
+					isEmpty: false;
+					day: string;
+					dayNumber: number;
+					clockMs: number;
+					isToday: boolean;
+					isSelected: boolean;
+					isInRange: boolean;
+			  }
+		> = [];
+
+		for (let index = 0; index < leadingEmptyCells; index += 1) {
+			cells.push({ key: `empty-${index}`, isEmpty: true });
+		}
+
+		for (let dayNumber = 1; dayNumber <= daysInMonth; dayNumber += 1) {
+			const date = new Date(year, month, dayNumber);
+			const day = toInputDate(date);
+			const isInRange = selectedRange ? day >= selectedRange.startDay && day <= selectedRange.endDay : false;
+			const isSelected = selectedRange ? day === selectedRange.startDay || day === selectedRange.endDay : false;
+			cells.push({
+				key: day,
+				isEmpty: false,
 				day,
-				label: dutchDayFormatter.format(new Date(`${day}T00:00:00`)),
-				focusMs,
-			}))
-			.sort((a, b) => a.day.localeCompare(b.day));
-
-		const visibleRows = rows.slice(-10);
-		const topFocusMs = visibleRows.reduce((max, row) => Math.max(max, row.focusMs), 0);
-		return { rows: visibleRows, topFocusMs };
-	}, [sessionStats]);
-
-	const bestHourWindow = useMemo(() => {
-		const bucketByHour = new Map<number, number>();
-		for (const block of periodBlocks) {
-			const startHour = new Date(block.started_at).getHours();
-			const duration = blockDurationMs(block, now);
-			bucketByHour.set(startHour, (bucketByHour.get(startHour) ?? 0) + duration);
+				dayNumber,
+				clockMs: totalsByDay.get(day) ?? 0,
+				isToday: day === todayKey,
+				isSelected,
+				isInRange,
+			});
 		}
 
-		const best = Array.from(bucketByHour.entries()).sort((a, b) => b[1] - a[1])[0];
-		if (!best) {
-			return "Nog niet genoeg data";
+		return {
+			title: dutchMonthYearFormatter.format(monthStart),
+			cells,
+		};
+	}, [allSessionStats, displayedMonth, selectedRange, now]);
+
+	const selectionLabel = useMemo(() => {
+		if (!selectedRange) {
+			return "Alles";
+		}
+		if (!selectedRange.isRange) {
+			return selectedRange.startDay;
+		}
+		return `${selectedRange.startDay} t/m ${selectedRange.endDay}`;
+	}, [selectedRange]);
+
+	const handleDaySelect = (day: string, withShift: boolean) => {
+		if (withShift && selectedStartDay && !selectedEndDay) {
+			if (day === selectedStartDay) {
+				return;
+			}
+			setSelectedEndDay(day);
+			return;
 		}
 
-		const [hour] = best;
-		const start = `${String(hour).padStart(2, "0")}:00`;
-		const end = `${String((hour + 1) % 24).padStart(2, "0")}:00`;
-		return `${start} - ${end}`;
-	}, [periodBlocks, now]);
-
-	const insightItems = useMemo(() => {
-		if (!sessionStats.length) {
-			return [
-				"Start met 1 korte sessie van 20 tot 30 minuten om je ritme op te bouwen.",
-				"Open deze pagina na je eerste sessie; je ziet dan meteen je eerste inzichten.",
-			];
-		}
-
-		const items: string[] = [];
-		if (totals.focusRatio >= 75) {
-			items.push(`Sterke focus: ${formatPercent(totals.focusRatio)} van je tijd was echt werktijd.`);
-		} else if (totals.focusRatio >= 55) {
-			items.push(`Goede basis: ${formatPercent(totals.focusRatio)} focus. Er is nog ruimte om te groeien.`);
-		} else {
-			items.push(
-				`Je focus is nu ${formatPercent(totals.focusRatio)}. Probeer sessies op te delen in kortere blokken.`,
-			);
-		}
-
-		if (topApps.rows[0]) {
-			items.push(
-				`Je meeste tijd ging naar ${topApps.rows[0].appName} (${formatDuration(topApps.rows[0].durationMs)}).`,
-			);
-		}
-
-		items.push(`Je beste focusmoment ligt rond ${bestHourWindow}.`);
-
-		if (totals.pauseRatio > 35) {
-			items.push("Je pauzetijd is relatief hoog. Kortere, geplande pauzes kunnen helpen.");
-		}
-
-		return items.slice(0, 4);
-	}, [sessionStats.length, totals.focusRatio, totals.pauseRatio, topApps.rows, formatDuration, bestHourWindow]);
+		setSelectedStartDay(day);
+		setSelectedEndDay(null);
+	};
 
 	return (
-		<div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden">
-			<section className="atlas-card grid gap-3">
-				<div className="flex flex-wrap items-start justify-between gap-3">
-					<div className="grid gap-1">
-						<h3 className="text-subtitle-small">Tijd Analyse</h3>
-						<p className="text-body-small text-neutral-500 dark:text-neutral-300">
-							Duidelijke inzichten in gewone taal: waar je tijd naartoe ging, wanneer je focus het sterkst
-							was en wat je morgen meteen kunt verbeteren.
-						</p>
-					</div>
-					<div className="flex flex-wrap gap-1.5">
-						{PERIOD_OPTIONS.map((option) => (
-							<button
-								key={option.id}
-								type="button"
-								onClick={() => setPeriod(option.id)}
-								className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] transition ${
-									period === option.id
-										? "border-primary/70 bg-primary/10 text-primary"
-										: "border-neutral-200 text-neutral-500 hover:border-neutral-300 dark:border-neutral-600 dark:text-neutral-300"
-								}`}
-							>
-								{option.label}
-							</button>
-						))}
-					</div>
-				</div>
-
-				{activityError ? <p className="text-[12px] text-amber-600">{activityError}</p> : null}
-				{isLoadingBlocks ? <p className="text-[12px] text-neutral-500">Activiteit laden...</p> : null}
-			</section>
-
+		<div className="grid h-full min-h-0 gap-3 overflow-hidden">
 			<div className="grid min-h-0 gap-3 overflow-auto pr-1">
-				{!sessionStats.length ? (
-					<section className="atlas-card">
-						<p className="empty">
-							Nog geen sessies in deze periode. Start een sessie en kom hier terug voor inzicht.
-						</p>
-					</section>
-				) : (
-					<>
-						<section className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-							<div className="atlas-card metric-card">
-								<p className="card-kicker text-label-small">Focus tijd</p>
-								<p className="metric-value text-title-small">{formatDuration(totals.totalFocusMs)}</p>
-								<p className="metric-sub text-data-small">
-									{formatPercent(totals.focusRatio)} van je totale tijd
-								</p>
-							</div>
-							<div className="atlas-card metric-card">
-								<p className="card-kicker text-label-small">Totale tijd</p>
-								<p className="metric-value text-title-small">{formatDuration(totals.totalClockMs)}</p>
-								<p className="metric-sub text-data-small">{sessionStats.length} sessies</p>
-							</div>
-							<div className="atlas-card metric-card">
-								<p className="card-kicker text-label-small">Gemiddelde sessie</p>
-								<p className="metric-value text-title-small">
-									{formatDuration(totals.averageSessionMs)}
-								</p>
-								<p className="metric-sub text-data-small">{totals.activeDays} actieve dagen</p>
-							</div>
-							<div className="atlas-card metric-card">
-								<p className="card-kicker text-label-small">Pauze tijd</p>
-								<p className="metric-value text-title-small">{formatDuration(totals.totalPausedMs)}</p>
-								<p className="metric-sub text-data-small">
-									{formatPercent(totals.pauseRatio)} van je totale tijd
-								</p>
-							</div>
-						</section>
+				<section className="atlas-card grid gap-3">
+					<div className="flex flex-wrap items-start justify-between gap-2">
+						<div className="grid gap-1">
+							<h3 className="text-subtitle-small">Kalender</h3>
+							<p className="text-data-small text-neutral-500 dark:text-neutral-300">
+								Selectie: {selectionLabel}
+							</p>
+						</div>
+						<div className="flex items-center gap-1.5">
+							<button
+								type="button"
+								onClick={() =>
+									setDisplayedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))
+								}
+								className="rounded-full border border-neutral-200 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-neutral-500 hover:border-neutral-300 dark:border-neutral-600 dark:text-neutral-300"
+							>
+								Vorige
+							</button>
+							<button
+								type="button"
+								onClick={() => setDisplayedMonth(toMonthStart(new Date(now)))}
+								className="rounded-full border border-neutral-200 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-neutral-500 hover:border-neutral-300 dark:border-neutral-600 dark:text-neutral-300"
+							>
+								Deze maand
+							</button>
+							<button
+								type="button"
+								onClick={() =>
+									setDisplayedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))
+								}
+								className="rounded-full border border-neutral-200 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-neutral-500 hover:border-neutral-300 dark:border-neutral-600 dark:text-neutral-300"
+							>
+								Volgende
+							</button>
+							<button
+								type="button"
+								onClick={() => {
+									setSelectedStartDay(null);
+									setSelectedEndDay(null);
+								}}
+								disabled={!selectedStartDay}
+								className="rounded-full border border-neutral-200 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-neutral-500 hover:border-neutral-300 disabled:cursor-not-allowed disabled:opacity-50 dark:border-neutral-600 dark:text-neutral-300"
+							>
+								Selectie wissen
+							</button>
+						</div>
+					</div>
 
-						<section className="grid gap-3 xl:grid-cols-[1.25fr_1fr]">
-							<div className="atlas-card grid gap-3">
-								<header className="card-head">
-									<h3 className="text-subtitle-small">Focus per dag</h3>
-									<span className="text-data-small">Laatste {dailyFocus.rows.length} dagen</span>
-								</header>
-								<div className="grid gap-2">
-									{dailyFocus.rows.map((row) => {
-										const max = dailyFocus.topFocusMs || 1;
-										const value = Math.max(0, row.focusMs);
-										return (
-											<div
-												key={row.day}
-												className="grid grid-cols-[90px_minmax(0,1fr)_auto] items-center gap-2"
-											>
-												<span className="text-data-small text-neutral-500 dark:text-neutral-300">
-													{row.label}
-												</span>
-												<progress
-													className="h-2 w-full overflow-hidden rounded-full [&::-moz-progress-bar]:bg-[linear-gradient(90deg,#f97316,#dc2626,#7c3aed)] [&::-webkit-progress-bar]:bg-neutral-200 [&::-webkit-progress-value]:bg-[linear-gradient(90deg,#f97316,#dc2626,#7c3aed)] dark:[&::-webkit-progress-bar]:bg-neutral-700"
-													max={max}
-													value={value}
-												/>
-												<strong className="text-data-small">
-													{formatDuration(row.focusMs)}
-												</strong>
-											</div>
-										);
-									})}
-								</div>
-							</div>
+					<header className="card-head">
+						<h3 className="text-subtitle-small capitalize">{calendarData.title}</h3>
+						<span className="text-data-small">
+							Klik op 1 dag voor die dag. Shift+klik werkt alleen nadat je eerst 1 dag selecteerde.
+						</span>
+					</header>
 
-							<div className="atlas-card grid gap-3">
-								<header className="card-head">
-									<h3 className="text-subtitle-small">Top apps</h3>
-									<span className="text-data-small">Waar je meeste tijd zat</span>
-								</header>
-								<div className="stack-list">
-									{topApps.rows.map((entry) => (
-										<div
-											key={entry.appName}
-											className="grid gap-1 rounded-xl border border-neutral-200 bg-neutral-50 p-2.5 dark:border-neutral-600 dark:bg-neutral-700"
-										>
-											<div className="stack-row text-body-small">
-												<span className="truncate">{entry.appName}</span>
-												<strong>{formatDuration(entry.durationMs)}</strong>
-											</div>
-											<progress
-												className="h-1.5 w-full overflow-hidden rounded-full [&::-moz-progress-bar]:bg-[linear-gradient(90deg,#f97316,#dc2626,#7c3aed)] [&::-webkit-progress-bar]:bg-neutral-200 [&::-webkit-progress-value]:bg-[linear-gradient(90deg,#f97316,#dc2626,#7c3aed)] dark:[&::-webkit-progress-bar]:bg-neutral-700"
-												max={topApps.topDuration || 1}
-												value={Math.max(0, entry.durationMs)}
-											/>
-										</div>
-									))}
-									{!topApps.rows.length ? (
-										<p className="empty">Nog geen app-data voor deze periode.</p>
-									) : null}
-								</div>
-							</div>
-						</section>
-
-						<section className="grid gap-3 xl:grid-cols-[1fr_1fr]">
-							<div className="atlas-card grid gap-2">
-								<header className="card-head">
-									<h3 className="text-subtitle-small">Snelle samenvatting</h3>
-									<span className="text-data-small">Zonder technische details</span>
-								</header>
-								<div className="grid gap-1.5">
-									{insightItems.map((item) => (
-										<div
-											key={item}
-											className="rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-body-small dark:border-neutral-600 dark:bg-neutral-700"
-										>
-											{item}
-										</div>
-									))}
-								</div>
-							</div>
-
-							<div className="atlas-card grid gap-2">
-								<header className="card-head">
-									<h3 className="text-subtitle-small">Geselecteerde sessie</h3>
-									<span className="text-data-small">
-										{selectedSession
-											? dutchDateTimeFormatter.format(new Date(selectedSession.started_at))
-											: "Selecteer in Logbook een sessie"}
-									</span>
-								</header>
-								{selectedSession ? (
-									<div className="grid gap-2">
-										<div className="rounded-xl border border-neutral-200 bg-neutral-50 p-2.5 dark:border-neutral-600 dark:bg-neutral-700">
-											<div className="stack-row text-body-small">
-												<span>Duur</span>
-												<strong>
-													{formatDuration(
-														selectedSession.is_active
-															? sessionElapsedMs(selectedSession, now)
-															: selectedSession.total_duration,
-													)}
-												</strong>
-											</div>
-											<div className="stack-row text-data-small text-neutral-500 dark:text-neutral-300">
-												<span>Pauze</span>
-												<span>{formatDuration(selectedSession.paused_duration)}</span>
-											</div>
-										</div>
-										<div className="rounded-xl border border-neutral-200 bg-neutral-50 p-2.5 text-data-small dark:border-neutral-600 dark:bg-neutral-700">
-											{activityBlocks.length
-												? `Aantal activiteitblokken: ${activityBlocks.length}`
-												: "Nog geen activiteitblokken beschikbaar voor deze sessie."}
-										</div>
-									</div>
+					<div className="grid gap-2">
+						<div className="grid grid-cols-7 gap-2">
+							{WEEKDAY_LABELS.map((label) => (
+								<span
+									key={label}
+									className="px-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-neutral-500 dark:text-neutral-300"
+								>
+									{label}
+								</span>
+							))}
+						</div>
+						<div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7">
+							{calendarData.cells.map((cell) =>
+								cell.isEmpty ? (
+									<div
+										key={cell.key}
+										aria-hidden
+										className="min-h-20 rounded-xl border border-transparent"
+									/>
 								) : (
-									<p className="empty">Open in Logbook een sessie om hier details te zien.</p>
-								)}
+									<button
+										key={cell.key}
+										type="button"
+										onClick={(event) => handleDaySelect(cell.day, event.shiftKey)}
+										className={`grid min-h-20 content-between gap-1 rounded-xl border bg-neutral-50 p-2 text-left transition dark:bg-neutral-700 ${
+											cell.isSelected
+												? "border-primary/80 ring-1 ring-primary/50"
+												: cell.isInRange
+													? "border-primary/40 bg-primary/5"
+													: "border-neutral-200 hover:border-neutral-300 dark:border-neutral-600"
+										}`}
+									>
+										<div className="flex items-center justify-between">
+											<span className="text-data-small font-semibold">{cell.dayNumber}</span>
+											{cell.isToday ? (
+												<span className="text-[10px] uppercase tracking-[0.06em] text-primary">
+													Vandaag
+												</span>
+											) : null}
+										</div>
+										<p className="text-body-small font-medium text-neutral-700 dark:text-neutral-100">
+											{formatHours(cell.clockMs)}
+										</p>
+									</button>
+								),
+							)}
+						</div>
+					</div>
+
+					{activityError ? <p className="text-[12px] text-amber-600">{activityError}</p> : null}
+					{isLoadingBlocks ? <p className="text-[12px] text-neutral-500">Activiteit laden...</p> : null}
+				</section>
+
+				<section className="atlas-card grid gap-3">
+					<header className="card-head">
+						<h3 className="text-subtitle-small">Top apps</h3>
+						<span className="text-data-small">Gebaseerd op je huidige kalenderselectie</span>
+					</header>
+					<div className="stack-list">
+						{topApps.rows.map((entry) => (
+							<div
+								key={entry.appName}
+								className="grid gap-1 rounded-xl border border-neutral-200 bg-neutral-50 p-2.5 dark:border-neutral-600 dark:bg-neutral-700"
+							>
+								<div className="stack-row text-body-small">
+									<span className="truncate">{entry.appName}</span>
+									<strong>{formatDuration(entry.durationMs)}</strong>
+								</div>
+								<progress
+									className="h-1.5 w-full overflow-hidden rounded-full [&::-moz-progress-bar]:bg-neutral-700 [&::-webkit-progress-bar]:bg-neutral-200 [&::-webkit-progress-value]:bg-neutral-700 dark:[&::-webkit-progress-bar]:bg-neutral-600 dark:[&::-webkit-progress-value]:bg-neutral-100"
+									max={topApps.topDuration || 1}
+									value={Math.max(0, entry.durationMs)}
+								/>
 							</div>
-						</section>
-					</>
-				)}
+						))}
+						{!topApps.rows.length ? <p className="empty">Nog geen app-data voor deze selectie.</p> : null}
+					</div>
+				</section>
+
+				<section className="grid grid-cols-1 gap-3 md:grid-cols-3">
+					<div className="atlas-card metric-card">
+						<p className="card-kicker text-label-small">Focus tijd</p>
+						<p className="metric-value text-title-small">{formatDuration(totals.totalFocusMs)}</p>
+						<p className="metric-sub text-data-small">
+							{formatPercent(totals.focusRatio)} van je totale tijd
+						</p>
+					</div>
+					<div className="atlas-card metric-card">
+						<p className="card-kicker text-label-small">Totale tijd</p>
+						<p className="metric-value text-title-small">{formatDuration(totals.totalClockMs)}</p>
+						<p className="metric-sub text-data-small">{filteredSessionStats.length} sessies</p>
+					</div>
+					<div className="atlas-card metric-card">
+						<p className="card-kicker text-label-small">Gemiddelde sessie</p>
+						<p className="metric-value text-title-small">{formatDuration(totals.averageSessionMs)}</p>
+						<p className="metric-sub text-data-small">{totals.activeDays} actieve dagen</p>
+					</div>
+				</section>
 			</div>
 		</div>
 	);
