@@ -180,14 +180,22 @@ jobs:
                 include:
                     - name: Windows
                       os: windows-latest
-                      script: npm run build && npx electron-builder --win --publish never
+                      script: |
+                        RELEASE_VERSION="${{ needs.release.outputs.version }}"
+                        RELEASE_VERSION="${RELEASE_VERSION#v}"
+                        npm run build
+                        npx electron-builder --win --publish never --config.extraMetadata.version="$RELEASE_VERSION"
                       asset_glob: |
                           release/Atlas-Setup-Windows-*.exe
                           release/Atlas-Setup-Windows-*.exe.blockmap
                           release/latest*.yml
                     - name: macOS
                       os: macos-latest
-                      script: npm run build && npx electron-builder --mac --arm64 --publish never
+                      script: |
+                        RELEASE_VERSION="${{ needs.release.outputs.version }}"
+                        RELEASE_VERSION="${RELEASE_VERSION#v}"
+                        npm run build
+                        npx electron-builder --mac --arm64 --publish never --config.extraMetadata.version="$RELEASE_VERSION"
                       asset_glob: |
                           release/Atlas-Setup-macOS-*.dmg
                           release/Atlas-Setup-macOS-*.zip
@@ -207,6 +215,7 @@ jobs:
               run: npm ci
 
             - name: Build and publish platform installer artifacts
+              shell: bash
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                   CSC_IDENTITY_AUTO_DISCOVERY: false
