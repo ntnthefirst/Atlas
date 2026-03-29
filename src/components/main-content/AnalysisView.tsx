@@ -16,6 +16,7 @@ type SessionStats = {
 };
 
 type PresetSelection = "thisWeek" | "last7Days" | "thisMonth" | "today" | "always";
+type ActivityViewMode = "apps" | "windows";
 
 const dutchMonthYearFormatter = new Intl.DateTimeFormat("nl-NL", {
 	month: "long",
@@ -72,6 +73,57 @@ const cleanAppLabel = (value: string) => {
 	return cleaned || "Unknown";
 };
 
+const KNOWN_APP_NAMES = new Map<string, string>([
+	["figma", "Figma"],
+	["chrome", "Google Chrome"],
+	["msedge", "Microsoft Edge"],
+	["edge", "Microsoft Edge"],
+	["firefox", "Firefox"],
+	["code", "VS Code"],
+	["vscode", "VS Code"],
+	["spotify", "Spotify"],
+	["discord", "Discord"],
+	["notion", "Notion"],
+	["slack", "Slack"],
+	["teams", "Microsoft Teams"],
+	["explorer", "File Explorer"],
+	["obsidian", "Obsidian"],
+	["postman", "Postman"],
+	["atlas", "Atlas"],
+]);
+
+const normalizeAppNameFromWindowLabel = (value: string) => {
+	const cleaned = cleanAppLabel(value);
+	const lowered = cleaned.toLowerCase();
+
+	for (const [needle, canonical] of KNOWN_APP_NAMES) {
+		if (lowered === needle || lowered.includes(` ${needle}`) || lowered.includes(`${needle} `)) {
+			return canonical;
+		}
+	}
+
+	const parts = cleaned
+		.split(/\s[-|\u2014\u2013\u00b7]\s/g)
+		.map((part) => part.trim())
+		.filter(Boolean);
+
+	if (parts.length > 1) {
+		const firstPart = parts[0];
+		const lastPart = parts[parts.length - 1];
+		const firstWords = firstPart.split(/\s+/).length;
+		const lastWords = lastPart.split(/\s+/).length;
+
+		if (lastWords <= 3) {
+			return lastPart;
+		}
+		if (firstWords <= 3) {
+			return firstPart;
+		}
+	}
+
+	return cleaned;
+};
+
 const blockDurationMs = (block: ActivityBlock, now: number) => {
 	if (block.ended_at) {
 		return Math.max(0, block.duration);
@@ -93,7 +145,8 @@ export function AnalysisView({
 	const [selectedStartDay, setSelectedStartDay] = useState<string | null>(null);
 	const [selectedEndDay, setSelectedEndDay] = useState<string | null>(null);
 	const [activePreset, setActivePreset] = useState<PresetSelection | null>(null);
-	const [showAllApps, setShowAllApps] = useState(false);
+	const [isTopMode, setIsTopMode] = useState(true);
+	const [activityViewMode, setActivityViewMode] = useState<ActivityViewMode>("apps");
 	const [isAppsSortAscending, setIsAppsSortAscending] = useState(false);
 	const [displayedMonth, setDisplayedMonth] = useState(() => toMonthStart(new Date(now)));
 	const [isCalendarCollapsed, setIsCalendarCollapsed] = useState(true);
@@ -265,33 +318,49 @@ export function AnalysisView({
 		};
 	}, [filteredSessionStats]);
 
+	const windowRows = useMemo(() => {
+		const windowTotals = new Map<string, number>();
+		for (const block of filteredBlocks) {
+			const windowName = cleanAppLabel(block.app_name);
+			const durationMs = blockDurationMs(block, now);
+			windowTotals.set(windowName, (windowTotals.get(windowName) ?? 0) + durationMs);
+		}
+
+		return Array.from(windowTotals.entries()).map(([name, durationMs]) => ({ name, durationMs }));
+	}, [filteredBlocks, now]);
+
 	const appRows = useMemo(() => {
 		const appTotals = new Map<string, number>();
 		for (const block of filteredBlocks) {
-			const appName = cleanAppLabel(block.app_name);
+			const appName = normalizeAppNameFromWindowLabel(block.app_name);
 			const durationMs = blockDurationMs(block, now);
 			appTotals.set(appName, (appTotals.get(appName) ?? 0) + durationMs);
 		}
 
-		return Array.from(appTotals.entries()).map(([appName, durationMs]) => ({ appName, durationMs }));
+		return Array.from(appTotals.entries()).map(([name, durationMs]) => ({ name, durationMs }));
 	}, [filteredBlocks, now]);
+
+	const activityRows = useMemo(
+		() => (activityViewMode === "apps" ? appRows : windowRows),
+		[activityViewMode, appRows, windowRows],
+	);
 
 	const appRowsSorted = useMemo(
 		() =>
-			appRows
+			activityRows
 				.slice()
 				.sort((a, b) => (isAppsSortAscending ? a.durationMs - b.durationMs : b.durationMs - a.durationMs)),
-		[appRows, isAppsSortAscending],
+		[activityRows, isAppsSortAscending],
 	);
 
 	const visibleAppRows = useMemo(
-		() => (showAllApps ? appRowsSorted : appRowsSorted.slice(0, 6)),
-		[showAllApps, appRowsSorted],
+		() => (isTopMode ? appRowsSorted.slice(0, 6) : appRowsSorted),
+		[isTopMode, appRowsSorted],
 	);
 
 	const totalSelectedAppsDuration = useMemo(
-		() => appRows.reduce((sum, entry) => sum + entry.durationMs, 0),
-		[appRows],
+		() => activityRows.reduce((sum, entry) => sum + entry.durationMs, 0),
+		[activityRows],
 	);
 
 	const calendarData = useMemo(() => {
@@ -717,20 +786,63 @@ export function AnalysisView({
 
 				<section className="atlas-card grid gap-3">
 					<header className="card-head">
-						<button
-							type="button"
-							onClick={() => setShowAllApps((current) => !current)}
-							className="text-subtitle-small transition hover:text-primary"
-						>
-							{showAllApps ? "Alle apps" : "Top apps"}
-						</button>
-						{showAllApps ? (
+						<div className="flex items-center gap-2">
+							<div className="inline-flex rounded-full border border-neutral-200 p-1 dark:border-neutral-600">
+								<button
+									type="button"
+									onClick={() => setIsTopMode(true)}
+									className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] transition ${
+										isTopMode
+											? "bg-primary/10 text-primary"
+											: "text-neutral-500 hover:text-neutral-700 dark:text-neutral-300 dark:hover:text-neutral-100"
+									}`}
+								>
+									Top
+								</button>
+								<button
+									type="button"
+									onClick={() => setIsTopMode(false)}
+									className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] transition ${
+										!isTopMode
+											? "bg-primary/10 text-primary"
+											: "text-neutral-500 hover:text-neutral-700 dark:text-neutral-300 dark:hover:text-neutral-100"
+									}`}
+								>
+									Alle
+								</button>
+							</div>
+							<div className="inline-flex rounded-full border border-neutral-200 p-1 dark:border-neutral-600">
+								<button
+									type="button"
+									onClick={() => setActivityViewMode("apps")}
+									className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] transition ${
+										activityViewMode === "apps"
+											? "bg-primary/10 text-primary"
+											: "text-neutral-500 hover:text-neutral-700 dark:text-neutral-300 dark:hover:text-neutral-100"
+									}`}
+								>
+									Apps
+								</button>
+								<button
+									type="button"
+									onClick={() => setActivityViewMode("windows")}
+									className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] transition ${
+										activityViewMode === "windows"
+											? "bg-primary/10 text-primary"
+											: "text-neutral-500 hover:text-neutral-700 dark:text-neutral-300 dark:hover:text-neutral-100"
+									}`}
+								>
+									Windows
+								</button>
+							</div>
+						</div>
+						{!isTopMode ? (
 							<button
 								type="button"
 								onClick={() => setIsAppsSortAscending((current) => !current)}
 								className="rounded-full border border-neutral-200 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-neutral-500 transition hover:border-neutral-300 hover:text-neutral-700 dark:border-neutral-600 dark:text-neutral-300 dark:hover:text-neutral-100"
 							>
-								{isAppsSortAscending ? "Ascending" : "Descending"}
+								{isAppsSortAscending ? "Oplopend" : "Aflopend"}
 							</button>
 						) : (
 							<span className="text-data-small">Gebaseerd op je huidige kalenderselectie</span>
@@ -739,11 +851,11 @@ export function AnalysisView({
 					<div className="stack-list">
 						{visibleAppRows.map((entry) => (
 							<div
-								key={entry.appName}
+								key={entry.name}
 								className="grid gap-1 rounded-xl border border-neutral-200 bg-neutral-50 p-2.5 dark:border-neutral-600 dark:bg-neutral-700"
 							>
 								<div className="stack-row text-body-small">
-									<span className="truncate">{entry.appName}</span>
+									<span className="truncate">{entry.name}</span>
 									<strong>{formatDuration(entry.durationMs)}</strong>
 								</div>
 								<progress
@@ -753,7 +865,11 @@ export function AnalysisView({
 								/>
 							</div>
 						))}
-						{!visibleAppRows.length ? <p className="empty">Nog geen app-data voor deze selectie.</p> : null}
+						{!visibleAppRows.length ? (
+							<p className="empty">
+								Nog geen {activityViewMode === "apps" ? "app" : "window"}-data voor deze selectie.
+							</p>
+						) : null}
 					</div>
 				</section>
 			</div>
