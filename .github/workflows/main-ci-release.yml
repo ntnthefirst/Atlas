@@ -180,14 +180,14 @@ jobs:
                 include:
                     - name: Windows
                       os: windows-latest
-                      script: npm run build && electron-builder --win --publish never
+                      script: npm run build && npx electron-builder --win --publish never
                       asset_glob: |
                           release/Atlas-Setup-Windows-*.exe
                           release/Atlas-Setup-Windows-*.exe.blockmap
                           release/latest*.yml
                     - name: macOS
                       os: macos-latest
-                      script: npm run build && electron-builder --mac --arm64 --publish never
+                      script: npm run build && npx electron-builder --mac --arm64 --publish never
                       asset_glob: |
                           release/Atlas-Setup-macOS-*.dmg
                           release/Atlas-Setup-macOS-*.zip
