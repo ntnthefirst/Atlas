@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, CalendarDaysIcon } from "@heroicons/react/24/outline";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ActivityBlock, Session } from "../../types";
 import type { MainContentViewsProps } from "./types";
 
@@ -19,6 +20,20 @@ const dutchHourFormatter = new Intl.NumberFormat("nl-NL", {
 });
 
 const WEEKDAY_LABELS = ["Ma", "Di", "Wo", "Do", "Vr", "Za", "Zo"];
+const MONTH_OPTIONS = [
+	"januari",
+	"februari",
+	"maart",
+	"april",
+	"mei",
+	"juni",
+	"juli",
+	"augustus",
+	"september",
+	"oktober",
+	"november",
+	"december",
+];
 
 const toInputDate = (value: Date) => {
 	const year = value.getFullYear();
@@ -62,6 +77,10 @@ export function AnalysisView({
 	const [selectedStartDay, setSelectedStartDay] = useState<string | null>(null);
 	const [selectedEndDay, setSelectedEndDay] = useState<string | null>(null);
 	const [displayedMonth, setDisplayedMonth] = useState(() => toMonthStart(new Date(now)));
+	const [monthDropdownOpen, setMonthDropdownOpen] = useState(false);
+	const [yearDropdownOpen, setYearDropdownOpen] = useState(false);
+	const monthDropdownRef = useRef<HTMLDivElement | null>(null);
+	const yearDropdownRef = useRef<HTMLDivElement | null>(null);
 
 	const resolvedBlocksBySessionId = useMemo(() => {
 		if (!selectedSession) {
@@ -127,6 +146,23 @@ export function AnalysisView({
 			cancelled = true;
 		};
 	}, [sessions, resolvedBlocksBySessionId]);
+
+	useEffect(() => {
+		const onPointerDown = (event: MouseEvent) => {
+			const target = event.target as Node;
+			if (monthDropdownRef.current && !monthDropdownRef.current.contains(target)) {
+				setMonthDropdownOpen(false);
+			}
+			if (yearDropdownRef.current && !yearDropdownRef.current.contains(target)) {
+				setYearDropdownOpen(false);
+			}
+		};
+
+		document.addEventListener("mousedown", onPointerDown);
+		return () => {
+			document.removeEventListener("mousedown", onPointerDown);
+		};
+	}, []);
 
 	const allSessionStats = useMemo<SessionStats[]>(
 		() =>
@@ -293,6 +329,19 @@ export function AnalysisView({
 		return `${selectedRange.startDay} t/m ${selectedRange.endDay}`;
 	}, [selectedRange]);
 
+	const yearOptions = useMemo(() => {
+		const years = sessions.map((session) => new Date(session.started_at).getFullYear());
+		years.push(new Date(now).getFullYear());
+
+		const minYear = Math.min(...years, new Date(now).getFullYear()) - 2;
+		const maxYear = Math.max(...years, new Date(now).getFullYear()) + 2;
+		const options: number[] = [];
+		for (let year = minYear; year <= maxYear; year += 1) {
+			options.push(year);
+		}
+		return options;
+	}, [sessions, now]);
+
 	const handleDaySelect = (day: string, withShift: boolean) => {
 		if (withShift && selectedStartDay && !selectedEndDay) {
 			if (day === selectedStartDay) {
@@ -304,6 +353,24 @@ export function AnalysisView({
 
 		setSelectedStartDay(day);
 		setSelectedEndDay(null);
+	};
+
+	const goToPreviousMonth = () => {
+		setDisplayedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+	};
+
+	const goToNextMonth = () => {
+		setDisplayedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+	};
+
+	const setDisplayedYear = (year: number) => {
+		setDisplayedMonth((prev) => new Date(year, prev.getMonth(), 1));
+		setYearDropdownOpen(false);
+	};
+
+	const setDisplayedMonthIndex = (monthIndex: number) => {
+		setDisplayedMonth((prev) => new Date(prev.getFullYear(), monthIndex, 1));
+		setMonthDropdownOpen(false);
 	};
 
 	return (
@@ -320,28 +387,11 @@ export function AnalysisView({
 						<div className="flex items-center gap-1.5">
 							<button
 								type="button"
-								onClick={() =>
-									setDisplayedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))
-								}
-								className="rounded-full border border-neutral-200 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-neutral-500 hover:border-neutral-300 dark:border-neutral-600 dark:text-neutral-300"
-							>
-								Vorige
-							</button>
-							<button
-								type="button"
 								onClick={() => setDisplayedMonth(toMonthStart(new Date(now)))}
-								className="rounded-full border border-neutral-200 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-neutral-500 hover:border-neutral-300 dark:border-neutral-600 dark:text-neutral-300"
+								className="inline-flex items-center gap-1.5 rounded-full border border-primary/60 bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-primary hover:bg-primary/15"
 							>
-								Deze maand
-							</button>
-							<button
-								type="button"
-								onClick={() =>
-									setDisplayedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))
-								}
-								className="rounded-full border border-neutral-200 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-neutral-500 hover:border-neutral-300 dark:border-neutral-600 dark:text-neutral-300"
-							>
-								Volgende
+								<CalendarDaysIcon className="h-3.5 w-3.5" />
+								Vandaag
 							</button>
 							<button
 								type="button"
@@ -357,12 +407,97 @@ export function AnalysisView({
 						</div>
 					</div>
 
-					<header className="card-head">
-						<h3 className="text-subtitle-small capitalize">{calendarData.title}</h3>
-						<span className="text-data-small">
-							Klik op 1 dag voor die dag. Shift+klik werkt alleen nadat je eerst 1 dag selecteerde.
-						</span>
-					</header>
+					<div className="flex flex-wrap items-center justify-between gap-2">
+						<div className="flex items-center gap-1.5">
+							<button
+								type="button"
+								onClick={goToPreviousMonth}
+								className="rounded-full border border-neutral-200 p-1.5 text-neutral-500 hover:border-neutral-300 dark:border-neutral-600 dark:text-neutral-300"
+								aria-label="Vorige maand"
+							>
+								<ChevronLeftIcon className="h-4 w-4" />
+							</button>
+
+							<div
+								ref={monthDropdownRef}
+								className="relative"
+							>
+								<button
+									type="button"
+									onClick={() => {
+										setMonthDropdownOpen((open) => !open);
+										setYearDropdownOpen(false);
+									}}
+									className="inline-flex items-center gap-1 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-1.5 text-sm font-semibold capitalize text-neutral-700 dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-100"
+								>
+									{MONTH_OPTIONS[displayedMonth.getMonth()]}
+									<ChevronDownIcon className="h-4 w-4" />
+								</button>
+								{monthDropdownOpen ? (
+									<div className="absolute left-0 z-20 mt-1 grid w-40 grid-cols-2 gap-1 rounded-xl border border-neutral-200 bg-white p-2 shadow-lg dark:border-neutral-600 dark:bg-neutral-800">
+										{MONTH_OPTIONS.map((month, index) => (
+											<button
+												key={month}
+												type="button"
+												onClick={() => setDisplayedMonthIndex(index)}
+												className={`rounded-lg px-2 py-1 text-left text-xs capitalize ${
+													index === displayedMonth.getMonth()
+														? "bg-primary/10 text-primary"
+														: "text-neutral-600 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-700"
+												}`}
+											>
+												{month}
+											</button>
+										))}
+									</div>
+								) : null}
+							</div>
+
+							<div
+								ref={yearDropdownRef}
+								className="relative"
+							>
+								<button
+									type="button"
+									onClick={() => {
+										setYearDropdownOpen((open) => !open);
+										setMonthDropdownOpen(false);
+									}}
+									className="inline-flex items-center gap-1 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-1.5 text-sm font-semibold text-neutral-700 dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-100"
+								>
+									{displayedMonth.getFullYear()}
+									<ChevronDownIcon className="h-4 w-4" />
+								</button>
+								{yearDropdownOpen ? (
+									<div className="absolute left-0 z-20 mt-1 grid max-h-44 w-28 gap-1 overflow-auto rounded-xl border border-neutral-200 bg-white p-2 shadow-lg dark:border-neutral-600 dark:bg-neutral-800">
+										{yearOptions.map((year) => (
+											<button
+												key={year}
+												type="button"
+												onClick={() => setDisplayedYear(year)}
+												className={`rounded-lg px-2 py-1 text-left text-xs ${
+													year === displayedMonth.getFullYear()
+														? "bg-primary/10 text-primary"
+														: "text-neutral-600 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-700"
+												}`}
+											>
+												{year}
+											</button>
+										))}
+									</div>
+								) : null}
+							</div>
+
+							<button
+								type="button"
+								onClick={goToNextMonth}
+								className="rounded-full border border-neutral-200 p-1.5 text-neutral-500 hover:border-neutral-300 dark:border-neutral-600 dark:text-neutral-300"
+								aria-label="Volgende maand"
+							>
+								<ChevronRightIcon className="h-4 w-4" />
+							</button>
+						</div>
+					</div>
 
 					<div className="grid gap-2">
 						<div className="grid grid-cols-7 gap-2">
