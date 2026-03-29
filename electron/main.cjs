@@ -1,7 +1,9 @@
 const path = require("node:path");
 const https = require("node:https");
+const fs = require("node:fs");
 const { spawn } = require("node:child_process");
 const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, nativeTheme } = require("electron");
+const { autoUpdater } = require("electron-updater");
 
 const { AtlasDatabase } = require("./db.cjs");
 const { ActivityTracker } = require("./activity-tracker.cjs");
@@ -21,6 +23,13 @@ const isWindows = process.platform === "win32";
 const APP_USER_MODEL_ID = isDev ? "com.atlas.app.dev" : "com.atlas.app";
 const GITHUB_OWNER = "ntnthefirst";
 const GITHUB_REPO = "Atlas";
+const UPDATE_PREFS_FILE = "update-preferences.json";
+const defaultUpdatePreferences = {
+	autoCheck: true,
+	includeBeta: false,
+};
+
+let updatePreferences = { ...defaultUpdatePreferences };
 
 if (isDev) {
 	// Keep development state fully isolated from the installed production app.
@@ -66,36 +75,142 @@ function fetchJson(url) {
 	});
 }
 
-function toSemverTuple(rawVersion) {
+function getUpdatePrefsPath() {
+	return path.join(app.getPath("userData"), UPDATE_PREFS_FILE);
+}
+
+function normalizeUpdatePreferences(rawValue) {
+	if (!rawValue || typeof rawValue !== "object") {
+		return { ...defaultUpdatePreferences };
+	}
+
+	return {
+		autoCheck:
+			typeof rawValue.autoCheck === "boolean" ? rawValue.autoCheck : defaultUpdatePreferences.autoCheck,
+		includeBeta:
+			typeof rawValue.includeBeta === "boolean"
+				? rawValue.includeBeta
+				: defaultUpdatePreferences.includeBeta,
+	};
+}
+
+function loadUpdatePreferences() {
+	try {
+		const rawContent = fs.readFileSync(getUpdatePrefsPath(), "utf8");
+		const parsed = JSON.parse(rawContent);
+		updatePreferences = normalizeUpdatePreferences(parsed);
+	} catch {
+		updatePreferences = { ...defaultUpdatePreferences };
+	}
+
+	return updatePreferences;
+}
+
+function saveUpdatePreferences(nextValue) {
+	updatePreferences = normalizeUpdatePreferences(nextValue);
+
+	try {
+		fs.writeFileSync(getUpdatePrefsPath(), JSON.stringify(updatePreferences, null, 2), "utf8");
+	} catch {
+		// Non-blocking: update checks should still work with in-memory preferences.
+	}
+
+	return updatePreferences;
+}
+
+function parseVersion(rawVersion) {
 	if (!rawVersion || typeof rawVersion !== "string") {
 		return null;
 	}
 
 	const cleaned = rawVersion.trim().replace(/^v/i, "");
-	if (!cleaned) {
+	const match = cleaned.match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/);
+	if (!match) {
 		return null;
 	}
 
-	const parts = cleaned.split(".").map((part) => Number.parseInt(part, 10));
-	if (parts.some((part) => Number.isNaN(part) || part < 0)) {
-		return null;
-	}
-
-	return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0];
+	return {
+		major: Number.parseInt(match[1], 10),
+		minor: Number.parseInt(match[2], 10),
+		patch: Number.parseInt(match[3], 10),
+		prerelease: match[4] || null,
+	};
 }
 
-function compareSemver(a, b) {
-	for (let index = 0; index < 3; index += 1) {
-		const left = a[index] ?? 0;
-		const right = b[index] ?? 0;
-		if (left > right) {
+function comparePrerelease(left, right) {
+	if (!left && !right) {
+		return 0;
+	}
+	if (!left) {
+		return 1;
+	}
+	if (!right) {
+		return -1;
+	}
+
+	const leftParts = left.split(".");
+	const rightParts = right.split(".");
+	const limit = Math.max(leftParts.length, rightParts.length);
+
+	for (let index = 0; index < limit; index += 1) {
+		const leftPart = leftParts[index];
+		const rightPart = rightParts[index];
+		if (leftPart === undefined) {
+			return -1;
+		}
+		if (rightPart === undefined) {
 			return 1;
 		}
-		if (left < right) {
+
+		const leftNumber = /^\d+$/.test(leftPart) ? Number.parseInt(leftPart, 10) : null;
+		const rightNumber = /^\d+$/.test(rightPart) ? Number.parseInt(rightPart, 10) : null;
+
+		if (leftNumber !== null && rightNumber !== null) {
+			if (leftNumber > rightNumber) {
+				return 1;
+			}
+			if (leftNumber < rightNumber) {
+				return -1;
+			}
+			continue;
+		}
+
+		if (leftNumber !== null && rightNumber === null) {
+			return -1;
+		}
+		if (leftNumber === null && rightNumber !== null) {
+			return 1;
+		}
+
+		if (leftPart > rightPart) {
+			return 1;
+		}
+		if (leftPart < rightPart) {
 			return -1;
 		}
 	}
+
 	return 0;
+}
+
+function compareVersionStrings(leftVersion, rightVersion) {
+	const left = parseVersion(leftVersion);
+	const right = parseVersion(rightVersion);
+	if (!left || !right) {
+		return 0;
+	}
+
+	if (left.major !== right.major) {
+		return left.major > right.major ? 1 : -1;
+	}
+	if (left.minor !== right.minor) {
+		return left.minor > right.minor ? 1 : -1;
+	}
+	if (left.patch !== right.patch) {
+		return left.patch > right.patch ? 1 : -1;
+	}
+
+	return comparePrerelease(left.prerelease, right.prerelease);
 }
 
 function normalizeReleaseEntry(entry) {
@@ -115,28 +230,103 @@ function normalizeReleaseEntry(entry) {
 	};
 }
 
-async function checkLatestGitHubVersion() {
-	const localVersion = app.getVersion();
-	const localTuple = toSemverTuple(localVersion);
-	if (!localTuple) {
-		return;
+function pickInstallerAsset(release) {
+	const assets = Array.isArray(release?.assets) ? release.assets : [];
+	const names = assets
+		.map((asset) => ({
+			name: typeof asset?.name === "string" ? asset.name : "",
+			url: typeof asset?.browser_download_url === "string" ? asset.browser_download_url : "",
+		}))
+		.filter((asset) => asset.name && asset.url);
+
+	if (!names.length) {
+		return null;
 	}
 
+	if (isWindows) {
+		return names.find((asset) => /\.exe$/i.test(asset.name))?.url ?? null;
+	}
+	if (isMac) {
+		return names.find((asset) => /\.dmg$/i.test(asset.name))?.url ?? names.find((asset) => /\.zip$/i.test(asset.name))?.url ?? null;
+	}
+
+	return (
+		names.find((asset) => /\.AppImage$/i.test(asset.name))?.url ??
+		names.find((asset) => /\.deb$/i.test(asset.name))?.url ??
+		null
+	);
+}
+
+function normalizeReleaseList(releaseList, includePrerelease) {
+	if (!Array.isArray(releaseList)) {
+		return [];
+	}
+
+	return releaseList
+		.filter((release) => !release?.draft)
+		.filter((release) => includePrerelease || !release?.prerelease)
+		.map((release) => ({
+			...normalizeReleaseEntry(release),
+			installerUrl: pickInstallerAsset(release),
+		}))
+		.filter((release) => Boolean(release?.tag));
+}
+
+async function fetchReleases(includePrerelease) {
+	const releaseList = await fetchJson(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases?per_page=30`);
+	return normalizeReleaseList(releaseList, includePrerelease);
+}
+
+async function checkLatestGitHubVersion(includePrerelease) {
+	const localVersion = app.getVersion();
+
 	try {
-		const latestRelease = await fetchJson(
-			`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`,
-		);
-		const remoteTag = typeof latestRelease?.tag_name === "string" ? latestRelease.tag_name : "";
-		const remoteTuple = toSemverTuple(remoteTag);
-		if (!remoteTuple) {
+		const releases = await fetchReleases(includePrerelease);
+		const latestRelease = releases[0];
+		if (!latestRelease) {
 			return;
 		}
 
-		if (compareSemver(remoteTuple, localTuple) > 0) {
-			console.log(`[Atlas] New version available: ${remoteTag} (local: v${localVersion}).`);
+		if (compareVersionStrings(latestRelease.version, localVersion) > 0) {
+			console.log(`[Atlas] New version available: ${latestRelease.tag} (local: v${localVersion}).`);
 		}
 	} catch {
 		console.log("[Atlas] Version check skipped (offline or GitHub unavailable). Continuing startup.");
+	}
+}
+
+async function performInAppUpdate(includePrerelease) {
+	if (!app.isPackaged) {
+		return {
+			started: false,
+			error: "In-app install is only available in packaged builds.",
+		};
+	}
+
+	try {
+		autoUpdater.allowPrerelease = includePrerelease;
+		autoUpdater.allowDowngrade = includePrerelease;
+		autoUpdater.autoDownload = true;
+
+		const result = await autoUpdater.checkForUpdates();
+		if (!result?.downloadPromise) {
+			return {
+				started: false,
+				error: "No update download started.",
+			};
+		}
+
+		await result.downloadPromise;
+		setImmediate(() => {
+			autoUpdater.quitAndInstall(false, true);
+		});
+
+		return { started: true };
+	} catch (error) {
+		return {
+			started: false,
+			error: error instanceof Error ? error.message : "Unknown update error",
+		};
 	}
 }
 
@@ -788,32 +978,40 @@ function wireIpc() {
 		return app.getVersion();
 	});
 
-	ipcMain.handle("app:checkUpdates", async () => {
+	ipcMain.handle("app:getUpdatePreferences", () => {
+		return updatePreferences;
+	});
+
+	ipcMain.handle("app:setUpdatePreferences", (_event, nextPreferences) => {
+		return saveUpdatePreferences(nextPreferences);
+	});
+
+	ipcMain.handle("app:checkUpdates", async (_event, options = {}) => {
+		const includePrerelease =
+			typeof options?.includePrerelease === "boolean" ? options.includePrerelease : updatePreferences.includeBeta;
 		const localVersion = app.getVersion();
-		const localTuple = toSemverTuple(localVersion);
-		if (!localTuple) {
-			return { hasUpdate: false, local: localVersion, latest: null, error: "Invalid local version" };
-		}
 
 		try {
-			const latestRelease = await fetchJson(
-				`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`,
-			);
-			const remoteTag = typeof latestRelease?.tag_name === "string" ? latestRelease.tag_name : "";
-			const remoteTuple = toSemverTuple(remoteTag);
-			if (!remoteTuple) {
-				return { hasUpdate: false, local: localVersion, latest: null, error: "Invalid remote version" };
+			const releases = await fetchReleases(includePrerelease);
+			const latestRelease = releases[0] ?? null;
+			if (!latestRelease) {
+				return {
+					hasUpdate: false,
+					local: localVersion,
+					latest: null,
+					error: "No published releases available",
+				};
 			}
 
-			const isOutdated = compareSemver(remoteTuple, localTuple) > 0;
-			const cleanRemote = remoteTag.replace(/^v/i, "");
-			const downloadUrl = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest/download/Atlas-Setup-latest.exe`;
+			const isOutdated = compareVersionStrings(latestRelease.version, localVersion) > 0;
 
 			return {
 				hasUpdate: isOutdated,
 				local: localVersion,
-				latest: cleanRemote,
-				downloadUrl: isOutdated ? downloadUrl : undefined,
+				latest: latestRelease.version,
+				releaseUrl: latestRelease.url,
+				publishedAt: latestRelease.publishedAt,
+				downloadUrl: isOutdated ? latestRelease.installerUrl ?? undefined : undefined,
 			};
 		} catch (error) {
 			return {
@@ -825,19 +1023,12 @@ function wireIpc() {
 		}
 	});
 
-	ipcMain.handle("app:releaseHistory", async () => {
+	ipcMain.handle("app:releaseHistory", async (_event, options = {}) => {
+		const includePrerelease =
+			typeof options?.includePrerelease === "boolean" ? options.includePrerelease : updatePreferences.includeBeta;
+
 		try {
-			const releaseList = await fetchJson(
-				`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases?per_page=20`,
-			);
-
-			if (!Array.isArray(releaseList)) {
-				return { releases: [], error: "Unexpected release history response" };
-			}
-
-			const releases = releaseList
-				.map((entry) => normalizeReleaseEntry(entry))
-				.filter((entry) => Boolean(entry));
+			const releases = await fetchReleases(includePrerelease);
 
 			return { releases };
 		} catch (error) {
@@ -847,9 +1038,19 @@ function wireIpc() {
 			};
 		}
 	});
+
+	ipcMain.handle("app:downloadAndInstallUpdate", async (_event, options = {}) => {
+		const includePrerelease =
+			typeof options?.includePrerelease === "boolean" ? options.includePrerelease : updatePreferences.includeBeta;
+		return performInAppUpdate(includePrerelease);
+	});
 }
 
 app.whenReady().then(async () => {
+	loadUpdatePreferences();
+	autoUpdater.autoDownload = false;
+	autoUpdater.autoInstallOnAppQuit = true;
+
 	const iconPath = isDev
 		? path.join(__dirname, "..", "src", "assets", "logosmall.png")
 		: path.join(__dirname, "..", "dist", "assets", "logosmall.png");
@@ -881,7 +1082,9 @@ app.whenReady().then(async () => {
 
 	wireIpc();
 	openPrimaryWindowByMapState();
-	void checkLatestGitHubVersion();
+	if (updatePreferences.autoCheck) {
+		void checkLatestGitHubVersion(updatePreferences.includeBeta);
+	}
 
 	app.on("activate", () => {
 		if (BrowserWindow.getAllWindows().length === 0) {

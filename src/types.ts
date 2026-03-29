@@ -97,6 +97,8 @@ export type UpdateCheckResult = {
 	local: string;
 	latest: string | null;
 	downloadUrl?: string;
+	releaseUrl?: string;
+	publishedAt?: string | null;
 	error?: string;
 };
 
@@ -108,4 +110,15 @@ export type AppRelease = {
 	prerelease: boolean;
 	draft: boolean;
 	url: string;
+	installerUrl?: string | null;
+};
+
+export type UpdatePreferences = {
+	autoCheck: boolean;
+	includeBeta: boolean;
+};
+
+export type DownloadAndInstallResult = {
+	started: boolean;
+	error?: string;
 };

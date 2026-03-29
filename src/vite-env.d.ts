@@ -3,24 +3,29 @@
 import type {
 	ActivityBlock,
 	AppRelease,
+	DownloadAndInstallResult,
 	DashboardOverview,
 	MapItem,
 	NoteItem,
 	Session,
 	TaskItem,
 	TaskStatus,
+	UpdatePreferences,
 	UpdateCheckResult,
 } from "./types";
 
 declare global {
 	interface Window {
 		atlas: {
-			checkForUpdates: () => Promise<UpdateCheckResult>;
+			checkForUpdates: (options?: { includePrerelease?: boolean }) => Promise<UpdateCheckResult>;
 			getAppVersion: () => Promise<string>;
-			listReleaseHistory: () => Promise<{
+			listReleaseHistory: (options?: { includePrerelease?: boolean }) => Promise<{
 				releases: AppRelease[];
 				error?: string;
 			}>;
+			getUpdatePreferences: () => Promise<UpdatePreferences>;
+			setUpdatePreferences: (preferences: UpdatePreferences) => Promise<UpdatePreferences>;
+			downloadAndInstallUpdate: (options?: { includePrerelease?: boolean }) => Promise<DownloadAndInstallResult>;
 			listMaps: () => Promise<MapItem[]>;
 			createMap: (name: string) => Promise<MapItem>;
 			renameMap: (mapId: string, name: string) => Promise<MapItem>;

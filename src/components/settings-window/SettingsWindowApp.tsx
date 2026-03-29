@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { MinusIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { ArrowPathIcon, CommandLineIcon, PaintBrushIcon, WrenchScrewdriverIcon } from "@heroicons/react/24/solid";
@@ -54,9 +54,11 @@ export function SettingsWindowApp() {
 	const [vimMode, setVimMode] = useState(() => readStorage("atlas.settings.vimMode", false));
 	const [commandPalette, setCommandPalette] = useState(() => readStorage("atlas.settings.commandPalette", true));
 	const [autoUpdates, setAutoUpdates] = useState(() => readStorage("atlas.autoUpdates", true));
+	const [includeBetaUpdates, setIncludeBetaUpdates] = useState(() => readStorage("atlas.includeBetaUpdates", false));
 	const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
 	const [releaseHistory, setReleaseHistory] = useState<AppRelease[]>([]);
 	const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
+	const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
 	const [updatesError, setUpdatesError] = useState<string | null>(null);
 
 	const tabLabel = useMemo(() => settingsTabs.find((tab) => tab.id === activeTab)?.label ?? "General", [activeTab]);
@@ -102,18 +104,34 @@ export function SettingsWindowApp() {
 		localStorage.setItem("atlas.autoUpdates", JSON.stringify(autoUpdates));
 	}, [autoUpdates]);
 
-	const loadUpdatesData = async (withVersionScan = true) => {
+	useEffect(() => {
+		localStorage.setItem("atlas.includeBetaUpdates", JSON.stringify(includeBetaUpdates));
+	}, [includeBetaUpdates]);
+
+	useEffect(() => {
+		window.atlas
+			.getUpdatePreferences()
+			.then((preferences) => {
+				setAutoUpdates(preferences.autoCheck);
+				setIncludeBetaUpdates(preferences.includeBeta);
+			})
+			.catch(() => {
+				// LocalStorage fallbacks are already set for offline/dev resilience.
+			});
+	}, []);
+
+	const loadUpdatesData = useCallback(async (withVersionScan = true) => {
 		setIsCheckingUpdates(true);
 		setUpdatesError(null);
 
 		try {
 			const [version, historyResponse] = await Promise.all([
 				window.atlas.getAppVersion(),
-				window.atlas.listReleaseHistory(),
+				window.atlas.listReleaseHistory({ includePrerelease: includeBetaUpdates }),
 			]);
 
 			const latestCheck = withVersionScan
-				? await window.atlas.checkForUpdates()
+				? await window.atlas.checkForUpdates({ includePrerelease: includeBetaUpdates })
 				: {
 						local: version,
 						hasUpdate: false,
@@ -131,7 +149,7 @@ export function SettingsWindowApp() {
 		} finally {
 			setIsCheckingUpdates(false);
 		}
-	};
+	}, [includeBetaUpdates]);
 
 	useEffect(() => {
 		if (activeTab !== "updates") {
@@ -141,14 +159,53 @@ export function SettingsWindowApp() {
 		if (!updateInfo || releaseHistory.length === 0) {
 			void loadUpdatesData(autoUpdates);
 		}
-	}, [activeTab, autoUpdates, releaseHistory.length, updateInfo]);
+	}, [activeTab, autoUpdates, includeBetaUpdates, loadUpdatesData, releaseHistory.length, updateInfo]);
+
+	useEffect(() => {
+		if (activeTab === "updates") {
+			void loadUpdatesData(true);
+		}
+	}, [activeTab, includeBetaUpdates, loadUpdatesData]);
+
+	const persistUpdatePreferences = async (nextAutoCheck: boolean, nextIncludeBeta: boolean) => {
+		try {
+			await window.atlas.setUpdatePreferences({ autoCheck: nextAutoCheck, includeBeta: nextIncludeBeta });
+		} catch {
+			// Keep local values active even if persistence fails.
+		}
+	};
+
+	const handleToggleAutoUpdates = (nextValue: boolean) => {
+		setAutoUpdates(nextValue);
+		void persistUpdatePreferences(nextValue, includeBetaUpdates);
+	};
+
+	const handleToggleBetaUpdates = (nextValue: boolean) => {
+		setIncludeBetaUpdates(nextValue);
+		void persistUpdatePreferences(autoUpdates, nextValue);
+	};
 
 	const handleDownloadUpdate = () => {
-		if (!updateInfo?.downloadUrl) {
-			return;
-		}
+		void (async () => {
+			setIsInstallingUpdate(true);
+			setUpdatesError(null);
 
-		void window.atlas.launchApp(`start "" "${updateInfo.downloadUrl}"`);
+			try {
+				const result = await window.atlas.downloadAndInstallUpdate({ includePrerelease: includeBetaUpdates });
+				if (!result.started) {
+					if (updateInfo?.downloadUrl) {
+						void window.atlas.launchApp(`start "" "${updateInfo.downloadUrl}"`);
+					}
+					if (result.error) {
+						setUpdatesError(result.error);
+					}
+				}
+			} catch {
+				setUpdatesError("Failed to start the update installer.");
+			} finally {
+				setIsInstallingUpdate(false);
+			}
+		})();
 	};
 
 	const handleScanUpdates = () => {
@@ -359,9 +416,16 @@ export function SettingsWindowApp() {
 									<div className="grid gap-3">
 										<Toggle
 											label="Automatic update checks"
-											description="Scan automatically when opening this Updates tab"
+											description="Check for updates automatically when Atlas starts"
 											checked={autoUpdates}
-											onChange={setAutoUpdates}
+											onChange={handleToggleAutoUpdates}
+										/>
+
+										<Toggle
+											label="Beta updates"
+											description="Allow pre-release and beta versions"
+											checked={includeBetaUpdates}
+											onChange={handleToggleBetaUpdates}
 										/>
 
 										<div className="atlas-settings-card-stack">
@@ -393,9 +457,10 @@ export function SettingsWindowApp() {
 												<button
 													type="button"
 													onClick={handleDownloadUpdate}
+													disabled={isInstallingUpdate}
 													className="action-btn mt-3"
 												>
-													Download installer
+													{isInstallingUpdate ? "Preparing install..." : "Install update"}
 												</button>
 											)}
 										</div>

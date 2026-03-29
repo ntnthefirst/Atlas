@@ -1,10 +1,29 @@
-name: Main CI + Release
+name: Main CI + Multi-Platform Release
 
 on:
     push:
         branches:
             - main
     workflow_dispatch:
+        inputs:
+            release_channel:
+                description: "Release channel"
+                required: true
+                default: stable
+                type: choice
+                options:
+                    - stable
+                    - beta
+            bump:
+                description: "Version bump strategy"
+                required: true
+                default: auto
+                type: choice
+                options:
+                    - auto
+                    - patch
+                    - minor
+                    - major
 
 concurrency:
     group: main-ci-release-${{ github.ref }}
@@ -35,12 +54,13 @@ jobs:
               run: npm run build --if-present
 
     release:
-        name: Version, Release and Cleanup
+        name: Version and Release
         runs-on: ubuntu-latest
         needs: quality
         outputs:
             created: ${{ steps.version.outputs.created }}
             version: ${{ steps.version.outputs.version }}
+            prerelease: ${{ steps.version.outputs.prerelease }}
         permissions:
             contents: write
 
@@ -50,43 +70,49 @@ jobs:
               with:
                   fetch-depth: 0
 
-            - name: Determine next semantic version tag
+            - name: Determine next release version
               id: version
               shell: bash
               run: |
                   set -euo pipefail
 
-                  if git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' >/dev/null; then
+                  channel="stable"
+                  if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+                    channel="${{ github.event.inputs.release_channel }}"
+                  fi
+
+                  bump_input="auto"
+                  if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+                    bump_input="${{ github.event.inputs.bump }}"
+                  fi
+
+                  if git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$' >/dev/null; then
                     echo "created=false" >> "$GITHUB_OUTPUT"
                     echo "version=" >> "$GITHUB_OUTPUT"
+                    echo "prerelease=false" >> "$GITHUB_OUTPUT"
                     exit 0
                   fi
 
-                  latest_tag=$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)
-
-                  if [ -z "$latest_tag" ]; then
-                    next_version="v0.1.0"
-                    echo "created=true" >> "$GITHUB_OUTPUT"
-                    echo "version=$next_version" >> "$GITHUB_OUTPUT"
-                    exit 0
+                  latest_stable=$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)
+                  if [ -z "$latest_stable" ]; then
+                    latest_stable="v0.0.0"
                   fi
 
-                  range="$latest_tag..HEAD"
-                  commits=$(git log --format=%s%n%b $range)
+                  range="$latest_stable..HEAD"
+                  commits=$(git log --format=%s%n%b $range || true)
 
-                  bump="patch"
-                  if echo "$commits" | grep -Eq 'BREAKING CHANGE|^[a-zA-Z]+(\([^)]+\))?!:'; then
-                    bump="major"
-                  elif echo "$commits" | grep -Eq '^feat(\([^)]+\))?:'; then
-                    bump="minor"
+                  bump="$bump_input"
+                  if [ "$bump" = "auto" ]; then
+                    bump="patch"
+                    if echo "$commits" | grep -Eq 'BREAKING CHANGE|^[a-zA-Z]+(\([^)]+\))?!:'; then
+                      bump="major"
+                    elif echo "$commits" | grep -Eq '^feat(\([^)]+\))?:'; then
+                      bump="minor"
+                    fi
                   fi
 
-                  base=${latest_tag#v}
+                  base=${latest_stable#v}
                   IFS='.' read -r major minor patch <<< "$base"
-
-                  major=${major:-0}
-                  minor=${minor:-0}
-                  patch=${patch:-0}
 
                   case "$bump" in
                     major)
@@ -103,9 +129,25 @@ jobs:
                       ;;
                   esac
 
-                  next_version="v${major}.${minor}.${patch}"
+                  base_version="${major}.${minor}.${patch}"
+
+                  if [ "$channel" = "beta" ]; then
+                    latest_beta=$(git tag --list "v${base_version}-beta.*" --sort=-v:refname | grep -E "^v${base_version}-beta\.[0-9]+$" | head -n1 || true)
+                    beta_number=1
+                    if [ -n "$latest_beta" ]; then
+                      beta_number=$(echo "$latest_beta" | sed -E 's/.*-beta\.([0-9]+)$/\1/')
+                      beta_number=$((beta_number + 1))
+                    fi
+                    next_version="v${base_version}-beta.${beta_number}"
+                    is_prerelease="true"
+                  else
+                    next_version="v${base_version}"
+                    is_prerelease="false"
+                  fi
+
                   echo "created=true" >> "$GITHUB_OUTPUT"
                   echo "version=$next_version" >> "$GITHUB_OUTPUT"
+                  echo "prerelease=$is_prerelease" >> "$GITHUB_OUTPUT"
 
             - name: Create and push git tag
               if: steps.version.outputs.created == 'true'
@@ -122,54 +164,29 @@ jobs:
               uses: softprops/action-gh-release@v2
               with:
                   tag_name: ${{ steps.version.outputs.version }}
+                  prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
                   generate_release_notes: true
 
-            - name: Cleanup old major releases and tags
-              if: steps.version.outputs.created == 'true'
-              env:
-                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-                  REPO: ${{ github.repository }}
-                  CURRENT_VERSION: ${{ steps.version.outputs.version }}
-              shell: bash
-              run: |
-                  set -euo pipefail
-
-                  current_major=$(echo "$CURRENT_VERSION" | sed -E 's/^v([0-9]+)\..*/\1/')
-
-                  releases=$(gh api "repos/$REPO/releases?per_page=100")
-                  echo "$releases" | jq -c '.[] | {id: .id, tag: .tag_name}' | while read -r rel; do
-                    tag=$(echo "$rel" | jq -r '.tag')
-                    release_id=$(echo "$rel" | jq -r '.id')
-
-                    if [[ "$tag" =~ ^v([0-9]+)\.[0-9]+\.[0-9]+$ ]]; then
-                      tag_major="${BASH_REMATCH[1]}"
-                      if [ "$tag_major" -lt "$current_major" ]; then
-                        echo "Deleting release and tag for old major: $tag"
-                        gh api -X DELETE "repos/$REPO/releases/$release_id" || true
-                        gh api -X DELETE "repos/$REPO/git/refs/tags/$tag" || true
-                      fi
-                    fi
-                  done
-
-                  tags=$(gh api "repos/$REPO/git/matching-refs/tags/v" | jq -r '.[].ref' | sed 's#refs/tags/##')
-                  while read -r tag; do
-                    [ -z "$tag" ] && continue
-                    if [[ "$tag" =~ ^v([0-9]+)\.[0-9]+\.[0-9]+$ ]]; then
-                      tag_major="${BASH_REMATCH[1]}"
-                      if [ "$tag_major" -lt "$current_major" ]; then
-                        echo "Deleting leftover old-major tag: $tag"
-                        gh api -X DELETE "repos/$REPO/git/refs/tags/$tag" || true
-                      fi
-                    fi
-                  done <<< "$tags"
-
-    windows-installer:
-        name: Build and Upload Windows Installer
-        runs-on: windows-latest
+    installers:
+        name: Build and Publish Installers (${{ matrix.name }})
+        runs-on: ${{ matrix.os }}
         needs: [quality, release]
         if: needs.release.outputs.created == 'true'
         permissions:
             contents: write
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - name: Windows
+                      os: windows-latest
+                      script: npm run dist:ci:win
+                    - name: macOS
+                      os: macos-latest
+                      script: npm run dist:ci:mac
+                    - name: Linux
+                      os: ubuntu-latest
+                      script: npm run dist:ci:linux
 
         steps:
             - name: Checkout
@@ -184,24 +201,8 @@ jobs:
             - name: Install dependencies
               run: npm ci
 
-            - name: Build Windows installer
-              run: npm run dist
-
-            - name: Create stable latest installer filename
-              shell: pwsh
-              run: |
-                  $installer = Get-ChildItem -Path release -Filter "*.exe" | Where-Object { $_.Name -like "*Setup*" } | Select-Object -First 1
-                  if (-not $installer) {
-                      Write-Error "No installer .exe found in release folder."
-                      exit 1
-                  }
-
-                  Copy-Item -Path $installer.FullName -Destination (Join-Path $installer.DirectoryName "Atlas-Setup-latest.exe") -Force
-
-            - name: Upload installer files to release
-              uses: softprops/action-gh-release@v2
-              with:
-                  tag_name: ${{ needs.release.outputs.version }}
-                  files: |
-                      release/*.exe
-                      release/*.blockmap
+            - name: Build and publish platform installer artifacts
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  CSC_IDENTITY_AUTO_DISCOVERY: false
+              run: ${{ matrix.script }}
