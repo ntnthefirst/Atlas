@@ -3,6 +3,7 @@
 Atlas is a desktop app for activity tracking and project-focused time mapping.
 
 Core features:
+
 - Session-based tracking
 - Automatic active-app logging
 - Dashboard and logbook insights
@@ -13,19 +14,23 @@ Core features:
 ## Installers (All Platforms)
 
 Latest release page:
+
 - https://github.com/ntnthefirst/Atlas/releases/latest
 
 Direct latest asset links:
+
 - Windows installer: https://github.com/ntnthefirst/Atlas/releases/latest/download/Atlas-Setup-Windows-x64.exe
 - macOS DMG: https://github.com/ntnthefirst/Atlas/releases/latest/download/Atlas-Setup-macOS-arm64.dmg
 
 Notes:
+
 - Each GitHub release keeps its own installer assets (stable and beta/prerelease).
 - GitHub may still show automatic source archives (`Source code (zip/tar.gz)`); those are GitHub-provided defaults.
 
 ## In-App Updates
 
 The Settings `Updates` tab supports:
+
 - Current installed version + publish timestamp
 - Manual `Scan for updates`
 - Automatic check preference
@@ -62,6 +67,7 @@ npm run dev
 ### Main Release Workflow
 
 `/.github/workflows/main-ci-release.yml`:
+
 - Runs lint/build gate
 - Computes semantic version automatically
 - Supports `stable` and `beta` channels
@@ -72,13 +78,18 @@ npm run dev
 ### PR Guard Workflow
 
 `/.github/workflows/pr-release-guard.yml`:
+
 - Runs on PRs to `main`
-- Requires exactly one release bump label:
-  - `release:patch`
-  - `release:minor`
-  - `release:major`
-  - `release:none`
-- Optional `release:beta` label for beta intent visibility
+- Enforces release labels with a beta-state lock:
+    - Normal flow (latest release is stable): exactly one bump label is required
+        - `release:patch`
+        - `release:minor`
+        - `release:major`
+    - Optional `release:beta` starts a beta track for that bumped version
+    - Beta-locked flow (latest release is beta): bump labels are blocked
+        - `release:beta` continues the same beta line (`...-beta.N+1`)
+        - `release:finalize-beta` publishes the stable tag for the same base version
+    - `release:none` is not allowed
 
 ## Project Structure
 
