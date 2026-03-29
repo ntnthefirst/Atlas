@@ -63,6 +63,7 @@ jobs:
             prerelease: ${{ steps.version.outputs.prerelease }}
         permissions:
             contents: write
+            pull-requests: read
 
         steps:
             - name: Checkout full history
@@ -70,20 +71,75 @@ jobs:
               with:
                   fetch-depth: 0
 
+            - name: Resolve release strategy
+              id: strategy
+              uses: actions/github-script@v7
+              with:
+                  script: |
+                      const channelInput = context.eventName === "workflow_dispatch"
+                        ? "${{ github.event.inputs.release_channel }}"
+                        : "stable";
+                      const bumpInput = context.eventName === "workflow_dispatch"
+                        ? "${{ github.event.inputs.bump }}"
+                        : "auto";
+
+                      let channel = channelInput;
+                      let bump = bumpInput;
+                      let skipRelease = false;
+
+                      if (context.eventName === "push" && context.ref === "refs/heads/main") {
+                        const { owner, repo } = context.repo;
+                        const response = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                          owner,
+                          repo,
+                          commit_sha: context.sha,
+                        });
+
+                        const prs = response.data || [];
+                        const mergedPr = prs.find((pr) => pr.merged_at && pr.base?.ref === "main") || prs[0];
+
+                        if (mergedPr) {
+                          const labels = (mergedPr.labels || []).map((label) => label.name);
+                          const bumpLabels = ["release:patch", "release:minor", "release:major", "release:none"];
+                          const selected = labels.filter((label) => bumpLabels.includes(label));
+
+                          if (selected.length === 1) {
+                            if (selected[0] === "release:none") {
+                              skipRelease = true;
+                            } else {
+                              bump = selected[0].replace("release:", "");
+                            }
+                          }
+
+                          if (labels.includes("release:beta")) {
+                            channel = "beta";
+                          }
+
+                          core.info(`Resolved from PR #${mergedPr.number}: bump=${selected[0] || "auto"}, channel=${channel}, skip=${skipRelease}`);
+                        } else {
+                          core.info("No associated PR found for this commit; falling back to existing auto strategy.");
+                        }
+                      }
+
+                      core.setOutput("channel", channel);
+                      core.setOutput("bump", bump);
+                      core.setOutput("skip", String(skipRelease));
+
             - name: Determine next release version
               id: version
               shell: bash
               run: |
                   set -euo pipefail
 
-                  channel="stable"
-                  if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-                    channel="${{ github.event.inputs.release_channel }}"
-                  fi
+                  channel="${{ steps.strategy.outputs.channel }}"
+                  bump_input="${{ steps.strategy.outputs.bump }}"
+                  skip_release="${{ steps.strategy.outputs.skip }}"
 
-                  bump_input="auto"
-                  if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-                    bump_input="${{ github.event.inputs.bump }}"
+                  if [ "$skip_release" = "true" ]; then
+                    echo "created=false" >> "$GITHUB_OUTPUT"
+                    echo "version=" >> "$GITHUB_OUTPUT"
+                    echo "prerelease=false" >> "$GITHUB_OUTPUT"
+                    exit 0
                   fi
 
                   if git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$' >/dev/null; then
