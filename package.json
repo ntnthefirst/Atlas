@@ -13,6 +13,9 @@
 		"start": "electron .",
 		"build": "tsc -b && vite build",
 		"dist": "npm run build && electron-builder --win --publish never",
+		"dist:ci:win": "npm run build && electron-builder --win --publish always",
+		"dist:ci:mac": "npm run build && electron-builder --mac --publish always",
+		"dist:ci:linux": "npm run build && electron-builder --linux --publish always",
 		"dist:portable": "npm run build && electron-builder --win portable --publish never",
 		"lint": "eslint .",
 		"preview": "vite preview"
@@ -30,7 +33,15 @@
 			"node_modules/**/*",
 			"package.json"
 		],
+		"publish": [
+			{
+				"provider": "github",
+				"owner": "ntnthefirst",
+				"repo": "Atlas"
+			}
+		],
 		"win": {
+			"artifactName": "Atlas-Setup-Windows-${arch}.${ext}",
 			"icon": "public/icon.ico",
 			"target": [
 				{
@@ -40,6 +51,21 @@
 					]
 				}
 			]
+		},
+		"mac": {
+			"artifactName": "Atlas-Setup-macOS-${arch}.${ext}",
+			"target": [
+				"dmg",
+				"zip"
+			]
+		},
+		"linux": {
+			"artifactName": "Atlas-Setup-Linux-${arch}.${ext}",
+			"target": [
+				"AppImage",
+				"deb"
+			],
+			"category": "Utility"
 		},
 		"nsis": {
 			"oneClick": false,
@@ -51,6 +77,7 @@
 	},
 	"dependencies": {
 		"@heroicons/react": "^2.2.0",
+		"electron-updater": "^6.8.3",
 		"framer-motion": "^12.38.0",
 		"react": "^19.2.4",
 		"react-dom": "^19.2.4",

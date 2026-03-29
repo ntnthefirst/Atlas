@@ -2,109 +2,94 @@
 
 Atlas is a desktop app for activity tracking and project-focused time mapping.
 
-It combines:
-
-- Session-based time tracking
+Core features:
+- Session-based tracking
 - Automatic active-app logging
 - Dashboard and logbook insights
 - Task boards per map
-- Visual notebook (text, post-its, media)
+- Visual notebook (text, media, post-its)
 - Mini always-on-top session controls
 
-## Tech Stack
+## Installers (All Platforms)
 
-- Electron
-- React 19 + TypeScript
-- Vite
-- Tailwind CSS
-- Framer Motion
-- sql.js (SQLite in WASM)
+Latest release page:
+- https://github.com/ntnthefirst/Atlas/releases/latest
 
-## Getting Started
+Direct latest asset links:
+- Windows installer: https://github.com/ntnthefirst/Atlas/releases/latest/download/Atlas-Setup-Windows-x64.exe
+- macOS DMG: https://github.com/ntnthefirst/Atlas/releases/latest/download/Atlas-Setup-macOS-arm64.dmg
+- Linux AppImage: https://github.com/ntnthefirst/Atlas/releases/latest/download/Atlas-Setup-Linux-x86_64.AppImage
 
-### 1. Install dependencies
+Notes:
+- Each GitHub release keeps its own installer assets (stable and beta/prerelease).
+- GitHub may still show automatic source archives (`Source code (zip/tar.gz)`); those are GitHub-provided defaults.
+
+## In-App Updates
+
+The Settings `Updates` tab supports:
+- Current installed version + publish timestamp
+- Manual `Scan for updates`
+- Automatic check preference
+- Beta/pre-release opt-in
+- In-app update installation (packaged builds), with browser-download fallback
+
+## Release Channels
+
+- Stable: semantic tags like `v1.2.3`
+- Beta/prerelease: tags like `v1.2.4-beta.1`
+
+Users who enable beta updates in Settings can discover and install prereleases.
+
+## Development
+
+### Quick Start
 
 ```bash
 npm install
-```
-
-### 2. Run in development mode
-
-```bash
 npm run dev
 ```
 
-This starts both:
+### Scripts
 
-- Vite renderer dev server
-- Electron app shell
+- `npm run dev`: Vite + Electron
+- `npm run build`: TypeScript + Vite production build
+- `npm run dist`: local Windows build (no publish)
+- `npm run dist:ci:win`: CI publish Windows installers
+- `npm run dist:ci:mac`: CI publish macOS installers
+- `npm run dist:ci:linux`: CI publish Linux installers
+- `npm run lint`: ESLint
 
-### 3. Start Electron without dev server workflow
+## CI/CD Overview
 
-```bash
-npm run start
-```
+### Main Release Workflow
 
-## Scripts
+`/.github/workflows/main-ci-release.yml`:
+- Runs lint/build gate
+- Computes semantic version automatically
+- Supports `stable` and `beta` channels
+- Creates release tags and GitHub Releases
+- Builds and publishes installers for Windows, macOS, and Linux
+- Keeps all historical releases/tags (no cleanup deletion)
 
-- `npm run dev` - Run renderer + Electron together
-- `npm run dev:renderer` - Run only Vite
-- `npm run dev:electron` - Run only Electron (after renderer is available)
-- `npm run build` - TypeScript build + Vite production build
-- `npm run dist` - Build Windows installer using electron-builder
-- `npm run dist:portable` - Build portable Windows package
-- `npm run lint` - Run ESLint
-- `npm run preview` - Preview Vite production build
+### PR Guard Workflow
 
-## Automatic Versioning and Releases
-
-This repository uses a GitHub Actions workflow on every push to `main`:
-
-- Lint and build are executed first.
-- A semantic version tag is generated automatically.
-- A GitHub Release is created automatically.
-- Old releases/tags from older major versions are removed automatically.
-
-Version bump rules are commit-message based:
-
-- `feat:` -> minor bump
-- `fix:` and other commits -> patch bump
-- `BREAKING CHANGE` or `type(scope)!:` -> major bump
-
-Example:
-
-- New `v2.x.x` release will trigger cleanup of all `v1.x.x` releases/tags.
-
-## Install in 1-2 Clicks (GitHub)
-
-- Latest release page:
-    - https://github.com/ntnthefirst/Atlas/releases/latest
-- Direct Windows installer download:
-    - https://github.com/ntnthefirst/Atlas/releases/latest/download/Atlas-Setup-latest.exe
-
-How it works:
-
-- On every push to `main`, GitHub Actions builds a Windows installer.
-- The installer is attached to the new release.
-- A stable file name `Atlas-Setup-latest.exe` is uploaded so users always have a single direct link.
+`/.github/workflows/pr-release-guard.yml`:
+- Runs on PRs to `main`
+- Requires exactly one release bump label:
+  - `release:patch`
+  - `release:minor`
+  - `release:major`
+  - `release:none`
+- Optional `release:beta` label for beta intent visibility
 
 ## Project Structure
 
-- `src/` - React UI and application state
-- `src/components/` - Layout, views, and UI components
-- `electron/` - Electron main/preload, DB layer, and activity tracker
-- `public/` - Static assets and build resources
-- `release/` - Electron builder outputs (ignored in git)
+- `src/`: React UI + state
+- `electron/`: main/preload, DB layer, activity tracker
+- `public/`: static assets and build resources
+- `release/`: local build outputs
 
-## Local Data
+## Additional Documentation
 
-Atlas stores runtime data locally:
-
-- SQLite DB via `sql.js` in Electron userData directory
-- UI preferences in browser localStorage
-
-## Notes
-
-- Activity foreground tracking currently targets Windows behavior.
-- If you want full internals and feature details, see:
-    - `ATLAS_FUNCTIONELE_DOCUMENTATIE.md`
+- Product/functional notes: `ATLAS_FUNCTIONELE_DOCUMENTATIE.md`
+- Developer release and update internals: `DEV-DOCS.md`

@@ -1,4 +1,5 @@
 import {
+	ChartBarIcon,
 	ClipboardDocumentListIcon,
 	ClockIcon,
 	Cog6ToothIcon,
@@ -6,6 +7,7 @@ import {
 	Squares2X2Icon,
 } from "@heroicons/react/24/outline";
 import {
+	ChartBarIcon as ChartBarIconSolid,
 	ClipboardDocumentListIcon as ClipboardDocumentListIconSolid,
 	ClockIcon as ClockIconSolid,
 	Cog6ToothIcon as Cog6ToothIconSolid,
@@ -51,6 +53,7 @@ export const viewItems: AtlasNavItem[] = [
 		outlineIcon: ClipboardDocumentListIcon,
 		solidIcon: ClipboardDocumentListIconSolid,
 	},
+	{ id: "analysis", label: "Tijd Analyse", outlineIcon: ChartBarIcon, solidIcon: ChartBarIconSolid },
 	{ id: "notes", label: "Notes", outlineIcon: DocumentTextIcon, solidIcon: DocumentTextIconSolid },
 	{ id: "settings", label: "Settings", outlineIcon: Cog6ToothIcon, solidIcon: Cog6ToothIconSolid },
 ];

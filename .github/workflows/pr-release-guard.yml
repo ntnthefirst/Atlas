@@ -1,0 +1,42 @@
+name: PR Release Guard
+
+on:
+    pull_request:
+        branches:
+            - main
+        types:
+            - opened
+            - reopened
+            - synchronize
+            - labeled
+            - unlabeled
+            - edited
+
+jobs:
+    release-policy:
+        name: Enforce Release Labels
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Validate release labels
+              uses: actions/github-script@v7
+              with:
+                  script: |
+                      const labels = (context.payload.pull_request.labels || []).map((label) => label.name);
+                      const bumpLabels = ["release:patch", "release:minor", "release:major", "release:none"];
+                      const betaLabel = "release:beta";
+
+                      const selectedBumps = labels.filter((label) => bumpLabels.includes(label));
+
+                      if (selectedBumps.length !== 1) {
+                        core.setFailed(`A PR to main must have exactly one bump label: ${bumpLabels.join(", ")}. Found: ${selectedBumps.join(", ") || "none"}.`);
+                        return;
+                      }
+
+                      const summary = [
+                        `Selected bump: ${selectedBumps[0]}`,
+                        `Beta channel enabled: ${labels.includes(betaLabel) ? "yes" : "no"}`,
+                        "When merged, push-triggered release remains automatic. Use workflow_dispatch for manual beta cuts when needed.",
+                      ];
+
+                      core.summary.addHeading("Release Guard").addList(summary).write();

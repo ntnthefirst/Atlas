@@ -35,7 +35,11 @@ contextBridge.exposeInMainWorld("atlas", {
 	getPlatform: () => ipcRenderer.invoke("app:platform"),
 	setNativeTheme: (theme) => ipcRenderer.invoke("window:setTheme", theme),
 	getAppVersion: () => ipcRenderer.invoke("app:version"),
-	checkForUpdates: () => ipcRenderer.invoke("app:checkUpdates"),
+	checkForUpdates: (options) => ipcRenderer.invoke("app:checkUpdates", options),
+	listReleaseHistory: (options) => ipcRenderer.invoke("app:releaseHistory", options),
+	getUpdatePreferences: () => ipcRenderer.invoke("app:getUpdatePreferences"),
+	setUpdatePreferences: (preferences) => ipcRenderer.invoke("app:setUpdatePreferences", preferences),
+	downloadAndInstallUpdate: (options) => ipcRenderer.invoke("app:downloadAndInstallUpdate", options),
 
 	windowMinimize: () => ipcRenderer.invoke("window:minimize"),
 	openMiniWindow: () => ipcRenderer.invoke("window:openMini"),
