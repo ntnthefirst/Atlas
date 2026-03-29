@@ -93,6 +93,8 @@ export function AnalysisView({
 	const [selectedStartDay, setSelectedStartDay] = useState<string | null>(null);
 	const [selectedEndDay, setSelectedEndDay] = useState<string | null>(null);
 	const [activePreset, setActivePreset] = useState<PresetSelection | null>(null);
+	const [showAllApps, setShowAllApps] = useState(false);
+	const [isAppsSortAscending, setIsAppsSortAscending] = useState(false);
 	const [displayedMonth, setDisplayedMonth] = useState(() => toMonthStart(new Date(now)));
 	const [isCalendarCollapsed, setIsCalendarCollapsed] = useState(true);
 	const [monthDropdownOpen, setMonthDropdownOpen] = useState(false);
@@ -263,7 +265,7 @@ export function AnalysisView({
 		};
 	}, [filteredSessionStats]);
 
-	const topApps = useMemo(() => {
+	const appRows = useMemo(() => {
 		const appTotals = new Map<string, number>();
 		for (const block of filteredBlocks) {
 			const appName = cleanAppLabel(block.app_name);
@@ -271,16 +273,26 @@ export function AnalysisView({
 			appTotals.set(appName, (appTotals.get(appName) ?? 0) + durationMs);
 		}
 
-		const rows = Array.from(appTotals.entries())
-			.map(([appName, durationMs]) => ({ appName, durationMs }))
-			.sort((a, b) => b.durationMs - a.durationMs)
-			.slice(0, 6);
-
-		return {
-			rows,
-			topDuration: rows[0]?.durationMs ?? 1,
-		};
+		return Array.from(appTotals.entries()).map(([appName, durationMs]) => ({ appName, durationMs }));
 	}, [filteredBlocks, now]);
+
+	const appRowsSorted = useMemo(
+		() =>
+			appRows
+				.slice()
+				.sort((a, b) => (isAppsSortAscending ? a.durationMs - b.durationMs : b.durationMs - a.durationMs)),
+		[appRows, isAppsSortAscending],
+	);
+
+	const visibleAppRows = useMemo(
+		() => (showAllApps ? appRowsSorted : appRowsSorted.slice(0, 6)),
+		[showAllApps, appRowsSorted],
+	);
+
+	const totalSelectedAppsDuration = useMemo(
+		() => appRows.reduce((sum, entry) => sum + entry.durationMs, 0),
+		[appRows],
+	);
 
 	const calendarData = useMemo(() => {
 		const totalsByDay = new Map<string, number>();
@@ -705,11 +717,27 @@ export function AnalysisView({
 
 				<section className="atlas-card grid gap-3">
 					<header className="card-head">
-						<h3 className="text-subtitle-small">Top apps</h3>
-						<span className="text-data-small">Gebaseerd op je huidige kalenderselectie</span>
+						<button
+							type="button"
+							onClick={() => setShowAllApps((current) => !current)}
+							className="text-subtitle-small transition hover:text-primary"
+						>
+							{showAllApps ? "Alle apps" : "Top apps"}
+						</button>
+						{showAllApps ? (
+							<button
+								type="button"
+								onClick={() => setIsAppsSortAscending((current) => !current)}
+								className="rounded-full border border-neutral-200 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-neutral-500 transition hover:border-neutral-300 hover:text-neutral-700 dark:border-neutral-600 dark:text-neutral-300 dark:hover:text-neutral-100"
+							>
+								{isAppsSortAscending ? "Ascending" : "Descending"}
+							</button>
+						) : (
+							<span className="text-data-small">Gebaseerd op je huidige kalenderselectie</span>
+						)}
 					</header>
 					<div className="stack-list">
-						{topApps.rows.map((entry) => (
+						{visibleAppRows.map((entry) => (
 							<div
 								key={entry.appName}
 								className="grid gap-1 rounded-xl border border-neutral-200 bg-neutral-50 p-2.5 dark:border-neutral-600 dark:bg-neutral-700"
@@ -720,12 +748,12 @@ export function AnalysisView({
 								</div>
 								<progress
 									className="h-1.5 w-full overflow-hidden rounded-full [&::-moz-progress-bar]:bg-neutral-700 [&::-webkit-progress-bar]:bg-neutral-200 [&::-webkit-progress-value]:bg-neutral-700 dark:[&::-webkit-progress-bar]:bg-neutral-600 dark:[&::-webkit-progress-value]:bg-neutral-100"
-									max={topApps.topDuration || 1}
+									max={totalSelectedAppsDuration || 1}
 									value={Math.max(0, entry.durationMs)}
 								/>
 							</div>
 						))}
-						{!topApps.rows.length ? <p className="empty">Nog geen app-data voor deze selectie.</p> : null}
+						{!visibleAppRows.length ? <p className="empty">Nog geen app-data voor deze selectie.</p> : null}
 					</div>
 				</section>
 			</div>
