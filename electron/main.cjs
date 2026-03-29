@@ -98,6 +98,23 @@ function compareSemver(a, b) {
 	return 0;
 }
 
+function normalizeReleaseEntry(entry) {
+	const tag = typeof entry?.tag_name === "string" ? entry.tag_name.trim() : "";
+	if (!tag) {
+		return null;
+	}
+
+	return {
+		tag,
+		version: tag.replace(/^v/i, ""),
+		name: typeof entry?.name === "string" && entry.name.trim() ? entry.name.trim() : tag,
+		publishedAt: typeof entry?.published_at === "string" ? entry.published_at : null,
+		prerelease: Boolean(entry?.prerelease),
+		draft: Boolean(entry?.draft),
+		url: typeof entry?.html_url === "string" ? entry.html_url : "",
+	};
+}
+
 async function checkLatestGitHubVersion() {
 	const localVersion = app.getVersion();
 	const localTuple = toSemverTuple(localVersion);
@@ -803,6 +820,29 @@ function wireIpc() {
 				hasUpdate: false,
 				local: localVersion,
 				latest: null,
+				error: error instanceof Error ? error.message : "Unknown error",
+			};
+		}
+	});
+
+	ipcMain.handle("app:releaseHistory", async () => {
+		try {
+			const releaseList = await fetchJson(
+				`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases?per_page=20`,
+			);
+
+			if (!Array.isArray(releaseList)) {
+				return { releases: [], error: "Unexpected release history response" };
+			}
+
+			const releases = releaseList
+				.map((entry) => normalizeReleaseEntry(entry))
+				.filter((entry) => Boolean(entry));
+
+			return { releases };
+		} catch (error) {
+			return {
+				releases: [],
 				error: error instanceof Error ? error.message : "Unknown error",
 			};
 		}

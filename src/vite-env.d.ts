@@ -1,15 +1,24 @@
 /// <reference types="vite/client" />
 
-import type { ActivityBlock, DashboardOverview, MapItem, NoteItem, Session, TaskItem, TaskStatus } from "./types";
+import type {
+	ActivityBlock,
+	AppRelease,
+	DashboardOverview,
+	MapItem,
+	NoteItem,
+	Session,
+	TaskItem,
+	TaskStatus,
+	UpdateCheckResult,
+} from "./types";
 
 declare global {
 	interface Window {
 		atlas: {
-			checkForUpdates: () => Promise<{
-				hasUpdate: boolean;
-				local: string;
-				latest: string | null;
-				downloadUrl?: string;
+			checkForUpdates: () => Promise<UpdateCheckResult>;
+			getAppVersion: () => Promise<string>;
+			listReleaseHistory: () => Promise<{
+				releases: AppRelease[];
 				error?: string;
 			}>;
 			listMaps: () => Promise<MapItem[]>;
