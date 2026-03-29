@@ -594,6 +594,42 @@ export function AnalysisView({
 					)}
 				</section>
 
+				<section className="grid grid-cols-3 gap-3">
+					<div className="atlas-card grid gap-2">
+						<p className="mt-2 text-[12px] uppercase tracking-[0.12em] text-neutral-500 dark:text-neutral-300">
+							Focus tijd
+						</p>
+						<p className="m-0 font-data text-[clamp(36px,5vw,52px)] leading-none">
+							{formatDuration(totals.totalFocusMs)}
+						</p>
+						<p className="mt-2 text-[12px] uppercase tracking-[0.12em] text-neutral-500 dark:text-neutral-300">
+							{formatPercent(totals.focusRatio)} van je totale tijd
+						</p>
+					</div>
+					<div className="atlas-card grid gap-2">
+						<p className="mt-2 text-[12px] uppercase tracking-[0.12em] text-neutral-500 dark:text-neutral-300">
+							Totale tijd
+						</p>
+						<p className="m-0 font-data text-[clamp(36px,5vw,52px)] leading-none">
+							{formatDuration(totals.totalClockMs)}
+						</p>
+						<p className="mt-2 text-[12px] uppercase tracking-[0.12em] text-neutral-500 dark:text-neutral-300">
+							{filteredSessionStats.length} sessies
+						</p>
+					</div>
+					<div className="atlas-card grid gap-2">
+						<p className="mt-2 text-[12px] uppercase tracking-[0.12em] text-neutral-500 dark:text-neutral-300">
+							Gemiddelde sessie
+						</p>
+						<p className="m-0 font-data text-[clamp(36px,5vw,52px)] leading-none">
+							{formatDuration(totals.averageSessionMs)}
+						</p>
+						<p className="mt-2 text-[12px] uppercase tracking-[0.12em] text-neutral-500 dark:text-neutral-300">
+							{totals.activeDays} actieve dagen
+						</p>
+					</div>
+				</section>
+
 				<section className="atlas-card grid gap-3">
 					<header className="card-head">
 						<h3 className="text-subtitle-small">Top apps</h3>
@@ -617,26 +653,6 @@ export function AnalysisView({
 							</div>
 						))}
 						{!topApps.rows.length ? <p className="empty">Nog geen app-data voor deze selectie.</p> : null}
-					</div>
-				</section>
-
-				<section className="grid grid-cols-1 gap-3 md:grid-cols-3">
-					<div className="atlas-card metric-card">
-						<p className="card-kicker text-label-small">Focus tijd</p>
-						<p className="metric-value text-title-small">{formatDuration(totals.totalFocusMs)}</p>
-						<p className="metric-sub text-data-small">
-							{formatPercent(totals.focusRatio)} van je totale tijd
-						</p>
-					</div>
-					<div className="atlas-card metric-card">
-						<p className="card-kicker text-label-small">Totale tijd</p>
-						<p className="metric-value text-title-small">{formatDuration(totals.totalClockMs)}</p>
-						<p className="metric-sub text-data-small">{filteredSessionStats.length} sessies</p>
-					</div>
-					<div className="atlas-card metric-card">
-						<p className="card-kicker text-label-small">Gemiddelde sessie</p>
-						<p className="metric-value text-title-small">{formatDuration(totals.averageSessionMs)}</p>
-						<p className="metric-sub text-data-small">{totals.activeDays} actieve dagen</p>
 					</div>
 				</section>
 			</div>
