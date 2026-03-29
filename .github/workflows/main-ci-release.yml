@@ -266,43 +266,6 @@ jobs:
                     latest_stable="v0.0.0"
                   fi
 
-                  range="$latest_stable..HEAD"
-                  commits=$(git log --format=%s%n%b $range || true)
-
-                  bump="$bump_input"
-                  if [ "$bump" = "auto" ]; then
-                    bump="patch"
-                    if echo "$commits" | grep -Eq 'BREAKING CHANGE|^[a-zA-Z]+(\([^)]+\))?!:'; then
-                      bump="major"
-                    elif echo "$commits" | grep -Eq '^feat(\([^)]+\))?:'; then
-                      bump="minor"
-                    fi
-                  fi
-
-                  base=${latest_stable#v}
-                  IFS='.' read -r major minor patch <<< "$base"
-
-                  case "$bump" in
-                    major)
-                      major=$((major + 1))
-                      minor=0
-                      patch=0
-                      ;;
-                    minor)
-                      minor=$((minor + 1))
-                      patch=0
-                      ;;
-                    patch)
-                      patch=$((patch + 1))
-                      ;;
-                    *)
-                      echo "Unsupported bump strategy: $bump"
-                      exit 1
-                      ;;
-                  esac
-
-                  computed_base_version="${major}.${minor}.${patch}"
-
                   if [ "$mode" = "beta-continue" ]; then
                     if [ -z "$active_beta_base" ]; then
                       echo "Missing active_beta_base for beta-continue mode"
@@ -323,7 +286,45 @@ jobs:
                     fi
                     next_version="v${active_beta_base}"
                     is_prerelease="false"
-                  elif [ "$channel" = "beta" ]; then
+                  else
+                    range="$latest_stable..HEAD"
+                    commits=$(git log --format=%s%n%b $range || true)
+
+                    bump="$bump_input"
+                    if [ "$bump" = "auto" ]; then
+                      bump="patch"
+                      if echo "$commits" | grep -Eq 'BREAKING CHANGE|^[a-zA-Z]+(\([^)]+\))?!:'; then
+                        bump="major"
+                      elif echo "$commits" | grep -Eq '^feat(\([^)]+\))?:'; then
+                        bump="minor"
+                      fi
+                    fi
+
+                    base=${latest_stable#v}
+                    IFS='.' read -r major minor patch <<< "$base"
+
+                    case "$bump" in
+                      major)
+                        major=$((major + 1))
+                        minor=0
+                        patch=0
+                        ;;
+                      minor)
+                        minor=$((minor + 1))
+                        patch=0
+                        ;;
+                      patch)
+                        patch=$((patch + 1))
+                        ;;
+                      *)
+                        echo "Unsupported bump strategy: $bump"
+                        exit 1
+                        ;;
+                    esac
+
+                    computed_base_version="${major}.${minor}.${patch}"
+
+                    if [ "$channel" = "beta" ]; then
                     latest_beta=$(git tag --list "v${computed_base_version}-beta.*" --sort=-v:refname | grep -E "^v${computed_base_version}-beta\.[0-9]+$" | head -n1 || true)
                     beta_number=1
                     if [ -n "$latest_beta" ]; then
@@ -332,9 +333,10 @@ jobs:
                     fi
                     next_version="v${computed_base_version}-beta.${beta_number}"
                     is_prerelease="true"
-                  else
-                    next_version="v${computed_base_version}"
-                    is_prerelease="false"
+                    else
+                      next_version="v${computed_base_version}"
+                      is_prerelease="false"
+                    fi
                   fi
 
                   echo "created=true" >> "$GITHUB_OUTPUT"
