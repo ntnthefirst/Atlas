@@ -1,0 +1,64 @@
+name: PR CI Checks
+
+on:
+    pull_request:
+        branches:
+            - main
+            - dev
+        types:
+            - opened
+            - reopened
+            - synchronize
+            - edited
+
+concurrency:
+    group: pr-ci-${{ github.event.pull_request.number }}
+    cancel-in-progress: true
+
+jobs:
+    quality:
+        name: Lint and Build (PR)
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 20
+                  cache: npm
+
+            - name: Install dependencies
+              run: npm ci
+
+            - name: Run lint
+              run: npm run lint --if-present
+
+            - name: Run build
+              run: npm run build --if-present
+
+    versioning-checker:
+        name: Versioning Checker (PR)
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Validate PR title for semantic versioning
+              uses: actions/github-script@v7
+              with:
+                  script: |
+                      const title = (context.payload.pull_request?.title || '').trim();
+                      const conventionalTitle = /^(feat|fix|perf|refactor|chore|docs|test|ci|build)(\([^)]+\))?!?:\s.+$/;
+
+                      if (!conventionalTitle.test(title)) {
+                        core.setFailed(
+                          'PR title must follow Conventional Commits, e.g. "feat: add update channel selector" or "fix(updates): handle prerelease scanning".'
+                        );
+                        return;
+                      }
+
+                      core.summary
+                        .addHeading('Versioning Checker')
+                        .addRaw(`PR title \`${title}\` is compatible with automatic semantic versioning.`)
+                        .write();

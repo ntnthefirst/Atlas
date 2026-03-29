@@ -87,36 +87,34 @@ export function AnalysisView({
 	const [isLoadingBlocks, setIsLoadingBlocks] = useState(false);
 	const [activityError, setActivityError] = useState("");
 	const [period, setPeriod] = useState<PeriodKey>("7d");
-
-	useEffect(() => {
+	const resolvedBlocksBySessionId = useMemo(() => {
 		if (!selectedSession) {
-			return;
+			return blocksBySessionId;
 		}
-		setBlocksBySessionId((current) => {
-			const existing = current[selectedSession.id];
-			if (existing && existing.length === activityBlocks.length) {
-				return current;
-			}
-			return {
-				...current,
-				[selectedSession.id]: activityBlocks,
-			};
-		});
-	}, [selectedSession, activityBlocks]);
+
+		return {
+			...blocksBySessionId,
+			[selectedSession.id]: activityBlocks,
+		};
+	}, [blocksBySessionId, selectedSession, activityBlocks]);
 
 	useEffect(() => {
 		const missingSessionIds = sessions
 			.map((session) => session.id)
-			.filter((sessionId) => blocksBySessionId[sessionId] === undefined);
+			.filter((sessionId) => resolvedBlocksBySessionId[sessionId] === undefined);
 
 		if (!missingSessionIds.length) {
-			setIsLoadingBlocks(false);
+			queueMicrotask(() => {
+				setIsLoadingBlocks(false);
+			});
 			return;
 		}
 
 		let cancelled = false;
-		setIsLoadingBlocks(true);
-		setActivityError("");
+		queueMicrotask(() => {
+			setIsLoadingBlocks(true);
+			setActivityError("");
+		});
 
 		void Promise.all(
 			missingSessionIds.map(async (sessionId) => ({
@@ -152,7 +150,7 @@ export function AnalysisView({
 		return () => {
 			cancelled = true;
 		};
-	}, [sessions, blocksBySessionId]);
+	}, [sessions, resolvedBlocksBySessionId]);
 
 	const periodStartMs = useMemo(() => getPeriodStartMs(period, now), [period, now]);
 
@@ -183,10 +181,10 @@ export function AnalysisView({
 
 	const periodBlocks = useMemo(
 		() =>
-			Object.entries(blocksBySessionId)
+			Object.entries(resolvedBlocksBySessionId)
 				.filter(([sessionId]) => sessionIdSet.has(sessionId))
 				.flatMap(([, blocks]) => blocks),
-		[blocksBySessionId, sessionIdSet],
+		[resolvedBlocksBySessionId, sessionIdSet],
 	);
 
 	const totals = useMemo(() => {
