@@ -33,10 +33,14 @@ export function DashboardView({
 
 	return (
 		<div className="view-grid">
-			<section className="atlas-card metric-card">
-				<p className="card-kicker text-label-small">Total time today</p>
-				<p className="metric-value text-title-small">{formatDuration(dashboard.totalTodayMs)}</p>
-				<p className="metric-sub text-data-small">
+			<section className="atlas-card grid gap-2">
+				<p className="mt-2 text-[12px] uppercase tracking-[0.12em] text-neutral-500 dark:text-neutral-300">
+					Total time today
+				</p>
+				<p className="m-0 font-data text-[clamp(36px,5vw,52px)] leading-none">
+					{formatDuration(dashboard.totalTodayMs)}
+				</p>
+				<p className="mt-2 text-[12px] uppercase tracking-[0.12em] text-neutral-500 dark:text-neutral-300">
 					{activeSession ? `Live: ${activeElapsed}` : "No active session"}
 				</p>
 			</section>
