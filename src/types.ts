@@ -90,4 +90,4 @@ export type DashboardOverview = {
 	};
 };
 
-export type AtlasView = "dashboard" | "logbook" | "tasks" | "notes" | "settings";
+export type AtlasView = "dashboard" | "logbook" | "tasks" | "analysis" | "notes" | "settings";
