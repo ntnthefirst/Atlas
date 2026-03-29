@@ -124,8 +124,12 @@ jobs:
                       minor=$((minor + 1))
                       patch=0
                       ;;
-                    *)
+                    patch)
                       patch=$((patch + 1))
+                      ;;
+                    *)
+                      echo "Unsupported bump strategy: $bump"
+                      exit 1
                       ;;
                   esac
 
@@ -181,10 +185,10 @@ jobs:
                     - name: Windows
                       os: windows-latest
                       script: |
-                        RELEASE_VERSION="${{ needs.release.outputs.version }}"
-                        RELEASE_VERSION="${RELEASE_VERSION#v}"
-                        npm run build
-                        npx electron-builder --win --publish never --config.extraMetadata.version="$RELEASE_VERSION"
+                          RELEASE_VERSION="${{ needs.release.outputs.version }}"
+                          RELEASE_VERSION="${RELEASE_VERSION#v}"
+                          npm run build
+                          npx electron-builder --win --publish never --config.extraMetadata.version="$RELEASE_VERSION"
                       asset_glob: |
                           release/Atlas-Setup-Windows-*.exe
                           release/Atlas-Setup-Windows-*.exe.blockmap
@@ -192,10 +196,10 @@ jobs:
                     - name: macOS
                       os: macos-latest
                       script: |
-                        RELEASE_VERSION="${{ needs.release.outputs.version }}"
-                        RELEASE_VERSION="${RELEASE_VERSION#v}"
-                        npm run build
-                        npx electron-builder --mac --arm64 --publish never --config.extraMetadata.version="$RELEASE_VERSION"
+                          RELEASE_VERSION="${{ needs.release.outputs.version }}"
+                          RELEASE_VERSION="${RELEASE_VERSION#v}"
+                          npm run build
+                          npx electron-builder --mac --arm64 --publish never --config.extraMetadata.version="$RELEASE_VERSION"
                       asset_glob: |
                           release/Atlas-Setup-macOS-*.dmg
                           release/Atlas-Setup-macOS-*.zip

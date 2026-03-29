@@ -25,7 +25,7 @@ Main workflow: `.github/workflows/main-ci-release.yml`
 
 `workflow_dispatch` inputs:
 - `release_channel`: `stable` or `beta`
-- `bump`: `auto`, `patch`, `minor`, `major`
+- `bump`: `auto`, `none`, `patch`, `minor`, `major`
 
 `auto` bump behavior is based on commit messages:
 - Breaking (`!` or `BREAKING CHANGE`) -> major
