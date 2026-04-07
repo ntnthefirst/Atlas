@@ -17,7 +17,7 @@ export function ThemeModePicker({ value, onChange }: ThemeModePickerProps) {
 			<span className="text-[11px] font-medium uppercase tracking-[0.14em] text-neutral-500 dark:text-neutral-300">
 				Theme
 			</span>
-			<div className="grid gap-3 xl:grid-cols-3">
+			<div className="grid gap-3 md:grid-cols-3">
 				{themeModes.map((mode) => {
 					const isActive = mode.value === value;
 					const isDark = mode.value === "dark";
