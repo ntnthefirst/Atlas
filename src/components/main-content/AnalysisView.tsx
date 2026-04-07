@@ -1,10 +1,4 @@
-import {
-	CalendarDaysIcon,
-	ChevronDownIcon,
-	ChevronLeftIcon,
-	ChevronRightIcon,
-	ChevronUpIcon,
-} from "@heroicons/react/24/outline";
+import { CalendarDaysIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ActivityBlock, Session } from "../../types";
 import type { MainContentViewsProps } from "./types";
@@ -583,17 +577,23 @@ export function AnalysisView({
 								className="inline-flex items-center gap-1 rounded-full border border-neutral-200 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-neutral-500 transition hover:border-neutral-300 hover:text-neutral-700 dark:border-neutral-600 dark:text-neutral-300 dark:hover:text-neutral-100"
 							>
 								{isCalendarCollapsed ? "Open" : "Dicht"}
-								{isCalendarCollapsed ? (
-									<ChevronDownIcon className="h-3.5 w-3.5" />
-								) : (
-									<ChevronUpIcon className="h-3.5 w-3.5" />
-								)}
+								<ChevronDownIcon
+									className={`h-3.5 w-3.5 transition-transform duration-300 ease-out ${
+										isCalendarCollapsed ? "rotate-0" : "rotate-180"
+									}`}
+								/>
 							</button>
 						</div>
 					</div>
 
-					{!isCalendarCollapsed ? (
-						<>
+					<div
+						className={`grid overflow-hidden transition-all duration-300 ease-out ${
+							isCalendarCollapsed
+								? "pointer-events-none grid-rows-[0fr] opacity-0"
+								: "grid-rows-[1fr] opacity-100"
+						}`}
+					>
+						<div className="min-h-0 overflow-hidden">
 							<div className="grid gap-2">
 								<div className="flex flex-wrap items-center justify-between gap-2">
 									<div className="flex items-center gap-1">
@@ -755,8 +755,8 @@ export function AnalysisView({
 							{isLoadingBlocks ? (
 								<p className="text-[12px] text-neutral-500">Activiteit laden...</p>
 							) : null}
-						</>
-					) : null}
+						</div>
+					</div>
 				</section>
 
 				<section className="grid grid-cols-3 items-start gap-3">
