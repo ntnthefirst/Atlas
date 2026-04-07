@@ -356,10 +356,7 @@ export function AnalysisView({
 		[activityRows],
 	);
 
-	const totalDistributableDuration = useMemo(
-		() => Math.max(0, totals.totalClockMs),
-		[totals.totalClockMs],
-	);
+	const totalDistributableDuration = useMemo(() => Math.max(0, totals.totalClockMs), [totals.totalClockMs]);
 
 	const untrackedDurationMs = useMemo(
 		() => Math.max(0, totalDistributableDuration - totalSelectedAppsDuration),
@@ -552,8 +549,8 @@ export function AnalysisView({
 	];
 
 	return (
-		<div className="grid h-full min-h-0 gap-3 overflow-hidden">
-			<div className="grid min-h-0 gap-3 overflow-auto pr-1">
+		<div className="grid h-full min-h-0 content-start gap-3 overflow-hidden">
+			<div className="grid min-h-0 content-start gap-3 overflow-auto pr-1">
 				<section className="atlas-card grid gap-3">
 					<div className="flex flex-wrap items-start justify-between gap-2">
 						<div className="grid gap-1">
@@ -762,7 +759,7 @@ export function AnalysisView({
 					) : null}
 				</section>
 
-				<section className="grid grid-cols-3 gap-3">
+				<section className="grid grid-cols-3 items-start gap-3">
 					<div className="atlas-card grid gap-2">
 						<p className="mt-2 text-[12px] uppercase tracking-[0.12em] text-neutral-500 dark:text-neutral-300">
 							Focus tijd
@@ -871,7 +868,8 @@ export function AnalysisView({
 								<div className="stack-row text-body-small">
 									<span className="truncate">{entry.name}</span>
 									<strong>
-										{formatDuration(entry.durationMs)} ({formatPercent((entry.durationMs / (totalDistributableDuration || 1)) * 100)})
+										{formatDuration(entry.durationMs)} (
+										{formatPercent((entry.durationMs / (totalDistributableDuration || 1)) * 100)})
 									</strong>
 								</div>
 								<progress
