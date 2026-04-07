@@ -534,6 +534,13 @@ export function AnalysisView({
 	};
 
 	const isPresetActive = activePreset !== null;
+	const isTodayVisibleInCalendar = useMemo(() => {
+		const todayMonth = toMonthStart(new Date(now));
+		return (
+			displayedMonth.getFullYear() === todayMonth.getFullYear() &&
+			displayedMonth.getMonth() === todayMonth.getMonth()
+		);
+	}, [displayedMonth, now]);
 	const presetButtons: Array<{ key: PresetSelection; label: string }> = [
 		{ key: "thisWeek", label: "Deze week" },
 		{ key: "last7Days", label: "Afgelopen 7 dagen" },
@@ -685,18 +692,20 @@ export function AnalysisView({
 											<ChevronRightIcon className="h-4 w-4" />
 										</button>
 									</div>
-									<button
-										type="button"
-										onClick={() => setDisplayedMonth(toMonthStart(new Date(now)))}
-										className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] transition ${
-											isPresetActive
-												? "border border-primary/60 bg-primary/10 text-primary hover:bg-primary/15"
-												: "border border-primary bg-primary text-white hover:bg-primary/90"
-										}`}
-									>
-										<CalendarDaysIcon className="h-3.5 w-3.5" />
-										Naar vandaag
-									</button>
+									{!isTodayVisibleInCalendar ? (
+										<button
+											type="button"
+											onClick={() => setDisplayedMonth(toMonthStart(new Date(now)))}
+											className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] transition ${
+												isPresetActive
+													? "border border-primary/60 bg-primary/10 text-primary hover:bg-primary/15"
+													: "border border-primary bg-primary text-white hover:bg-primary/90"
+											}`}
+										>
+											<CalendarDaysIcon className="h-3.5 w-3.5" />
+											Naar vandaag
+										</button>
+									) : null}
 								</div>
 
 								<div className="grid gap-2">
