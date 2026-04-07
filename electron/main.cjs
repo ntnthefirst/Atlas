@@ -85,12 +85,9 @@ function normalizeUpdatePreferences(rawValue) {
 	}
 
 	return {
-		autoCheck:
-			typeof rawValue.autoCheck === "boolean" ? rawValue.autoCheck : defaultUpdatePreferences.autoCheck,
+		autoCheck: typeof rawValue.autoCheck === "boolean" ? rawValue.autoCheck : defaultUpdatePreferences.autoCheck,
 		includeBeta:
-			typeof rawValue.includeBeta === "boolean"
-				? rawValue.includeBeta
-				: defaultUpdatePreferences.includeBeta,
+			typeof rawValue.includeBeta === "boolean" ? rawValue.includeBeta : defaultUpdatePreferences.includeBeta,
 	};
 }
 
@@ -247,7 +244,11 @@ function pickInstallerAsset(release) {
 		return names.find((asset) => /\.exe$/i.test(asset.name))?.url ?? null;
 	}
 	if (isMac) {
-		return names.find((asset) => /\.dmg$/i.test(asset.name))?.url ?? names.find((asset) => /\.zip$/i.test(asset.name))?.url ?? null;
+		return (
+			names.find((asset) => /\.dmg$/i.test(asset.name))?.url ??
+			names.find((asset) => /\.zip$/i.test(asset.name))?.url ??
+			null
+		);
 	}
 
 	return (
@@ -273,7 +274,9 @@ function normalizeReleaseList(releaseList, includePrerelease) {
 }
 
 async function fetchReleases(includePrerelease) {
-	const releaseList = await fetchJson(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases?per_page=30`);
+	const releaseList = await fetchJson(
+		`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases?per_page=30`,
+	);
 	return normalizeReleaseList(releaseList, includePrerelease);
 }
 
@@ -470,8 +473,10 @@ function createSettingsWindow(parentWindow = null) {
 	settingsWindow = new BrowserWindow({
 		width: 980,
 		height: 680,
-		minWidth: 900,
-		minHeight: 620,
+		minWidth: 980,
+		minHeight: 680,
+		maxWidth: 980,
+		maxHeight: 680,
 		maximizable: false,
 		fullscreenable: false,
 		autoHideMenuBar: true,
@@ -492,7 +497,7 @@ function createSettingsWindow(parentWindow = null) {
 			: false,
 		parent: parentWindow && !parentWindow.isDestroyed() ? parentWindow : undefined,
 		modal: Boolean(parentWindow && !parentWindow.isDestroyed()),
-		resizable: true,
+		resizable: false,
 		webPreferences: {
 			preload: path.join(__dirname, "preload.cjs"),
 			contextIsolation: true,
@@ -1011,7 +1016,7 @@ function wireIpc() {
 				latest: latestRelease.version,
 				releaseUrl: latestRelease.url,
 				publishedAt: latestRelease.publishedAt,
-				downloadUrl: isOutdated ? latestRelease.installerUrl ?? undefined : undefined,
+				downloadUrl: isOutdated ? (latestRelease.installerUrl ?? undefined) : undefined,
 			};
 		} catch (error) {
 			return {

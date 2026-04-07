@@ -391,7 +391,7 @@ export function SettingsWindowApp() {
 								)}
 
 								{activeTab === "appearance" && (
-									<div className="grid gap-3 md:grid-cols-2">
+									<div className="flex gap-3 flex-col">
 										<div className="atlas-settings-card-stack">
 											<ThemeModePicker
 												value={theme}

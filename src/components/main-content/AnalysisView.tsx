@@ -23,11 +23,6 @@ const dutchMonthYearFormatter = new Intl.DateTimeFormat("nl-NL", {
 	year: "numeric",
 });
 
-const dutchHourFormatter = new Intl.NumberFormat("nl-NL", {
-	minimumFractionDigits: 1,
-	maximumFractionDigits: 1,
-});
-
 const WEEKDAY_LABELS = ["Ma", "Di", "Wo", "Do", "Vr", "Za", "Zo"];
 const MONTH_OPTIONS = [
 	"januari",
@@ -62,8 +57,6 @@ const toWeekStartMonday = (value: Date) => {
 };
 
 const formatPercent = (value: number) => `${Math.round(value)}%`;
-
-const formatHours = (valueMs: number) => `${dutchHourFormatter.format(valueMs / 3_600_000)}u`;
 
 const cleanAppLabel = (value: string) => {
 	const cleaned = value
@@ -362,6 +355,27 @@ export function AnalysisView({
 		() => activityRows.reduce((sum, entry) => sum + entry.durationMs, 0),
 		[activityRows],
 	);
+
+	const totalDistributableDuration = useMemo(
+		() => Math.max(0, totals.totalClockMs),
+		[totals.totalClockMs],
+	);
+
+	const untrackedDurationMs = useMemo(
+		() => Math.max(0, totalDistributableDuration - totalSelectedAppsDuration),
+		[totalDistributableDuration, totalSelectedAppsDuration],
+	);
+
+	const displayRows = useMemo(() => {
+		const rows = [...visibleAppRows];
+		if (untrackedDurationMs > 0) {
+			rows.push({
+				name: "Ongetraceerd",
+				durationMs: untrackedDurationMs,
+			});
+		}
+		return rows;
+	}, [visibleAppRows, untrackedDurationMs]);
 
 	const calendarData = useMemo(() => {
 		const totalsByDay = new Map<string, number>();
@@ -731,7 +745,7 @@ export function AnalysisView({
 														) : null}
 													</div>
 													<p className="text-body-small font-medium text-neutral-700 dark:text-neutral-100">
-														{formatHours(cell.clockMs)}
+														{formatDuration(cell.clockMs)}
 													</p>
 												</button>
 											),
@@ -849,23 +863,25 @@ export function AnalysisView({
 						)}
 					</header>
 					<div className="stack-list">
-						{visibleAppRows.map((entry) => (
+						{displayRows.map((entry) => (
 							<div
 								key={entry.name}
 								className="grid gap-1 rounded-xl border border-neutral-200 bg-neutral-50 p-2.5 dark:border-neutral-600 dark:bg-neutral-700"
 							>
 								<div className="stack-row text-body-small">
 									<span className="truncate">{entry.name}</span>
-									<strong>{formatDuration(entry.durationMs)}</strong>
+									<strong>
+										{formatDuration(entry.durationMs)} ({formatPercent((entry.durationMs / (totalDistributableDuration || 1)) * 100)})
+									</strong>
 								</div>
 								<progress
 									className="h-1.5 w-full overflow-hidden rounded-full [&::-moz-progress-bar]:bg-neutral-700 [&::-webkit-progress-bar]:bg-neutral-200 [&::-webkit-progress-value]:bg-neutral-700 dark:[&::-webkit-progress-bar]:bg-neutral-600 dark:[&::-webkit-progress-value]:bg-neutral-100"
-									max={totalSelectedAppsDuration || 1}
+									max={totalDistributableDuration || 1}
 									value={Math.max(0, entry.durationMs)}
 								/>
 							</div>
 						))}
-						{!visibleAppRows.length ? (
+						{!displayRows.length ? (
 							<p className="empty">
 								Nog geen {activityViewMode === "apps" ? "app" : "window"}-data voor deze selectie.
 							</p>
