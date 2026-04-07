@@ -9,10 +9,11 @@ export const formatClock = (ms: number) => {
 };
 
 export const formatDuration = (ms: number) => {
-	const totalMinutes = Math.max(0, Math.floor(ms / 60000));
-	const h = Math.floor(totalMinutes / 60);
-	const m = totalMinutes % 60;
-	return `${h}h ${pad(m)}m`;
+	const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+	const h = Math.floor(totalSeconds / 3600);
+	const m = Math.floor((totalSeconds % 3600) / 60);
+	const s = totalSeconds % 60;
+	return `${h}h ${pad(m)}m ${pad(s)}s`;
 };
 
 export const normalizeTrackedAppName = (value: string) => {
