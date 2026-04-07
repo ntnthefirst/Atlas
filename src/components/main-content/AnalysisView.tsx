@@ -1,10 +1,4 @@
-import {
-	CalendarDaysIcon,
-	ChevronDownIcon,
-	ChevronLeftIcon,
-	ChevronRightIcon,
-	ChevronUpIcon,
-} from "@heroicons/react/24/outline";
+import { CalendarDaysIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ActivityBlock, Session } from "../../types";
 import type { MainContentViewsProps } from "./types";
@@ -356,10 +350,7 @@ export function AnalysisView({
 		[activityRows],
 	);
 
-	const totalDistributableDuration = useMemo(
-		() => Math.max(0, totals.totalClockMs),
-		[totals.totalClockMs],
-	);
+	const totalDistributableDuration = useMemo(() => Math.max(0, totals.totalClockMs), [totals.totalClockMs]);
 
 	const untrackedDurationMs = useMemo(
 		() => Math.max(0, totalDistributableDuration - totalSelectedAppsDuration),
@@ -543,6 +534,13 @@ export function AnalysisView({
 	};
 
 	const isPresetActive = activePreset !== null;
+	const isTodayVisibleInCalendar = useMemo(() => {
+		const todayMonth = toMonthStart(new Date(now));
+		return (
+			displayedMonth.getFullYear() === todayMonth.getFullYear() &&
+			displayedMonth.getMonth() === todayMonth.getMonth()
+		);
+	}, [displayedMonth, now]);
 	const presetButtons: Array<{ key: PresetSelection; label: string }> = [
 		{ key: "thisWeek", label: "Deze week" },
 		{ key: "last7Days", label: "Afgelopen 7 dagen" },
@@ -552,8 +550,8 @@ export function AnalysisView({
 	];
 
 	return (
-		<div className="grid h-full min-h-0 gap-3 overflow-hidden">
-			<div className="grid min-h-0 gap-3 overflow-auto pr-1">
+		<div className="grid h-full min-h-0 content-start gap-3 overflow-hidden">
+			<div className="grid min-h-0 content-start gap-3 overflow-auto pr-1">
 				<section className="atlas-card grid gap-3">
 					<div className="flex flex-wrap items-start justify-between gap-2">
 						<div className="grid gap-1">
@@ -586,17 +584,23 @@ export function AnalysisView({
 								className="inline-flex items-center gap-1 rounded-full border border-neutral-200 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-neutral-500 transition hover:border-neutral-300 hover:text-neutral-700 dark:border-neutral-600 dark:text-neutral-300 dark:hover:text-neutral-100"
 							>
 								{isCalendarCollapsed ? "Open" : "Dicht"}
-								{isCalendarCollapsed ? (
-									<ChevronDownIcon className="h-3.5 w-3.5" />
-								) : (
-									<ChevronUpIcon className="h-3.5 w-3.5" />
-								)}
+								<ChevronDownIcon
+									className={`h-3.5 w-3.5 transition-transform duration-300 ease-out ${
+										isCalendarCollapsed ? "rotate-0" : "rotate-180"
+									}`}
+								/>
 							</button>
 						</div>
 					</div>
 
-					{!isCalendarCollapsed ? (
-						<>
+					<div
+						className={`grid overflow-hidden transition-all duration-300 ease-out ${
+							isCalendarCollapsed
+								? "pointer-events-none grid-rows-[0fr] opacity-0"
+								: "grid-rows-[1fr] opacity-100"
+						}`}
+					>
+						<div className="min-h-0 overflow-hidden">
 							<div className="grid gap-2">
 								<div className="flex flex-wrap items-center justify-between gap-2">
 									<div className="flex items-center gap-1">
@@ -688,18 +692,20 @@ export function AnalysisView({
 											<ChevronRightIcon className="h-4 w-4" />
 										</button>
 									</div>
-									<button
-										type="button"
-										onClick={() => setDisplayedMonth(toMonthStart(new Date(now)))}
-										className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] transition ${
-											isPresetActive
-												? "border border-primary/60 bg-primary/10 text-primary hover:bg-primary/15"
-												: "border border-primary bg-primary text-white hover:bg-primary/90"
-										}`}
-									>
-										<CalendarDaysIcon className="h-3.5 w-3.5" />
-										Naar vandaag
-									</button>
+									{!isTodayVisibleInCalendar ? (
+										<button
+											type="button"
+											onClick={() => setDisplayedMonth(toMonthStart(new Date(now)))}
+											className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.06em] transition ${
+												isPresetActive
+													? "border border-primary/60 bg-primary/10 text-primary hover:bg-primary/15"
+													: "border border-primary bg-primary text-white hover:bg-primary/90"
+											}`}
+										>
+											<CalendarDaysIcon className="h-3.5 w-3.5" />
+											Naar vandaag
+										</button>
+									) : null}
 								</div>
 
 								<div className="grid gap-2">
@@ -758,11 +764,11 @@ export function AnalysisView({
 							{isLoadingBlocks ? (
 								<p className="text-[12px] text-neutral-500">Activiteit laden...</p>
 							) : null}
-						</>
-					) : null}
+						</div>
+					</div>
 				</section>
 
-				<section className="grid grid-cols-3 gap-3">
+				<section className="grid grid-cols-3 items-start gap-3">
 					<div className="atlas-card grid gap-2">
 						<p className="mt-2 text-[12px] uppercase tracking-[0.12em] text-neutral-500 dark:text-neutral-300">
 							Focus tijd
@@ -871,7 +877,8 @@ export function AnalysisView({
 								<div className="stack-row text-body-small">
 									<span className="truncate">{entry.name}</span>
 									<strong>
-										{formatDuration(entry.durationMs)} ({formatPercent((entry.durationMs / (totalDistributableDuration || 1)) * 100)})
+										{formatDuration(entry.durationMs)} (
+										{formatPercent((entry.durationMs / (totalDistributableDuration || 1)) * 100)})
 									</strong>
 								</div>
 								<progress
