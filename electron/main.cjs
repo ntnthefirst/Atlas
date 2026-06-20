@@ -1651,12 +1651,13 @@ function wireIpc() {
 
 	ipcMain.handle("app:getFileIcon", async (_event, filePath) => {
 		if (!filePath) return null;
-		// Strip surrounding quotes and any trailing arguments a launch command
-		// might have (e.g. `"C:\Program Files\App\app.exe" --flag`).
-		const target = filePath
-			.trim()
-			.replace(/^"([^"]+)".*$/, "$1")
-			.split(" ")[0];
+		// A quoted path (the common case — paths with spaces, e.g. under
+		// "Program Files", get auto-quoted when picked) keeps everything
+		// between the quotes intact. An unquoted command may have trailing
+		// arguments after the first space, which get dropped.
+		const trimmed = filePath.trim();
+		const quotedMatch = trimmed.match(/^"([^"]+)"/);
+		const target = quotedMatch ? quotedMatch[1] : trimmed.split(" ")[0];
 		try {
 			const icon = await app.getFileIcon(target, { size: "normal" });
 			return icon.isEmpty() ? null : icon.toDataURL();
