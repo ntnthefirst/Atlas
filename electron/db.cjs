@@ -112,6 +112,14 @@ class AtlasDatabase {
       )`,
 		);
 
+		// Environment metadata (icon / accent color / preset type) added incrementally
+		// so existing databases migrate without losing data.
+		for (const column of ["icon", "accent", "preset"]) {
+			if (!this.columnExists("maps", column)) {
+				this.run(`ALTER TABLE maps ADD COLUMN ${column} TEXT`);
+			}
+		}
+
 		this.run(
 			`CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY,
@@ -334,24 +342,54 @@ class AtlasDatabase {
 	}
 
 	listMaps() {
-		return this.all("SELECT id, name, created_at FROM maps ORDER BY created_at ASC");
+		return this.all("SELECT id, name, icon, accent, preset, created_at FROM maps ORDER BY created_at ASC");
 	}
 
-	createMap(name) {
+	getMap(mapId) {
+		return this.first("SELECT id, name, icon, accent, preset, created_at FROM maps WHERE id = ?", [mapId]);
+	}
+
+	createMap(name, options = {}) {
 		const map = {
 			id: randomUUID(),
 			name,
+			icon: options.icon ?? null,
+			accent: options.accent ?? null,
+			preset: options.preset ?? null,
 			created_at: nowIso(),
 		};
 
-		this.run("INSERT INTO maps (id, name, created_at) VALUES (?, ?, ?)", [map.id, map.name, map.created_at]);
+		this.run("INSERT INTO maps (id, name, icon, accent, preset, created_at) VALUES (?, ?, ?, ?, ?, ?)", [
+			map.id,
+			map.name,
+			map.icon,
+			map.accent,
+			map.preset,
+			map.created_at,
+		]);
 
 		return map;
 	}
 
 	renameMap(mapId, name) {
 		this.run("UPDATE maps SET name = ? WHERE id = ?", [name, mapId]);
-		return this.first("SELECT id, name, created_at FROM maps WHERE id = ?", [mapId]);
+		return this.getMap(mapId);
+	}
+
+	updateMap(mapId, fields = {}) {
+		const allowed = ["name", "icon", "accent", "preset"];
+		const updates = [];
+		const values = [];
+		for (const key of allowed) {
+			if (Object.prototype.hasOwnProperty.call(fields, key)) {
+				updates.push(`${key} = ?`);
+				values.push(fields[key]);
+			}
+		}
+		if (updates.length > 0) {
+			this.run(`UPDATE maps SET ${updates.join(", ")} WHERE id = ?`, [...values, mapId]);
+		}
+		return this.getMap(mapId);
 	}
 
 	deleteMap(mapId) {

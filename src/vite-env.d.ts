@@ -3,10 +3,13 @@
 import type {
 	ActivityBlock,
 	AppRelease,
+	AtlasView,
+	DisplaySummary,
 	DownloadAndInstallResult,
 	DashboardOverview,
 	MapItem,
 	NoteItem,
+	NotchPreferences,
 	Session,
 	TaskItem,
 	TaskStatus,
@@ -27,8 +30,15 @@ declare global {
 			setUpdatePreferences: (preferences: UpdatePreferences) => Promise<UpdatePreferences>;
 			downloadAndInstallUpdate: (options?: { includePrerelease?: boolean }) => Promise<DownloadAndInstallResult>;
 			listMaps: () => Promise<MapItem[]>;
-			createMap: (name: string) => Promise<MapItem>;
+			createMap: (
+				name: string,
+				options?: { icon?: string | null; accent?: string | null; preset?: string | null },
+			) => Promise<MapItem>;
 			renameMap: (mapId: string, name: string) => Promise<MapItem>;
+			updateMap: (
+				mapId: string,
+				fields: Partial<Pick<MapItem, "name" | "icon" | "accent" | "preset">>,
+			) => Promise<MapItem>;
 			deleteMap: (mapId: string) => Promise<boolean>;
 
 			getActiveSession: () => Promise<Session | null>;
@@ -58,12 +68,23 @@ declare global {
 			launchApp: (command: string) => Promise<boolean>;
 			getPlatform: () => Promise<string>;
 			setNativeTheme: (theme: "dark" | "light" | "system") => Promise<boolean>;
+			setAccent: (value: string) => Promise<boolean>;
+			onAccentChanged: (callback: (value: string) => void) => () => void;
+
+			getNotchPreferences: () => Promise<NotchPreferences>;
+			setNotchPreferences: (preferences: Partial<NotchPreferences>) => Promise<NotchPreferences>;
+			resizeNotch: (width: number, height: number) => Promise<boolean>;
+			onNotchPreferencesChanged: (callback: (preferences: NotchPreferences) => void) => () => void;
+			listDisplays: () => Promise<DisplaySummary[]>;
 
 			windowMinimize: () => Promise<boolean>;
 			openMiniWindow: () => Promise<boolean>;
 			openSettingsWindow: () => Promise<boolean>;
 			resizeMiniWindow: (width: number, height: number) => Promise<boolean>;
 			showMainWindow: () => Promise<boolean>;
+			focusMainIfOpen: () => Promise<boolean>;
+			requestNavigate: (view: AtlasView) => Promise<boolean>;
+			onNavigate: (callback: (view: AtlasView) => void) => () => void;
 			closeMiniWindow: () => Promise<boolean>;
 			windowToggleMaximize: () => Promise<boolean>;
 			windowClose: () => Promise<boolean>;

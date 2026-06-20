@@ -2,7 +2,7 @@ const path = require("node:path");
 const https = require("node:https");
 const fs = require("node:fs");
 const { spawn } = require("node:child_process");
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, nativeTheme } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, nativeTheme, screen } = require("electron");
 const { autoUpdater } = require("electron-updater");
 
 const { AtlasDatabase } = require("./db.cjs");
@@ -12,6 +12,8 @@ let mainWindow = null;
 let miniWindow = null;
 let welcomeWindow = null;
 let settingsWindow = null;
+// Keyed by display id, since the notch can be shown on multiple screens at once.
+let notchWindows = new Map();
 let tray = null;
 let isQuitting = false;
 let db = null;
@@ -30,6 +32,53 @@ const defaultUpdatePreferences = {
 };
 
 let updatePreferences = { ...defaultUpdatePreferences };
+
+const NOTCH_PREFS_FILE = "notch-preferences.json";
+const NOTCH_POSITIONS = ["top", "left", "right", "free"];
+const NOTCH_IDLE_OPACITIES = ["subtle", "balanced", "solid"];
+const NOTCH_ACTIVATIONS = ["always", "withMain"];
+const NOTCH_ACTION_BUTTON_IDS = ["activity", "dashboard", "notes", "tasks"];
+const NOTCH_INFO_ITEM_IDS = ["timer", "todo"];
+const defaultNotchActionButtons = NOTCH_ACTION_BUTTON_IDS.map((id) => ({ id, enabled: true }));
+const defaultNotchInfoItems = NOTCH_INFO_ITEM_IDS.map((id) => ({ id, enabled: true }));
+const defaultNotchPreferences = {
+	enabled: true,
+	position: "top",
+	x: null,
+	y: null,
+	idleOpacity: "balanced",
+	locked: false,
+	activation: "always",
+	displayIds: [],
+	actionButtons: defaultNotchActionButtons,
+	infoItems: defaultNotchInfoItems,
+};
+
+// Normalizes a reorderable {id, enabled}[] list: drops invalid/duplicate ids,
+// keeps the user's order, and appends any missing ids (e.g. a newly added
+// feature) at the end so old saved preferences stay forward-compatible.
+function normalizeIdEnabledList(value, validIds, defaults) {
+	if (!Array.isArray(value)) {
+		return defaults.map((entry) => ({ ...entry }));
+	}
+	const seen = new Set();
+	const result = [];
+	for (const entry of value) {
+		if (!entry || typeof entry !== "object" || !validIds.includes(entry.id) || seen.has(entry.id)) {
+			continue;
+		}
+		seen.add(entry.id);
+		result.push({ id: entry.id, enabled: typeof entry.enabled === "boolean" ? entry.enabled : true });
+	}
+	for (const id of validIds) {
+		if (!seen.has(id)) {
+			result.push({ id, enabled: true });
+		}
+	}
+	return result;
+}
+
+let notchPreferences = { ...defaultNotchPreferences };
 
 if (isDev) {
 	// Keep development state fully isolated from the installed production app.
@@ -337,6 +386,7 @@ function createMainWindow() {
 	if (mainWindow && !mainWindow.isDestroyed()) {
 		mainWindow.show();
 		mainWindow.focus();
+		syncNotchWindows();
 		return mainWindow;
 	}
 
@@ -390,6 +440,7 @@ function createMainWindow() {
 
 	mainWindow.on("closed", () => {
 		mainWindow = null;
+		syncNotchWindows();
 	});
 
 	applyNativeTheme(
@@ -400,6 +451,7 @@ function createMainWindow() {
 		welcomeWindow.close();
 	}
 
+	syncNotchWindows();
 	return mainWindow;
 }
 
@@ -411,14 +463,14 @@ function createWelcomeWindow() {
 	}
 
 	welcomeWindow = new BrowserWindow({
-		width: 700,
-		height: 540,
+		width: 720,
+		height: 660,
 		minWidth: 620,
-		minHeight: 500,
+		minHeight: 560,
 		resizable: false,
 		maximizable: false,
 		fullscreenable: false,
-		title: "Atlas - Welkom",
+		title: "Atlas - Welcome",
 		backgroundColor: "#070707",
 		icon: isDev
 			? path.join(__dirname, "..", "src", "assets", "logosmall.png")
@@ -535,9 +587,10 @@ function hasAnyMaps() {
 function openPrimaryWindowByMapState() {
 	if (hasAnyMaps()) {
 		createMainWindow();
-		return;
+	} else {
+		createWelcomeWindow();
 	}
-	createWelcomeWindow();
+	syncNotchWindows();
 }
 
 function applyNativeTheme(theme) {
@@ -680,6 +733,236 @@ function createMiniWindow() {
 	return miniWindow;
 }
 
+function normalizeNotchPreferences(value) {
+	if (!value || typeof value !== "object") {
+		return { ...defaultNotchPreferences };
+	}
+	return {
+		enabled: typeof value.enabled === "boolean" ? value.enabled : defaultNotchPreferences.enabled,
+		position: NOTCH_POSITIONS.includes(value.position) ? value.position : defaultNotchPreferences.position,
+		x: typeof value.x === "number" ? value.x : null,
+		y: typeof value.y === "number" ? value.y : null,
+		idleOpacity: NOTCH_IDLE_OPACITIES.includes(value.idleOpacity)
+			? value.idleOpacity
+			: defaultNotchPreferences.idleOpacity,
+		locked: typeof value.locked === "boolean" ? value.locked : defaultNotchPreferences.locked,
+		activation: NOTCH_ACTIVATIONS.includes(value.activation)
+			? value.activation
+			: defaultNotchPreferences.activation,
+		displayIds: Array.isArray(value.displayIds)
+			? [...new Set(value.displayIds.filter((id) => typeof id === "number" && Number.isFinite(id)))]
+			: defaultNotchPreferences.displayIds,
+		actionButtons: normalizeIdEnabledList(value.actionButtons, NOTCH_ACTION_BUTTON_IDS, defaultNotchActionButtons),
+		infoItems: normalizeIdEnabledList(value.infoItems, NOTCH_INFO_ITEM_IDS, defaultNotchInfoItems),
+	};
+}
+
+function loadNotchPreferences() {
+	try {
+		const raw = fs.readFileSync(path.join(app.getPath("userData"), NOTCH_PREFS_FILE), "utf8");
+		notchPreferences = normalizeNotchPreferences(JSON.parse(raw));
+	} catch {
+		notchPreferences = { ...defaultNotchPreferences };
+	}
+	return notchPreferences;
+}
+
+function saveNotchPreferences(value) {
+	notchPreferences = normalizeNotchPreferences(value);
+	try {
+		fs.writeFileSync(
+			path.join(app.getPath("userData"), NOTCH_PREFS_FILE),
+			JSON.stringify(notchPreferences, null, 2),
+			"utf8",
+		);
+	} catch {
+		// Non-blocking: notch still works with in-memory preferences.
+	}
+	return notchPreferences;
+}
+
+// Resolves which displays should currently show a notch. Falls back to the
+// primary display whenever the saved selection is empty or none of the saved
+// ids are connected, so there's always at least one.
+function getTargetDisplays() {
+	const displays = screen.getAllDisplays();
+	const primary = screen.getPrimaryDisplay();
+	const selectedIds = notchPreferences.displayIds.length > 0 ? notchPreferences.displayIds : [primary.id];
+	const matched = displays.filter((display) => selectedIds.includes(display.id));
+	return matched.length > 0 ? matched : [primary];
+}
+
+function positionNotchWindow(notchWindow, display, width, height) {
+	if (!notchWindow || notchWindow.isDestroyed()) {
+		return;
+	}
+	const area = display.workArea;
+	const margin = 10;
+	const isPrimary = display.id === screen.getPrimaryDisplay().id;
+	let x;
+	let y;
+
+	if (
+		isPrimary &&
+		notchPreferences.position === "free" &&
+		typeof notchPreferences.x === "number" &&
+		typeof notchPreferences.y === "number"
+	) {
+		x = notchPreferences.x;
+		y = notchPreferences.y;
+	} else if (notchPreferences.position === "left") {
+		// Docked flush against the left edge, vertically centered.
+		x = area.x;
+		y = area.y + Math.round((area.height - height) / 2);
+	} else if (notchPreferences.position === "right") {
+		// Docked flush against the right edge, vertically centered.
+		x = area.x + area.width - width;
+		y = area.y + Math.round((area.height - height) / 2);
+	} else if (notchPreferences.position === "top") {
+		// Docked flush against the top edge, horizontally centered.
+		x = area.x + Math.round((area.width - width) / 2);
+		y = area.y;
+	} else {
+		// "free" without saved coordinates: centered near the top with a margin.
+		x = area.x + Math.round((area.width - width) / 2);
+		y = area.y + margin;
+	}
+
+	notchWindow.setBounds({ x: Math.round(x), y: Math.round(y), width, height });
+}
+
+function createNotchWindowForDisplay(display) {
+	const existing = notchWindows.get(display.id);
+	if (existing && !existing.isDestroyed()) {
+		existing.show();
+		return existing;
+	}
+
+	const notchWindow = new BrowserWindow({
+		width: 300,
+		height: 70,
+		frame: false,
+		transparent: true,
+		backgroundColor: "#00000000",
+		hasShadow: false,
+		alwaysOnTop: true,
+		skipTaskbar: true,
+		resizable: false,
+		maximizable: false,
+		minimizable: false,
+		fullscreenable: false,
+		movable: notchPreferences.position === "free" && !notchPreferences.locked,
+		focusable: true,
+		webPreferences: {
+			preload: path.join(__dirname, "preload.cjs"),
+			contextIsolation: true,
+			nodeIntegration: false,
+		},
+	});
+
+	notchWindow.notchDisplayId = display.id;
+	notchWindow.setAlwaysOnTop(true, "screen-saver");
+
+	if (isDev) {
+		notchWindow.loadURL("http://localhost:5173?mode=notch");
+	} else {
+		notchWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"), {
+			query: { mode: "notch" },
+		});
+	}
+
+	notchWindow.on("moved", () => {
+		if (notchWindow.isDestroyed()) {
+			return;
+		}
+		// Only the primary display's free position is persisted; other displays
+		// keep their own default placement.
+		if (notchPreferences.position === "free" && display.id === screen.getPrimaryDisplay().id) {
+			const [x, y] = notchWindow.getPosition();
+			notchPreferences.x = x;
+			notchPreferences.y = y;
+			saveNotchPreferences(notchPreferences);
+		}
+	});
+
+	notchWindow.on("closed", () => {
+		if (notchWindows.get(display.id) === notchWindow) {
+			notchWindows.delete(display.id);
+		}
+	});
+
+	notchWindows.set(display.id, notchWindow);
+	positionNotchWindow(notchWindow, display, 300, 70);
+	ensureTray();
+	return notchWindow;
+}
+
+function shouldNotchBeActive() {
+	if (!notchPreferences.enabled) {
+		return false;
+	}
+	if (notchPreferences.activation === "withMain") {
+		return Boolean(mainWindow && !mainWindow.isDestroyed());
+	}
+	return true;
+}
+
+// Creates/destroys notch windows to match shouldNotchBeActive() and the
+// selected displays. Call this whenever notch preferences change, the main
+// window's lifecycle changes, or the connected displays change.
+function syncNotchWindows() {
+	if (!shouldNotchBeActive()) {
+		for (const notchWindow of notchWindows.values()) {
+			if (!notchWindow.isDestroyed()) {
+				notchWindow.destroy();
+			}
+		}
+		notchWindows.clear();
+		return;
+	}
+
+	const targets = getTargetDisplays();
+	const targetIds = new Set(targets.map((display) => display.id));
+
+	for (const [displayId, notchWindow] of [...notchWindows]) {
+		if (!targetIds.has(displayId)) {
+			if (!notchWindow.isDestroyed()) {
+				notchWindow.destroy();
+			}
+			notchWindows.delete(displayId);
+		}
+	}
+
+	for (const display of targets) {
+		const existing = notchWindows.get(display.id);
+		if (!existing || existing.isDestroyed()) {
+			createNotchWindowForDisplay(display);
+		}
+	}
+}
+
+function applyNotchPreferences(next) {
+	notchPreferences = saveNotchPreferences(next);
+
+	syncNotchWindows();
+	for (const [displayId, notchWindow] of notchWindows) {
+		if (notchWindow.isDestroyed()) {
+			continue;
+		}
+		notchWindow.setMovable(notchPreferences.position === "free" && !notchPreferences.locked);
+		const display = screen.getAllDisplays().find((item) => item.id === displayId) ?? screen.getPrimaryDisplay();
+		const [width, height] = notchWindow.getContentSize();
+		positionNotchWindow(notchWindow, display, width, height);
+	}
+
+	for (const browserWindow of BrowserWindow.getAllWindows()) {
+		if (!browserWindow.isDestroyed()) {
+			browserWindow.webContents.send("notch:preferences-changed", notchPreferences);
+		}
+	}
+	return notchPreferences;
+}
+
 function ensureTray() {
 	if (tray) {
 		return tray;
@@ -694,6 +977,10 @@ function ensureTray() {
 	const contextMenu = Menu.buildFromTemplate([
 		{ label: "Show Atlas", click: () => showMainWindow() },
 		{ label: "Open Mini Window", click: () => createMiniWindow() },
+		{
+			label: "Toggle Smart Notch",
+			click: () => applyNotchPreferences({ ...notchPreferences, enabled: !notchPreferences.enabled }),
+		},
 		{ type: "separator" },
 		{
 			label: "Quit",
@@ -710,23 +997,39 @@ function ensureTray() {
 function wireIpc() {
 	ipcMain.handle("map:list", () => db.listMaps());
 
-	ipcMain.handle("map:create", (_event, name) => {
+	ipcMain.handle("map:create", (_event, name, options = {}) => {
 		if (!name || !name.trim()) {
-			throw new Error("Map name is required.");
+			throw new Error("Environment name is required.");
 		}
-		const createdMap = db.createMap(name.trim());
+		const createdMap = db.createMap(name.trim(), {
+			icon: options?.icon ?? null,
+			accent: options?.accent ?? null,
+			preset: options?.preset ?? null,
+		});
 		openPrimaryWindowByMapState();
 		return createdMap;
 	});
 
 	ipcMain.handle("map:rename", (_event, mapId, name) => {
 		if (!mapId) {
-			throw new Error("Map id missing.");
+			throw new Error("Environment id missing.");
 		}
 		if (!name || !name.trim()) {
-			throw new Error("Map name is required.");
+			throw new Error("Environment name is required.");
 		}
 		return db.renameMap(mapId, name.trim());
+	});
+
+	ipcMain.handle("map:update", (_event, mapId, fields = {}) => {
+		if (!mapId) {
+			throw new Error("Environment id missing.");
+		}
+		const sanitized = {};
+		if (typeof fields?.name === "string" && fields.name.trim()) sanitized.name = fields.name.trim();
+		if (typeof fields?.icon === "string" || fields?.icon === null) sanitized.icon = fields.icon;
+		if (typeof fields?.accent === "string" || fields?.accent === null) sanitized.accent = fields.accent;
+		if (typeof fields?.preset === "string" || fields?.preset === null) sanitized.preset = fields.preset;
+		return db.updateMap(mapId, sanitized);
 	});
 
 	ipcMain.handle("map:delete", (_event, mapId) => {
@@ -917,6 +1220,44 @@ function wireIpc() {
 		return true;
 	});
 
+	ipcMain.handle("app:setAccent", (_event, value) => {
+		// Relay the accent change to every window so the whole app updates live.
+		for (const browserWindow of BrowserWindow.getAllWindows()) {
+			if (!browserWindow.isDestroyed()) {
+				browserWindow.webContents.send("accent:changed", value);
+			}
+		}
+		return true;
+	});
+
+	ipcMain.handle("notch:getPreferences", () => notchPreferences);
+
+	ipcMain.handle("notch:setPreferences", (_event, prefs) => applyNotchPreferences({ ...notchPreferences, ...(prefs || {}) }));
+
+	ipcMain.handle("notch:resize", (event, width, height) => {
+		const notchWindow = BrowserWindow.fromWebContents(event.sender);
+		if (!notchWindow || notchWindow.isDestroyed()) {
+			return false;
+		}
+		const display =
+			screen.getAllDisplays().find((item) => item.id === notchWindow.notchDisplayId) ?? screen.getPrimaryDisplay();
+		const safeWidth = Math.max(120, Math.min(900, Math.ceil(Number(width) || 0)));
+		const safeHeight = Math.max(44, Math.min(600, Math.ceil(Number(height) || 0)));
+		positionNotchWindow(notchWindow, display, safeWidth, safeHeight);
+		return true;
+	});
+
+	ipcMain.handle("screen:listDisplays", () => {
+		const primaryId = screen.getPrimaryDisplay().id;
+		return screen.getAllDisplays().map((display, index) => ({
+			id: display.id,
+			label: `Display ${index + 1} (${display.size.width}x${display.size.height})${display.id === primaryId ? " — Primary" : ""}`,
+			isPrimary: display.id === primaryId,
+			width: display.size.width,
+			height: display.size.height,
+		}));
+	});
+
 	ipcMain.handle("window:openMini", () => {
 		createMiniWindow();
 		return true;
@@ -941,6 +1282,28 @@ function wireIpc() {
 
 	ipcMain.handle("window:showMain", () => {
 		showMainWindow();
+		return true;
+	});
+
+	// Brings the main window forward only if it already exists, without launching
+	// it — the notch can run fully standalone, so this never force-opens the app.
+	ipcMain.handle("window:focusMainIfOpen", () => {
+		if (!mainWindow || mainWindow.isDestroyed()) {
+			return false;
+		}
+		if (mainWindow.isMinimized()) {
+			mainWindow.restore();
+		}
+		mainWindow.show();
+		mainWindow.focus();
+		return true;
+	});
+
+	ipcMain.handle("window:navigate", (_event, view) => {
+		showMainWindow();
+		if (mainWindow && !mainWindow.isDestroyed()) {
+			mainWindow.webContents.send("window:navigate-changed", view);
+		}
 		return true;
 	});
 
@@ -1053,6 +1416,7 @@ function wireIpc() {
 
 app.whenReady().then(async () => {
 	loadUpdatePreferences();
+	loadNotchPreferences();
 	autoUpdater.autoDownload = false;
 	autoUpdater.autoInstallOnAppQuit = true;
 
@@ -1090,6 +1454,11 @@ app.whenReady().then(async () => {
 	if (updatePreferences.autoCheck) {
 		void checkLatestGitHubVersion(updatePreferences.includeBeta);
 	}
+
+	// Re-sync notch windows whenever a monitor is connected/disconnected so the
+	// selection (and the "always at least one" fallback) stays accurate.
+	screen.on("display-added", () => syncNotchWindows());
+	screen.on("display-removed", () => syncNotchWindows());
 
 	app.on("activate", () => {
 		if (BrowserWindow.getAllWindows().length === 0) {

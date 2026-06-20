@@ -951,7 +951,7 @@ export function NotesView({ notebook, onUpdateNotebookByMap }: MainContentViewsP
 	return (
 		<div className="notebook-layout">
 			<section
-				className="atlas-card notebook-canvas-wrap"
+				className="notebook-canvas-wrap"
 				onMouseMove={onMouseMove}
 				onMouseUp={endInteraction}
 				onMouseLeave={endInteraction}

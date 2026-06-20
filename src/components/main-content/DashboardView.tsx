@@ -65,7 +65,7 @@ export function DashboardView({
 						<strong className="text-body-regular font-semibold">{cleanAppLabel(currentAppName)}</strong>
 					</div>
 					<div>
-						<span className="text-data-small">Current map</span>
+						<span className="text-data-small">Current environment</span>
 						<strong className="text-body-regular font-semibold">{selectedMapName}</strong>
 					</div>
 				</div>
@@ -93,7 +93,7 @@ export function DashboardView({
 
 			<section className="atlas-card">
 				<header className="card-head">
-					<h3 className="text-subtitle-small">Time per map</h3>
+					<h3 className="text-subtitle-small">Time per environment</h3>
 				</header>
 				<ul className="simple-list">
 					{dashboard.timePerMap.map((entry) => (
@@ -102,7 +102,7 @@ export function DashboardView({
 							<strong className="text-body-small font-semibold">{formatDuration(entry.duration)}</strong>
 						</li>
 					))}
-					{!dashboard.timePerMap.length && <li className="empty">No map totals yet.</li>}
+					{!dashboard.timePerMap.length && <li className="empty">No environment totals yet.</li>}
 				</ul>
 			</section>
 

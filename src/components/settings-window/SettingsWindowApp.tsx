@@ -1,21 +1,51 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { MinusIcon, XMarkIcon } from "@heroicons/react/24/outline";
-import { ArrowPathIcon, CommandLineIcon, PaintBrushIcon, WrenchScrewdriverIcon } from "@heroicons/react/24/solid";
-import { Select, ThemeModePicker, Toggle } from "../ui";
-import type { AppRelease, UpdateCheckResult } from "../../types";
+import { ChevronDownIcon, ChevronUpIcon, MinusIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import {
+	ArrowPathIcon,
+	CommandLineIcon,
+	PaintBrushIcon,
+	RectangleGroupIcon,
+	WrenchScrewdriverIcon,
+} from "@heroicons/react/24/solid";
+import { AccentPicker, Select, ThemeModePicker, Toggle } from "../ui";
+import { useAccent } from "../../hooks";
+import type {
+	AppRelease,
+	DisplaySummary,
+	NotchActionButtonConfig,
+	NotchActivation,
+	NotchIdleOpacity,
+	NotchInfoItemConfig,
+	NotchPosition,
+	NotchPreferences,
+	UpdateCheckResult,
+} from "../../types";
 import logo from "../../assets/logosmall.png";
 
-type SettingsTab = "general" | "appearance" | "keybindings" | "updates";
+type SettingsTab = "general" | "appearance" | "notch" | "keybindings" | "updates";
 
 type ThemeOption = "dark" | "light" | "system";
 
 const settingsTabs: Array<{ id: SettingsTab; label: string; icon: typeof WrenchScrewdriverIcon }> = [
 	{ id: "general", label: "General", icon: WrenchScrewdriverIcon },
 	{ id: "appearance", label: "Appearance", icon: PaintBrushIcon },
+	{ id: "notch", label: "Smart Notch", icon: RectangleGroupIcon },
 	{ id: "keybindings", label: "Keybindings", icon: CommandLineIcon },
 	{ id: "updates", label: "Updates", icon: ArrowPathIcon },
 ];
+
+const ACTION_BUTTON_LABELS: Record<NotchActionButtonConfig["id"], string> = {
+	activity: "Activity",
+	dashboard: "Dashboard",
+	notes: "Notes",
+	tasks: "Tasks",
+};
+
+const INFO_ITEM_LABELS: Record<NotchInfoItemConfig["id"], string> = {
+	timer: "Active timer",
+	todo: "First to-do",
+};
 
 const readStorage = <T,>(key: string, fallback: T): T => {
 	try {
@@ -43,6 +73,28 @@ export function SettingsWindowApp() {
 		() => false,
 	);
 	const resolvedTheme: "dark" | "light" = theme === "system" ? (prefersDark ? "dark" : "light") : theme;
+	const { accent, setAccent } = useAccent();
+	const [notchPrefs, setNotchPrefs] = useState<NotchPreferences>({
+		enabled: true,
+		position: "top",
+		x: null,
+		y: null,
+		idleOpacity: "balanced",
+		locked: false,
+		activation: "always",
+		displayIds: [],
+		actionButtons: [
+			{ id: "activity", enabled: true },
+			{ id: "dashboard", enabled: true },
+			{ id: "notes", enabled: true },
+			{ id: "tasks", enabled: true },
+		],
+		infoItems: [
+			{ id: "timer", enabled: true },
+			{ id: "todo", enabled: true },
+		],
+	});
+	const [displays, setDisplays] = useState<DisplaySummary[]>([]);
 	const [timeFormat, setTimeFormat] = useState(() => readStorage("atlas.settings.timeFormat", "24h"));
 	const [startWeekOn, setStartWeekOn] = useState(() => readStorage("atlas.settings.startWeekOn", "monday"));
 	const [density, setDensity] = useState(() => readStorage("atlas.settings.density", "comfortable"));
@@ -97,6 +149,68 @@ export function SettingsWindowApp() {
 			.then((value) => setPlatform(value || "win32"))
 			.catch(() => setPlatform("win32"));
 	}, []);
+
+	useEffect(() => {
+		window.atlas
+			.getNotchPreferences()
+			.then(setNotchPrefs)
+			.catch(() => undefined);
+		const unsubscribe = window.atlas.onNotchPreferencesChanged?.(setNotchPrefs);
+		return () => unsubscribe?.();
+	}, []);
+
+	useEffect(() => {
+		window.atlas
+			.listDisplays()
+			.then(setDisplays)
+			.catch(() => undefined);
+	}, []);
+
+	const updateNotch = (patch: Partial<NotchPreferences>) => {
+		setNotchPrefs((current) => ({ ...current, ...patch }));
+		void window.atlas.setNotchPreferences(patch);
+	};
+
+	// Empty selection means "primary display only" by convention.
+	const selectedDisplayIds =
+		notchPrefs.displayIds.length > 0
+			? notchPrefs.displayIds
+			: displays.filter((display) => display.isPrimary).map((display) => display.id);
+
+	const toggleNotchDisplay = (displayId: number) => {
+		const isSelected = selectedDisplayIds.includes(displayId);
+		// Keep at least one display selected.
+		if (isSelected && selectedDisplayIds.length <= 1) {
+			return;
+		}
+		const next = isSelected
+			? selectedDisplayIds.filter((id) => id !== displayId)
+			: [...selectedDisplayIds, displayId];
+		updateNotch({ displayIds: next });
+	};
+
+	const toggleActionButton = (id: NotchActionButtonConfig["id"]) => {
+		const next = notchPrefs.actionButtons.map((button) =>
+			button.id === id ? { ...button, enabled: !button.enabled } : button,
+		);
+		updateNotch({ actionButtons: next });
+	};
+
+	const toggleInfoItem = (id: NotchInfoItemConfig["id"]) => {
+		const next = notchPrefs.infoItems.map((item) => (item.id === id ? { ...item, enabled: !item.enabled } : item));
+		updateNotch({ infoItems: next });
+	};
+
+	const moveInfoItem = (id: NotchInfoItemConfig["id"], direction: "up" | "down") => {
+		const index = notchPrefs.infoItems.findIndex((item) => item.id === id);
+		const targetIndex = direction === "up" ? index - 1 : index + 1;
+		if (index < 0 || targetIndex < 0 || targetIndex >= notchPrefs.infoItems.length) {
+			return;
+		}
+		const next = [...notchPrefs.infoItems];
+		[next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+		updateNotch({ infoItems: next });
+	};
 
 	useEffect(() => {
 		document.documentElement.dataset.theme = resolvedTheme;
@@ -259,10 +373,9 @@ export function SettingsWindowApp() {
 					<div className="titlebar-left no-drag flex min-w-0 items-center gap-2 text-base">
 						<img
 							src={logo}
-							alt="Atlas Logo"
+							alt="Atlas"
 							className="h-7 w-7 shrink-0"
 						/>
-						<span>Atlas</span>
 					</div>
 					<div className="titlebar-center absolute left-1/2 w-2/5 max-w-2xl min-w-72 -translate-x-1/2">
 						<div className="inline-flex h-6 w-full items-center justify-center rounded-lg border border-neutral-300 px-2.5 py-0.5 text-body-small text-neutral-700 dark:border-neutral-500 dark:text-neutral-50">
@@ -398,6 +511,12 @@ export function SettingsWindowApp() {
 												onChange={(nextTheme) => setTheme(nextTheme)}
 											/>
 										</div>
+										<div className="atlas-settings-card-stack">
+											<AccentPicker
+												value={accent}
+												onChange={setAccent}
+											/>
+										</div>
 										<Toggle
 											label="Soft panel animations"
 											description="Smooth transitions between dashboard, notes and tasks"
@@ -410,6 +529,218 @@ export function SettingsWindowApp() {
 											checked={highlightSession}
 											onChange={setHighlightSession}
 										/>
+									</div>
+								)}
+
+								{activeTab === "notch" && (
+									<div className="flex gap-3 flex-col">
+										<div className="atlas-settings-card-stack grid gap-3">
+											<Toggle
+												label="Enable smart notch"
+												description="A small floating bar for quick navigation, your active environment and a position lock."
+												checked={notchPrefs.enabled}
+												onChange={(value) => updateNotch({ enabled: value })}
+											/>
+											{notchPrefs.enabled && (
+												<>
+													<div className="grid gap-2">
+														<span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
+															Action buttons
+														</span>
+														<div className="grid gap-1.5">
+															{notchPrefs.actionButtons.map((button) => (
+																<button
+																	key={button.id}
+																	type="button"
+																	onClick={() => toggleActionButton(button.id)}
+																	className="flex items-center justify-between rounded-lg border border-neutral-200 px-3 py-2 text-left text-sm transition-colors hover:bg-neutral-50 dark:border-neutral-600 dark:hover:bg-neutral-700/60"
+																>
+																	<span className="text-neutral-700 dark:text-neutral-100">
+																		{ACTION_BUTTON_LABELS[button.id]}
+																	</span>
+																	<span
+																		className={`flex h-4 w-4 items-center justify-center rounded border ${
+																			button.enabled
+																				? "border-primary bg-primary"
+																				: "border-neutral-300 dark:border-neutral-500"
+																		}`}
+																	>
+																		{button.enabled && (
+																			<span className="h-2 w-2 rounded-sm bg-white" />
+																		)}
+																	</span>
+																</button>
+															))}
+														</div>
+													</div>
+
+													<div className="grid gap-2">
+														<span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
+															Information screen
+														</span>
+														<p className="m-0 text-xs text-neutral-500 dark:text-neutral-300">
+															Shows only when there's something to display. Ranked top to bottom — the
+															highest-ranked enabled item with information wins the slot.
+														</p>
+														<div className="grid gap-1.5">
+															{notchPrefs.infoItems.map((item, index) => (
+																<div
+																	key={item.id}
+																	className="flex items-center justify-between rounded-lg border border-neutral-200 px-3 py-2 text-sm dark:border-neutral-600"
+																>
+																	<span className="text-neutral-700 dark:text-neutral-100">
+																		{INFO_ITEM_LABELS[item.id]}
+																	</span>
+																	<div className="flex items-center gap-1.5">
+																		<button
+																			type="button"
+																			onClick={() => moveInfoItem(item.id, "up")}
+																			disabled={index === 0}
+																			className="flex h-6 w-6 items-center justify-center rounded text-neutral-500 transition-colors hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-30 dark:text-neutral-300 dark:hover:bg-neutral-700"
+																			title="Move up"
+																			aria-label="Move up"
+																		>
+																			<ChevronUpIcon className="h-3.5 w-3.5" />
+																		</button>
+																		<button
+																			type="button"
+																			onClick={() => moveInfoItem(item.id, "down")}
+																			disabled={index === notchPrefs.infoItems.length - 1}
+																			className="flex h-6 w-6 items-center justify-center rounded text-neutral-500 transition-colors hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-30 dark:text-neutral-300 dark:hover:bg-neutral-700"
+																			title="Move down"
+																			aria-label="Move down"
+																		>
+																			<ChevronDownIcon className="h-3.5 w-3.5" />
+																		</button>
+																		<button
+																			type="button"
+																			onClick={() => toggleInfoItem(item.id)}
+																			className={`flex h-4 w-4 items-center justify-center rounded border ${
+																				item.enabled
+																					? "border-primary bg-primary"
+																					: "border-neutral-300 dark:border-neutral-500"
+																			}`}
+																			title={item.enabled ? "Disable" : "Enable"}
+																			aria-label={item.enabled ? "Disable" : "Enable"}
+																		>
+																			{item.enabled && (
+																				<span className="h-2 w-2 rounded-sm bg-white" />
+																			)}
+																		</button>
+																	</div>
+																</div>
+															))}
+														</div>
+													</div>
+
+													<Select
+														label="Run notch"
+														value={notchPrefs.activation}
+														onChange={(value) => updateNotch({ activation: value as NotchActivation })}
+														options={[
+															{
+																value: "always",
+																label: "Independently",
+																description: "Stays around even when Atlas's main window is closed, including at startup",
+															},
+															{
+																value: "withMain",
+																label: "Only with main window",
+																description: "Only shows up while the main Atlas window is open",
+															},
+														]}
+													/>
+													<Select
+														label="Notch position"
+														value={notchPrefs.position}
+														onChange={(value) => updateNotch({ position: value as NotchPosition })}
+														options={[
+															{
+																value: "top",
+																label: "Top center",
+																description: "Docked flush against the top edge",
+															},
+															{
+																value: "left",
+																label: "Left",
+																description: "Middle of the left edge",
+															},
+															{
+																value: "right",
+																label: "Right",
+																description: "Middle of the right edge",
+															},
+															{
+																value: "free",
+																label: "Free floating",
+																description: "Drag it anywhere you like",
+															},
+														]}
+													/>
+													<Select
+														label="Idle transparency"
+														value={notchPrefs.idleOpacity}
+														onChange={(value) => updateNotch({ idleOpacity: value as NotchIdleOpacity })}
+														options={[
+															{
+																value: "subtle",
+																label: "Subtle",
+																description: "Nearly invisible until you hover",
+															},
+															{
+																value: "balanced",
+																label: "Balanced",
+																description: "Visible but unobtrusive",
+															},
+															{
+																value: "solid",
+																label: "Solid",
+																description: "Always clearly visible",
+															},
+														]}
+													/>
+													<Toggle
+														label="Lock position"
+														description="Prevent the free-floating notch from being dragged accidentally"
+														checked={notchPrefs.locked}
+														onChange={(value) => updateNotch({ locked: value })}
+													/>
+													{displays.length > 1 && (
+														<div className="grid gap-2">
+															<span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
+																Show notch on
+															</span>
+															<div className="grid gap-1.5">
+																{displays.map((display) => {
+																	const checked = selectedDisplayIds.includes(display.id);
+																	return (
+																		<button
+																			key={display.id}
+																			type="button"
+																			onClick={() => toggleNotchDisplay(display.id)}
+																			className="flex items-center justify-between rounded-lg border border-neutral-200 px-3 py-2 text-left text-sm transition-colors hover:bg-neutral-50 dark:border-neutral-600 dark:hover:bg-neutral-700/60"
+																		>
+																			<span className="text-neutral-700 dark:text-neutral-100">
+																				{display.label}
+																			</span>
+																			<span
+																				className={`flex h-4 w-4 items-center justify-center rounded border ${
+																					checked
+																						? "border-primary bg-primary"
+																						: "border-neutral-300 dark:border-neutral-500"
+																				}`}
+																			>
+																				{checked && <span className="h-2 w-2 rounded-sm bg-white" />}
+																			</span>
+																		</button>
+																	);
+																})}
+															</div>
+														</div>
+													)}
+												</>
+											)}
+										</div>
 									</div>
 								)}
 

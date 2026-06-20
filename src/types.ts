@@ -1,6 +1,11 @@
+export type EnvironmentPreset = "work" | "coding" | "gaming" | "montage" | "study" | "design" | "writing" | "custom";
+
 export type MapItem = {
 	id: string;
 	name: string;
+	icon?: string | null;
+	accent?: string | null;
+	preset?: string | null;
 	created_at: string;
 };
 
@@ -90,7 +95,7 @@ export type DashboardOverview = {
 	};
 };
 
-export type AtlasView = "dashboard" | "logbook" | "tasks" | "analysis" | "notes" | "settings";
+export type AtlasView = "dashboard" | "activity" | "tasks" | "notes" | "settings";
 
 export type UpdateCheckResult = {
 	hasUpdate: boolean;
@@ -121,4 +126,49 @@ export type UpdatePreferences = {
 export type DownloadAndInstallResult = {
 	started: boolean;
 	error?: string;
+};
+
+export type NotchPosition = "top" | "left" | "right" | "free";
+
+export type NotchIdleOpacity = "subtle" | "balanced" | "solid";
+
+export type NotchActivation = "always" | "withMain";
+
+export type NotchActionButtonId = "activity" | "dashboard" | "notes" | "tasks";
+
+export type NotchActionButtonConfig = {
+	id: NotchActionButtonId;
+	enabled: boolean;
+};
+
+export type NotchInfoItemId = "timer" | "todo";
+
+// Order is priority: the first enabled item that has something to show wins the
+// single information slot.
+export type NotchInfoItemConfig = {
+	id: NotchInfoItemId;
+	enabled: boolean;
+};
+
+export type NotchPreferences = {
+	enabled: boolean;
+	position: NotchPosition;
+	x: number | null;
+	y: number | null;
+	idleOpacity: NotchIdleOpacity;
+	locked: boolean;
+	activation: NotchActivation;
+	// Which displays show the notch. Empty means "primary display only", and
+	// any id no longer connected falls back to the primary display.
+	displayIds: number[];
+	actionButtons: NotchActionButtonConfig[];
+	infoItems: NotchInfoItemConfig[];
+};
+
+export type DisplaySummary = {
+	id: number;
+	label: string;
+	isPrimary: boolean;
+	width: number;
+	height: number;
 };

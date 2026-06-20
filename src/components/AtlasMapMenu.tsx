@@ -1,7 +1,15 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { PencilIcon, PlusIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { ArrowLeftIcon, PencilIcon, PlusIcon, SwatchIcon, TrashIcon } from "@heroicons/react/24/outline";
 import type { MapItem } from "../types";
+import { AccentPicker } from "./ui";
+import {
+	ENVIRONMENT_ICON_KEYS,
+	ENVIRONMENT_PRESETS,
+	getEnvironmentIcon,
+	type EnvironmentPresetTemplate,
+} from "../environments";
+import { DEFAULT_ACCENT } from "../utils/accent";
 
 type AtlasMapMenuProps = {
 	showMapMenu: boolean;
@@ -18,10 +26,12 @@ type AtlasMapMenuProps = {
 	onCreateMap: () => void;
 	onRenameMap: () => void;
 	onDeleteMap: () => void;
+	onCreatePresetEnvironment: (preset: EnvironmentPresetTemplate) => void;
+	onUpdateEnvironment: (fields: Partial<Pick<MapItem, "name" | "icon" | "accent" | "preset">>) => void;
 };
 
-type MenuScreen = "default" | "create-map" | "rename-current";
-type DefaultAction = "rename" | "delete" | "create";
+type MenuScreen = "default" | "create-map" | "rename-current" | "customize";
+type DefaultAction = "rename" | "customize" | "delete" | "create";
 type DefaultNavItem = { kind: "action"; action: DefaultAction } | { kind: "map"; mapId: string };
 
 const menuInputClassName =
@@ -42,7 +52,10 @@ export function AtlasMapMenu({
 	onCreateMap,
 	onRenameMap,
 	onDeleteMap,
+	onCreatePresetEnvironment,
+	onUpdateEnvironment,
 }: AtlasMapMenuProps) {
+	const selectedMap = maps.find((mapItem) => mapItem.id === selectedMapId) ?? null;
 	const menuRef = useRef<HTMLDivElement | null>(null);
 	const searchInputRef = useRef<HTMLInputElement | null>(null);
 	const editorInputRef = useRef<HTMLInputElement | null>(null);
@@ -64,9 +77,10 @@ export function AtlasMapMenu({
 	const filteredActions = useMemo(() => {
 		const query = mapSearch.trim().toLowerCase();
 		const actions: Array<{ action: DefaultAction; label: string; disabled?: boolean }> = [
-			{ action: "rename", label: "pas mapnaam aan" },
-			{ action: "delete", label: "verwijder huidige map", disabled: !canDeleteMap },
-			{ action: "create", label: "maak nieuwe map" },
+			{ action: "rename", label: "rename environment" },
+			{ action: "customize", label: "customize environment icon color" },
+			{ action: "delete", label: "delete environment", disabled: !canDeleteMap },
+			{ action: "create", label: "new environment" },
 		];
 
 		if (!query) {
@@ -193,13 +207,13 @@ export function AtlasMapMenu({
 	const submitCreateMap = () => {
 		const candidate = newMapName.trim();
 		if (!candidate) {
-			setCreateMapError("Naam mag niet leeg zijn.");
+			setCreateMapError("Name can't be empty.");
 			return;
 		}
 
 		const exists = maps.some((mapItem) => mapItem.name.trim().toLowerCase() === candidate.toLowerCase());
 		if (exists) {
-			setCreateMapError("Mapnaam bestaat al.");
+			setCreateMapError("That environment name already exists.");
 			return;
 		}
 
@@ -211,7 +225,7 @@ export function AtlasMapMenu({
 	const submitRenameCurrentMap = () => {
 		const candidate = renameMapName.trim();
 		if (!candidate) {
-			setRenameMapError("Naam mag niet leeg zijn.");
+			setRenameMapError("Name can't be empty.");
 			return;
 		}
 
@@ -219,7 +233,7 @@ export function AtlasMapMenu({
 			(mapItem) => mapItem.id !== selectedMapId && mapItem.name.trim().toLowerCase() === candidate.toLowerCase(),
 		);
 		if (exists) {
-			setRenameMapError("Mapnaam bestaat al.");
+			setRenameMapError("That environment name already exists.");
 			return;
 		}
 
@@ -241,6 +255,11 @@ export function AtlasMapMenu({
 
 		if (item.action === "rename") {
 			openRenameCurrentScreen();
+			return;
+		}
+
+		if (item.action === "customize") {
+			setMenuScreen("customize");
 			return;
 		}
 
@@ -296,6 +315,7 @@ export function AtlasMapMenu({
 		placeholder,
 		error,
 		submitLabel,
+		footer,
 	}: {
 		value: string;
 		onChange: (next: string) => void;
@@ -303,6 +323,7 @@ export function AtlasMapMenu({
 		placeholder: string;
 		error: string;
 		submitLabel: string;
+		footer?: ReactNode;
 	}) => {
 		return (
 			<div className="border-b border-neutral-200 p-1.5 dark:border-neutral-600">
@@ -332,7 +353,7 @@ export function AtlasMapMenu({
 				<div
 					className="w-full h-full max-h-80 grid-cols-1 grid"
 					role="listbox"
-					aria-label="Map acties"
+					aria-label="Environment actions"
 				>
 					<button
 						type="button"
@@ -347,6 +368,7 @@ export function AtlasMapMenu({
 					</button>
 				</div>
 				{error && <span className="px-2 text-data-small text-red-500 dark:text-red-300">{error}</span>}
+				{footer}
 			</div>
 		);
 	};
@@ -384,17 +406,18 @@ export function AtlasMapMenu({
 										}
 									}}
 									className={menuInputClassName}
-									placeholder="Search maps and actions"
+									placeholder="Search environments and actions"
 								/>
 							</div>
 							<div
 								className="w-full h-full max-h-80 grid-cols-1 grid"
 								role="listbox"
-								aria-label="Map acties en maps"
+								aria-label="Environment actions and environments"
 							>
 								<div className="grid gap-0.5 overflow-auto p-1 [scrollbar-width:thin] [scrollbar-color:var(--neutral-400)_transparent] dark:[scrollbar-color:var(--neutral-500)_transparent]">
 									{(() => {
 										const renameIndex = getActionNavIndex("rename");
+										const customizeIndex = getActionNavIndex("customize");
 										const deleteIndex = getActionNavIndex("delete");
 										const createIndex = getActionNavIndex("create");
 
@@ -419,9 +442,35 @@ export function AtlasMapMenu({
 														onClick={openRenameCurrentScreen}
 													>
 														<PencilIcon className="h-3.5 w-3.5 text-neutral-400 dark:text-neutral-500" />
-														<span className="truncate text-[13px]">Pas mapnaam aan</span>
+														<span className="truncate text-[13px]">Rename environment</span>
 														<span className="text-[10px] uppercase tracking-[0.12em] text-neutral-400 dark:text-neutral-400">
 															{activeItemIndex === renameIndex ? "Enter" : ""}
+														</span>
+													</button>
+												)}
+
+												{customizeIndex >= 0 && (
+													<button
+														type="button"
+														role="option"
+														data-nav-index={customizeIndex >= 0 ? customizeIndex : undefined}
+														className={`group grid grid-cols-[auto_1fr_auto] items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition ${
+															activeItemIndex === customizeIndex
+																? "bg-neutral-100 text-neutral-800 dark:bg-neutral-700 dark:text-neutral-50"
+																: "text-neutral-700 hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-700"
+														}`}
+														onMouseEnter={() =>
+															customizeIndex >= 0 && setActiveItemIndex(customizeIndex)
+														}
+														onFocus={() =>
+															customizeIndex >= 0 && setActiveItemIndex(customizeIndex)
+														}
+														onClick={() => setMenuScreen("customize")}
+													>
+														<SwatchIcon className="h-3.5 w-3.5 text-neutral-400 dark:text-neutral-500" />
+														<span className="truncate text-[13px]">Customize environment</span>
+														<span className="text-[10px] uppercase tracking-[0.12em] text-neutral-400 dark:text-neutral-400">
+															{activeItemIndex === customizeIndex ? "Enter" : ""}
 														</span>
 													</button>
 												)}
@@ -447,7 +496,7 @@ export function AtlasMapMenu({
 													>
 														<TrashIcon className="h-3.5 w-3.5 text-red-500 dark:text-red-300" />
 														<span className="truncate text-[13px]">
-															Verwijder huidige map
+															Delete environment
 														</span>
 														<span className="text-[10px] uppercase tracking-[0.12em] text-red-400 dark:text-red-300">
 															{activeItemIndex === deleteIndex ? "Enter" : ""}
@@ -474,7 +523,7 @@ export function AtlasMapMenu({
 														onClick={openCreateMapScreen}
 													>
 														<PlusIcon className="h-3.5 w-3.5 text-neutral-400 dark:text-neutral-500" />
-														<span className="truncate text-[13px]">Maak nieuwe map</span>
+														<span className="truncate text-[13px]">New environment</span>
 														<span className="text-[10px] uppercase tracking-[0.12em] text-neutral-400 dark:text-neutral-400">
 															{activeItemIndex === createIndex ? "Enter" : ""}
 														</span>
@@ -486,7 +535,7 @@ export function AtlasMapMenu({
 								</div>
 
 								<div className="px-1 py-1 text-data-small text-[9px] font-medium uppercase tracking-[0.12em] text-neutral-500 dark:text-neutral-300 border-b border-neutral-200 dark:border-neutral-600">
-									Maps
+									Environments
 								</div>
 
 								<div className="grid max-h-[188px] gap-0.5 overflow-auto p-1 [scrollbar-width:thin] [scrollbar-color:var(--neutral-400)_transparent] dark:[scrollbar-color:var(--neutral-500)_transparent]">
@@ -497,12 +546,15 @@ export function AtlasMapMenu({
 									)}
 									{filteredMaps.length === 0 && (
 										<p className="rounded-md px-2 py-1.5 text-[13px] text-neutral-500 dark:text-neutral-300">
-											{mapSearch ? "No map matches this search." : "No other maps yet."}
+											{mapSearch
+											? "No environment matches this search."
+											: "No other environments yet."}
 										</p>
 									)}
 									{filteredMaps.map((mapItem) => {
 										const navIndex = getMapNavIndex(mapItem.id);
 										const isActiveKeyboard = navIndex >= 0 && activeItemIndex === navIndex;
+										const ItemIcon = getEnvironmentIcon(mapItem.icon);
 
 										return (
 											<button
@@ -510,7 +562,7 @@ export function AtlasMapMenu({
 												type="button"
 												role="option"
 												data-nav-index={navIndex >= 0 ? navIndex : undefined}
-												className={`group grid grid-cols-[1fr_auto] items-center rounded-md border border-transparent px-2 py-1.5 text-left transition ${
+												className={`group grid grid-cols-[auto_1fr_auto] items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition ${
 													isActiveKeyboard
 														? "bg-neutral-100 text-neutral-800 dark:bg-neutral-700 dark:text-neutral-50"
 														: "text-neutral-700 hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-700"
@@ -519,6 +571,10 @@ export function AtlasMapMenu({
 												onFocus={() => navIndex >= 0 && setActiveItemIndex(navIndex)}
 												onClick={() => onSelectMap(mapItem.id)}
 											>
+												<ItemIcon
+													className="h-3.5 w-3.5 shrink-0"
+													style={{ color: mapItem.accent ?? undefined }}
+												/>
 												<span className="truncate text-[13px]">{mapItem.name}</span>
 												<span
 													className={`text-[10px] uppercase tracking-[0.12em] ${
@@ -543,11 +599,42 @@ export function AtlasMapMenu({
 								onNewMapNameChange(next);
 							},
 							onSubmit: submitCreateMap,
-							placeholder: "Nieuwe mapnaam",
+							placeholder: "New environment name",
 							error: createMapError,
-							submitLabel: "Maak nieuwe map",
+							submitLabel: "Create environment",
+							footer: (
+								<div className="px-1 pt-1.5">
+									<p className="px-1 pb-1 text-[9px] font-medium uppercase tracking-[0.12em] text-neutral-500 dark:text-neutral-300">
+										Or start from a preset
+									</p>
+									<div className="grid grid-cols-2 gap-1">
+										{ENVIRONMENT_PRESETS.map((preset) => {
+											const Icon = getEnvironmentIcon(preset.icon);
+											return (
+												<button
+													key={preset.id}
+													type="button"
+													onClick={() => onCreatePresetEnvironment(preset)}
+													className="group flex items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left text-neutral-700 transition hover:bg-neutral-100 dark:text-neutral-100 dark:hover:bg-neutral-700"
+												>
+													<span
+														className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
+														style={{
+															backgroundColor: `${preset.accent}1f`,
+															color: preset.accent,
+														}}
+													>
+														<Icon className="h-3.5 w-3.5" />
+													</span>
+													<span className="truncate text-[13px]">{preset.name}</span>
+												</button>
+											);
+										})}
+									</div>
+								</div>
+							),
 						})
-					) : (
+					) : menuScreen === "rename-current" ? (
 						renderEditorScreen({
 							value: renameMapName,
 							onChange: (next) => {
@@ -555,10 +642,67 @@ export function AtlasMapMenu({
 								onRenameMapNameChange(next);
 							},
 							onSubmit: submitRenameCurrentMap,
-							placeholder: "Nieuwe mapnaam",
+							placeholder: "New environment name",
 							error: renameMapError,
-							submitLabel: "Pas huidige mapnaam aan",
+							submitLabel: "Rename environment",
 						})
+					) : (
+						<div className="border-b border-neutral-200 p-2 dark:border-neutral-600">
+							<div className="flex items-center gap-2 px-1 pb-2">
+								<button
+									type="button"
+									onClick={() => setMenuScreen("default")}
+									className="inline-flex h-7 w-7 items-center justify-center rounded-md text-neutral-500 transition hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-700"
+									aria-label="Back"
+								>
+									<ArrowLeftIcon className="h-4 w-4" />
+								</button>
+								<span className="truncate text-[13px] font-medium">
+									Customize {selectedMap?.name ?? "environment"}
+								</span>
+							</div>
+
+							<p className="px-1 pb-1 text-[9px] font-medium uppercase tracking-[0.12em] text-neutral-500 dark:text-neutral-300">
+								Icon
+							</p>
+							<div className="grid grid-cols-6 gap-1 px-1 pb-3">
+								{ENVIRONMENT_ICON_KEYS.map((key) => {
+									const Icon = getEnvironmentIcon(key);
+									const active = (selectedMap?.icon ?? "") === key;
+									return (
+										<button
+											key={key}
+											type="button"
+											onClick={() => onUpdateEnvironment({ icon: key })}
+											aria-pressed={active}
+											className={`inline-flex h-8 w-full items-center justify-center rounded-md border transition ${
+												active
+													? "border-primary bg-primary/10 text-primary"
+													: "border-transparent text-neutral-500 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-700"
+											}`}
+										>
+											<Icon className="h-4 w-4" />
+										</button>
+									);
+								})}
+							</div>
+
+							<div className="px-1">
+								<AccentPicker
+									value={selectedMap?.accent || DEFAULT_ACCENT}
+									onChange={(value) => onUpdateEnvironment({ accent: value })}
+								/>
+							</div>
+							<div className="px-1 pt-2">
+								<button
+									type="button"
+									onClick={() => onUpdateEnvironment({ accent: null })}
+									className="text-[11px] text-neutral-500 underline-offset-2 transition hover:text-neutral-700 hover:underline dark:text-neutral-300 dark:hover:text-neutral-100"
+								>
+									Use global accent
+								</button>
+							</div>
+						</div>
 					)}
 				</motion.div>
 			)}

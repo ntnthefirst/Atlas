@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { MinusIcon, XMarkIcon, PauseIcon, PlayIcon, StopIcon } from "@heroicons/react/24/outline";
-import type { AtlasView, TaskStatus, TaskItem, TaskColumn } from "./types";
+import type { AtlasView, TaskStatus, TaskItem, TaskColumn, MapItem } from "./types";
 import { AtlasHeader } from "./components/AtlasHeader";
 import { AtlasSidebar } from "./components/AtlasSidebar";
 import { AtlasMainContent } from "./components/AtlasMainContent";
 import { MainContentViews } from "./components/main-content";
 import { SettingsWindowApp } from "./components/settings-window/SettingsWindowApp";
+import { NotchApp } from "./components/notch/NotchApp";
 import logo from "./assets/logosmall.png";
 import {
 	useMapManagement,
@@ -23,6 +24,7 @@ import {
 	usePlatformManagement,
 	useBootstrapState,
 	useCurrentAppTracker,
+	useAccent,
 } from "./hooks";
 import {
 	formatClock,
@@ -34,12 +36,35 @@ import {
 	sessionElapsedMs,
 	readStorage,
 } from "./utils";
-import { TASK_ORDER_KEY, TASK_COLUMNS_KEY, defaultDashboard, defaultTaskColumns, viewItems } from "./constants";
+import {
+	TASK_ORDER_KEY,
+	TASK_COLUMNS_KEY,
+	SIDEBAR_HIDDEN_KEY,
+	defaultDashboard,
+	defaultTaskColumns,
+	viewItems,
+} from "./constants";
+import { applyAccent } from "./utils/accent";
+import {
+	DEFAULT_ENVIRONMENT_ICON,
+	ENVIRONMENT_PRESETS,
+	getEnvironmentIcon,
+	type EnvironmentPresetTemplate,
+} from "./environments";
 
 function MainAtlasApp() {
 	const isMiniMode = useMemo(() => new URLSearchParams(window.location.search).get("mode") === "mini", []);
 	const isWelcomeMode = useMemo(() => new URLSearchParams(window.location.search).get("mode") === "welcome", []);
 	const [view, setView] = useState<AtlasView>("dashboard");
+	const [hiddenSidebarViews, setHiddenSidebarViews] = useState<string[]>(() =>
+		readStorage(SIDEBAR_HIDDEN_KEY, [] as string[]),
+	);
+
+	// Lets the smart notch deep-link into a specific view.
+	useEffect(() => {
+		const unsubscribe = window.atlas.onNavigate?.(setView);
+		return () => unsubscribe?.();
+	}, []);
 
 	const { maps, setMaps, selectedMapId, setSelectedMapId, selectedMap } = useMapManagement();
 	const {
@@ -85,6 +110,8 @@ function MainAtlasApp() {
 	const { platform, setPlatform } = usePlatformManagement();
 	const { hasBootstrapped, setHasBootstrapped } = useBootstrapState();
 	const { currentAppName, setCurrentAppName } = useCurrentAppTracker();
+	// Applies the saved accent on mount and keeps it in sync when changed in another window.
+	const { accent: globalAccent } = useAccent();
 
 	const miniControlsRef = useRef<HTMLDivElement | null>(null);
 	const previousActiveSessionIdRef = useRef<string | null>(null);
@@ -134,6 +161,37 @@ function MainAtlasApp() {
 	useEffect(() => {
 		localStorage.setItem(TASK_COLUMNS_KEY, JSON.stringify(taskColumnsByMap));
 	}, [taskColumnsByMap]);
+
+	useEffect(() => {
+		localStorage.setItem(SIDEBAR_HIDDEN_KEY, JSON.stringify(hiddenSidebarViews));
+	}, [hiddenSidebarViews]);
+
+	// If the active view gets hidden from the sidebar, fall back to the first visible one.
+	useEffect(() => {
+		if (hiddenSidebarViews.includes(view)) {
+			const firstVisible = viewItems.find(
+				(item) => item.id !== "settings" && !hiddenSidebarViews.includes(item.id),
+			);
+			if (firstVisible) setView(firstVisible.id);
+		}
+	}, [hiddenSidebarViews, view]);
+
+	// Environment accent override: when the selected environment defines its own
+	// accent the whole app adopts it; otherwise it falls back to the global accent.
+	useEffect(() => {
+		applyAccent(selectedMap?.accent || globalAccent);
+	}, [selectedMap?.accent, globalAccent]);
+
+	// Remember the active environment so the notch can start a session in it.
+	useEffect(() => {
+		if (selectedMapId) {
+			try {
+				localStorage.setItem("atlas.lastEnvironmentId", selectedMapId);
+			} catch {
+				// Ignore storage failures; the notch falls back to the first environment.
+			}
+		}
+	}, [selectedMapId]);
 
 	// Platform detection
 	useEffect(() => {
@@ -391,10 +449,14 @@ function MainAtlasApp() {
 		if (!candidate) return;
 		const exists = maps.some((mapItem) => mapItem.name.trim().toLowerCase() === candidate.toLowerCase());
 		if (exists) {
-			setErrorMessage("Map name already exists.");
+			setErrorMessage("Environment name already exists.");
 			return;
 		}
-		const map = await window.atlas.createMap(candidate);
+		const map = await window.atlas.createMap(candidate, {
+			icon: DEFAULT_ENVIRONMENT_ICON,
+			accent: null,
+			preset: "custom",
+		});
 		setMaps([...maps, map]);
 		setSelectedMapId(map.id);
 		setRenameMapName(map.name);
@@ -403,6 +465,35 @@ function MainAtlasApp() {
 		setShowFirstLaunch(false);
 		setErrorMessage("");
 		await refreshMapData(map.id);
+	};
+
+	const onCreatePresetEnvironment = async (preset: EnvironmentPresetTemplate) => {
+		const lower = (value: string) => value.trim().toLowerCase();
+		let name = preset.name;
+		let suffix = 2;
+		while (maps.some((mapItem) => lower(mapItem.name) === lower(name))) {
+			name = `${preset.name} ${suffix}`;
+			suffix += 1;
+		}
+		const map = await window.atlas.createMap(name, {
+			icon: preset.icon,
+			accent: preset.accent,
+			preset: preset.id,
+		});
+		setMaps((current) => [...current, map]);
+		setSelectedMapId(map.id);
+		setRenameMapName(map.name);
+		setNewMapName("");
+		setShowMapMenu(false);
+		setShowFirstLaunch(false);
+		setErrorMessage("");
+		await refreshMapData(map.id);
+	};
+
+	const onUpdateEnvironment = async (fields: Partial<Pick<MapItem, "name" | "icon" | "accent" | "preset">>) => {
+		if (!selectedMapId) return;
+		const updated = await window.atlas.updateMap(selectedMapId, fields);
+		setMaps((current) => current.map((mapItem) => (mapItem.id === updated.id ? updated : mapItem)));
 	};
 
 	const onRenameMap = async () => {
@@ -686,6 +777,12 @@ function MainAtlasApp() {
 		setView(nextView);
 	};
 
+	const onToggleSidebarView = (id: AtlasView) => {
+		setHiddenSidebarViews((current) =>
+			current.includes(id) ? current.filter((value) => value !== id) : [...current, id],
+		);
+	};
+
 	const miniSessionControls = (
 		<div className="mini-session-controls recording-cluster active inline-flex min-w-0 items-center gap-2 rounded-[10px] border border-neutral-200 bg-neutral-0 p-0.5 dark:border-neutral-600 dark:bg-neutral-700/70">
 			<span className="recording-timer top whitespace-nowrap rounded-lg border border-neutral-200 bg-neutral-50 px-2.5 py-1.25 font-data text-data-regular text-neutral-700 dark:border-neutral-600 dark:bg-neutral-700/90 dark:text-neutral-100">
@@ -747,10 +844,9 @@ function MainAtlasApp() {
 					<div className="no-drag inline-flex items-center gap-2 font-data text-[12px] uppercase tracking-[0.04em]">
 						<img
 							src={logo}
-							alt="Atlas Logo"
+							alt="Atlas"
 							className="h-5 w-5 shrink-0"
 						/>
-						<span>Atlas</span>
 					</div>
 					{!hasNativeWindowControls && (
 						<div className="no-drag absolute right-2 top-2.25 inline-flex gap-1">
@@ -776,18 +872,18 @@ function MainAtlasApp() {
 
 				<div className="atlas-welcome-shell">
 					<header className="atlas-welcome-header">
-						<div className="atlas-welcome-eyebrow">Welkom</div>
-						<h1>Start je eerste project</h1>
-						<p>Maak een map aan om direct te beginnen.</p>
+						<div className="atlas-welcome-eyebrow">Welcome</div>
+						<h1>Create your first environment</h1>
+						<p>Set up an environment to start right away.</p>
 					</header>
 
 					<section className="atlas-welcome-card">
-						<label htmlFor="welcome-map-name">Mapnaam</label>
+						<label htmlFor="welcome-map-name">Environment name</label>
 						<input
 							id="welcome-map-name"
 							value={newMapName}
 							onChange={(event) => setNewMapName(event.target.value)}
-							placeholder="Bijv. Client Sprint"
+							placeholder="e.g. Work, Coding, Gaming"
 							autoFocus
 							onKeyDown={(event) => {
 								if (event.key === "Enter") {
@@ -800,8 +896,34 @@ function MainAtlasApp() {
 							className="action-btn atlas-welcome-create"
 							onClick={() => void onCreateMap()}
 						>
-							Maak nieuwe map
+							Create environment
 						</button>
+
+						<div className="atlas-preset-section">
+							<span className="atlas-preset-label">Or start from a preset</span>
+							<div className="atlas-preset-grid">
+								{ENVIRONMENT_PRESETS.map((preset) => {
+									const Icon = getEnvironmentIcon(preset.icon);
+									return (
+										<button
+											key={preset.id}
+											type="button"
+											className="atlas-preset-chip"
+											onClick={() => void onCreatePresetEnvironment(preset)}
+										>
+											<span
+												className="atlas-preset-chip-icon"
+												style={{ backgroundColor: `${preset.accent}1f`, color: preset.accent }}
+											>
+												<Icon className="h-4 w-4" />
+											</span>
+											<span>{preset.name}</span>
+										</button>
+									);
+								})}
+							</div>
+						</div>
+
 						{errorMessage && <p className="error-banner">{errorMessage}</p>}
 					</section>
 				</div>
@@ -817,8 +939,12 @@ function MainAtlasApp() {
 						<AtlasHeader
 							isMacPlatform={isMacPlatform}
 							selectedMapId={selectedMapId}
-							selectedMapName={selectedMap?.name ?? "Choose map"}
+							selectedMapName={selectedMap?.name ?? "Choose environment"}
+							selectedMapIcon={selectedMap?.icon ?? null}
+							selectedMapAccent={selectedMap?.accent ?? null}
 							maps={maps}
+							onCreatePresetEnvironment={onCreatePresetEnvironment}
+							onUpdateEnvironment={onUpdateEnvironment}
 							showMapMenu={showMapMenu}
 							renameMapName={renameMapName}
 							newMapName={newMapName}
@@ -849,6 +975,8 @@ function MainAtlasApp() {
 							settingsView={settingsView}
 							activeView={view}
 							onChangeView={onChangeView}
+							hiddenViews={hiddenSidebarViews}
+							onToggleView={onToggleSidebarView}
 						/>
 					</div>
 
@@ -917,20 +1045,54 @@ function MainAtlasApp() {
 							animate={{ opacity: 1, y: 0, scale: 1 }}
 							exit={{ opacity: 0, y: 16, scale: 0.98 }}
 						>
-							<h2>Start je eerste project</h2>
-							<p>Projecten groeperen je sessies, activiteit, taken en notities in een context.</p>
+							<h2>Create your first environment</h2>
+							<p>Environments group your sessions, activity, tasks and notes into one context.</p>
 							<input
 								value={newMapName}
 								onChange={(event) => setNewMapName(event.target.value)}
-								placeholder="Client Sprint"
+								placeholder="e.g. Work, Coding, Gaming"
 								autoFocus
+								onKeyDown={(event) => {
+									if (event.key === "Enter") {
+										event.preventDefault();
+										void onCreateMap();
+									}
+								}}
 							/>
 							<button
 								className="action-btn"
-								onClick={onCreateMap}
+								onClick={() => void onCreateMap()}
 							>
 								Create
 							</button>
+
+							<div className="atlas-preset-section">
+								<span className="atlas-preset-label">Or start from a preset</span>
+								<div className="atlas-preset-grid">
+									{ENVIRONMENT_PRESETS.map((preset) => {
+										const Icon = getEnvironmentIcon(preset.icon);
+										return (
+											<button
+												key={preset.id}
+												type="button"
+												className="atlas-preset-chip"
+												onClick={() => void onCreatePresetEnvironment(preset)}
+											>
+												<span
+													className="atlas-preset-chip-icon"
+													style={{
+														backgroundColor: `${preset.accent}1f`,
+														color: preset.accent,
+													}}
+												>
+													<Icon className="h-4 w-4" />
+												</span>
+												<span>{preset.name}</span>
+											</button>
+										);
+									})}
+								</div>
+							</div>
 						</motion.div>
 					</motion.div>
 				)}
@@ -942,6 +1104,7 @@ function MainAtlasApp() {
 function App() {
 	const mode = useMemo(() => new URLSearchParams(window.location.search).get("mode"), []);
 	if (mode === "settings") return <SettingsWindowApp />;
+	if (mode === "notch") return <NotchApp />;
 	return <MainAtlasApp />;
 }
 

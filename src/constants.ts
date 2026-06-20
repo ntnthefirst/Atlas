@@ -1,7 +1,6 @@
 import {
 	ChartBarIcon,
 	ClipboardDocumentListIcon,
-	ClockIcon,
 	Cog6ToothIcon,
 	DocumentTextIcon,
 	Squares2X2Icon,
@@ -9,7 +8,6 @@ import {
 import {
 	ChartBarIcon as ChartBarIconSolid,
 	ClipboardDocumentListIcon as ClipboardDocumentListIconSolid,
-	ClockIcon as ClockIconSolid,
 	Cog6ToothIcon as Cog6ToothIconSolid,
 	DocumentTextIcon as DocumentTextIconSolid,
 	Squares2X2Icon as Squares2X2IconSolid,
@@ -21,6 +19,7 @@ export const TASK_ORDER_KEY = "atlas.taskOrderByMap";
 export const TASK_COLUMNS_KEY = "atlas.taskColumnsByMap";
 export const THEME_KEY = "atlas.theme";
 export const QUICK_ACTIONS_KEY = "atlas.quickActions";
+export const SIDEBAR_HIDDEN_KEY = "atlas.sidebarHidden";
 
 export const defaultDashboard: DashboardOverview = {
 	totalTodayMs: 0,
@@ -46,14 +45,13 @@ export const defaultTaskColumns: TaskColumn[] = [
 
 export const viewItems: AtlasNavItem[] = [
 	{ id: "dashboard", label: "Dashboard", outlineIcon: Squares2X2Icon, solidIcon: Squares2X2IconSolid },
-	{ id: "logbook", label: "Logbook", outlineIcon: ClockIcon, solidIcon: ClockIconSolid },
+	{ id: "activity", label: "Activity", outlineIcon: ChartBarIcon, solidIcon: ChartBarIconSolid },
 	{
 		id: "tasks",
 		label: "Tasks",
 		outlineIcon: ClipboardDocumentListIcon,
 		solidIcon: ClipboardDocumentListIconSolid,
 	},
-	{ id: "analysis", label: "Tijd Analyse", outlineIcon: ChartBarIcon, solidIcon: ChartBarIconSolid },
 	{ id: "notes", label: "Notes", outlineIcon: DocumentTextIcon, solidIcon: DocumentTextIconSolid },
 	{ id: "settings", label: "Settings", outlineIcon: Cog6ToothIcon, solidIcon: Cog6ToothIconSolid },
 ];

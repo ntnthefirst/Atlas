@@ -128,8 +128,8 @@ export function SettingsView({
 						]}
 					/>
 					<Toggle
-						label="Pin map switcher"
-						description="Always keep current map visible in the titlebar"
+						label="Pin environment switcher"
+						description="Always keep the current environment visible in the titlebar"
 						checked={pinMapSwitcher}
 						onChange={setPinMapSwitcher}
 					/>

@@ -12,6 +12,21 @@
 			content="width=device-width, initial-scale=1.0"
 		/>
 		<title>atlas</title>
+		<script>
+			// Apply the saved accent color before first paint so there is no flash.
+			(function () {
+				try {
+					var value = localStorage.getItem("atlas.accent") || "#7d53de";
+					if (!/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value)) value = "#7d53de";
+					var root = document.documentElement;
+					root.style.setProperty("--primary", value);
+					root.style.setProperty("--primary-hover", "color-mix(in srgb, " + value + ", #000 14%)");
+					root.style.setProperty("--primary-active", "color-mix(in srgb, " + value + ", #000 28%)");
+					root.style.setProperty("--primary-soft", "color-mix(in srgb, " + value + ", #fff 22%)");
+					root.style.setProperty("--primary-subtle", "color-mix(in srgb, " + value + ", #fff 88%)");
+				} catch (e) {}
+			})();
+		</script>
 	</head>
 	<body>
 		<div id="root"></div>
