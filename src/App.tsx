@@ -8,6 +8,7 @@ import { AtlasMainContent } from "./components/AtlasMainContent";
 import { MainContentViews } from "./components/main-content";
 import { SettingsWindowApp } from "./components/settings-window/SettingsWindowApp";
 import { NotchApp } from "./components/notch/NotchApp";
+import { ActionEditorWindowApp } from "./components/action-editor/ActionEditorWindowApp";
 import logo from "./assets/logosmall.png";
 import {
 	useMapManagement,
@@ -54,7 +55,10 @@ import {
 
 function MainAtlasApp() {
 	const isMiniMode = useMemo(() => new URLSearchParams(window.location.search).get("mode") === "mini", []);
-	const isWelcomeMode = useMemo(() => new URLSearchParams(window.location.search).get("mode") === "welcome", []);
+	const isWelcomeMode = useMemo(
+		() => new URLSearchParams(window.location.search).get("mode") === "welcome",
+		[],
+	);
 	const [view, setView] = useState<AtlasView>("dashboard");
 	const [hiddenSidebarViews, setHiddenSidebarViews] = useState<string[]>(() =>
 		readStorage(SIDEBAR_HIDDEN_KEY, [] as string[]),
@@ -93,8 +97,14 @@ function MainAtlasApp() {
 	const { dashboard, setDashboard } = useDashboardManagement();
 	const { activityBlocks, setActivityBlocks } = useActivityManagement();
 	const { theme, setTheme } = useThemeManagement();
-	const { quickActions, setQuickActions, newActionLabel, setNewActionLabel, newActionCommand, setNewActionCommand } =
-		useQuickActionsManagement();
+	const {
+		quickActions,
+		setQuickActions,
+		newActionLabel,
+		setNewActionLabel,
+		newActionCommand,
+		setNewActionCommand,
+	} = useQuickActionsManagement();
 	const {
 		showMapMenu,
 		setShowMapMenu,
@@ -247,7 +257,14 @@ function MainAtlasApp() {
 			window.clearInterval(sessionSync);
 			window.clearInterval(dataSync);
 		};
-	}, [selectedMapId, selectedSessionId, setActiveSession, setCurrentAppName, setDashboard, setActivityBlocks]);
+	}, [
+		selectedMapId,
+		selectedSessionId,
+		setActiveSession,
+		setCurrentAppName,
+		setDashboard,
+		setActivityBlocks,
+	]);
 
 	// Active session change
 	useEffect(() => {
@@ -490,7 +507,9 @@ function MainAtlasApp() {
 		await refreshMapData(map.id);
 	};
 
-	const onUpdateEnvironment = async (fields: Partial<Pick<MapItem, "name" | "icon" | "accent" | "preset">>) => {
+	const onUpdateEnvironment = async (
+		fields: Partial<Pick<MapItem, "name" | "icon" | "accent" | "preset">>,
+	) => {
 		if (!selectedMapId) return;
 		const updated = await window.atlas.updateMap(selectedMapId, fields);
 		setMaps((current) => current.map((mapItem) => (mapItem.id === updated.id ? updated : mapItem)));
@@ -593,7 +612,10 @@ function MainAtlasApp() {
 	};
 
 	const onDeleteSession = async (sessionId: string) => {
-		if (!selectedMapId || !window.confirm("Are you sure you want to delete this session? This cannot be undone."))
+		if (
+			!selectedMapId ||
+			!window.confirm("Are you sure you want to delete this session? This cannot be undone.")
+		)
 			return;
 		try {
 			await window.atlas.deleteSession(sessionId);
@@ -658,13 +680,19 @@ function MainAtlasApp() {
 				nextIndex += 1;
 				nextStatus = `column_${nextIndex}`;
 			}
-			return { ...current, [selectedMapId]: [...columns, { status: nextStatus, label: `Column ${nextIndex}` }] };
+			return {
+				...current,
+				[selectedMapId]: [...columns, { status: nextStatus, label: `Column ${nextIndex}` }],
+			};
 		});
 	};
 
 	const onRemoveTaskColumn = async (status: TaskStatus) => {
 		if (!selectedMapId) return;
-		const columns = normalizeColumns(taskColumnsByMap[selectedMapId] ?? defaultTaskColumns, defaultTaskColumns);
+		const columns = normalizeColumns(
+			taskColumnsByMap[selectedMapId] ?? defaultTaskColumns,
+			defaultTaskColumns,
+		);
 		if (columns.length <= 1) return;
 		const nextColumns = columns.filter((column) => column.status !== status);
 		const fallbackStatus = nextColumns[0]?.status;
@@ -716,7 +744,9 @@ function MainAtlasApp() {
 		if (dragged.status !== targetTask.status) {
 			await window.atlas.updateTaskStatus(dragged.id, targetTask.status);
 		}
-		const nextTasks = tasks.map((task) => (task.id === dragged.id ? { ...task, status: targetTask.status } : task));
+		const nextTasks = tasks.map((task) =>
+			task.id === dragged.id ? { ...task, status: targetTask.status } : task,
+		);
 		const currentOrder = taskOrderByMap[selectedMapId] ?? tasks.map((task) => task.id);
 		const cleanOrder = currentOrder.filter((id) => nextTasks.some((task) => task.id === id));
 		const nextOrder = reorderTaskIds(cleanOrder, dragged.id, targetTask.id, position);
@@ -824,10 +854,7 @@ function MainAtlasApp() {
 		return (
 			<div className="atlas-mini-root text-neutral-900 dark:text-neutral-50">
 				<div className="mini-body">
-					<div
-						className="mini-controls"
-						ref={miniControlsRef}
-					>
+					<div className="mini-controls" ref={miniControlsRef}>
 						{miniSessionControls}
 					</div>
 				</div>
@@ -842,11 +869,7 @@ function MainAtlasApp() {
 					className={`atlas-welcome-titlebar ${isMacPlatform ? "pl-21" : hasNativeWindowControls ? "pr-36.5" : "pr-23.5"}`}
 				>
 					<div className="no-drag inline-flex items-center gap-2 font-data text-[12px] uppercase tracking-[0.04em]">
-						<img
-							src={logo}
-							alt="Atlas"
-							className="h-5 w-5 shrink-0"
-						/>
+						<img src={logo} alt="Atlas" className="h-5 w-5 shrink-0" />
 					</div>
 					{!hasNativeWindowControls && (
 						<div className="no-drag absolute right-2 top-2.25 inline-flex gap-1">
@@ -892,10 +915,7 @@ function MainAtlasApp() {
 								}
 							}}
 						/>
-						<button
-							className="action-btn atlas-welcome-create"
-							onClick={() => void onCreateMap()}
-						>
+						<button className="action-btn atlas-welcome-create" onClick={() => void onCreateMap()}>
 							Create environment
 						</button>
 
@@ -981,10 +1001,7 @@ function MainAtlasApp() {
 					</div>
 
 					<div className="atlas-main-slot">
-						<AtlasMainContent
-							view={view}
-							errorMessage={errorMessage}
-						>
+						<AtlasMainContent view={view} errorMessage={errorMessage}>
 							<MainContentViews
 								view={view}
 								dashboard={dashboard}
@@ -1059,10 +1076,7 @@ function MainAtlasApp() {
 									}
 								}}
 							/>
-							<button
-								className="action-btn"
-								onClick={() => void onCreateMap()}
-							>
+							<button className="action-btn" onClick={() => void onCreateMap()}>
 								Create
 							</button>
 
@@ -1105,6 +1119,7 @@ function App() {
 	const mode = useMemo(() => new URLSearchParams(window.location.search).get("mode"), []);
 	if (mode === "settings") return <SettingsWindowApp />;
 	if (mode === "notch") return <NotchApp />;
+	if (mode === "actions") return <ActionEditorWindowApp />;
 	return <MainAtlasApp />;
 }
 

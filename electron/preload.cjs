@@ -56,11 +56,21 @@ contextBridge.exposeInMainWorld("atlas", {
 		ipcRenderer.on("notch:preferences-changed", listener);
 		return () => ipcRenderer.removeListener("notch:preferences-changed", listener);
 	},
+	onNotchBlur: (callback) => {
+		const listener = () => callback();
+		ipcRenderer.on("notch:blur", listener);
+		return () => ipcRenderer.removeListener("notch:blur", listener);
+	},
 	listDisplays: () => ipcRenderer.invoke("screen:listDisplays"),
 
 	windowMinimize: () => ipcRenderer.invoke("window:minimize"),
 	openMiniWindow: () => ipcRenderer.invoke("window:openMini"),
 	openSettingsWindow: () => ipcRenderer.invoke("window:openSettings"),
+	openActionEditorWindow: () => ipcRenderer.invoke("window:openActionEditor"),
+	pickAppFile: () => ipcRenderer.invoke("app:pickFile"),
+	getFileIcon: (filePath) => ipcRenderer.invoke("app:getFileIcon", filePath),
+	listOpenApps: () => ipcRenderer.invoke("system:listOpenApps"),
+	getSystemStats: () => ipcRenderer.invoke("system:getStats"),
 	resizeMiniWindow: (width, height) => ipcRenderer.invoke("window:resizeMini", width, height),
 	showMainWindow: () => ipcRenderer.invoke("window:showMain"),
 	focusMainIfOpen: () => ipcRenderer.invoke("window:focusMainIfOpen"),

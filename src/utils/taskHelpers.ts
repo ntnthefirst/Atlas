@@ -1,4 +1,6 @@
 import type { TaskItem, TaskColumn } from "../types";
+import { readStorage } from "./storage";
+import { TASK_COLUMNS_KEY } from "../constants";
 
 export const reorderTaskIds = (
 	ids: string[],
@@ -36,6 +38,16 @@ export const sortTasksByOrder = (nextTasks: TaskItem[], orderedIds: string[]) =>
 		}
 		return rankA - rankB;
 	});
+};
+
+// The active environment's task columns, read straight from the same
+// localStorage key the Tasks board itself writes to (TASK_COLUMNS_KEY) —
+// lets any window (notch, settings, action editor) show the real per-map
+// columns without needing the map's data passed in.
+export const getActiveMapTaskColumns = (mapId: string | null, defaultColumns: TaskColumn[]): TaskColumn[] => {
+	if (!mapId) return [...defaultColumns];
+	const columnsByMap = readStorage<Record<string, TaskColumn[]>>(TASK_COLUMNS_KEY, {});
+	return normalizeColumns(columnsByMap[mapId] ?? defaultColumns, defaultColumns);
 };
 
 export const normalizeColumns = (columns: TaskColumn[], defaultTaskColumns: TaskColumn[]) => {

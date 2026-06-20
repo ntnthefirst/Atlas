@@ -1,43 +1,195 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
+	AcademicCapIcon,
+	AdjustmentsHorizontalIcon,
+	ArchiveBoxIcon,
+	ArrowPathIcon,
+	ArrowUpOnSquareStackIcon,
+	BeakerIcon,
+	BellIcon,
+	BoltIcon,
+	BookOpenIcon,
+	BriefcaseIcon,
+	CalendarIcon,
+	CameraIcon,
+	ChartBarIcon,
+	ChatBubbleLeftIcon,
+	CheckCircleIcon,
 	CheckIcon,
+	ClipboardIcon,
 	ClockIcon,
+	CloudIcon,
+	CodeBracketIcon,
+	Cog6ToothIcon,
+	CommandLineIcon,
+	CpuChipIcon,
+	CreditCardIcon,
+	CubeIcon,
+	DocumentTextIcon,
+	EnvelopeIcon,
+	FaceSmileIcon,
+	FilmIcon,
+	FireIcon,
+	FlagIcon,
+	FolderIcon,
+	GiftIcon,
+	GlobeAltIcon,
+	HeartIcon,
+	HomeIcon,
+	InboxIcon,
+	KeyIcon,
+	LightBulbIcon,
 	ListBulletIcon,
 	LockClosedIcon,
 	LockOpenIcon,
+	MapIcon,
+	MegaphoneIcon,
+	MinusIcon,
+	MoonIcon,
+	MusicalNoteIcon,
 	NewspaperIcon,
+	PaintBrushIcon,
+	PaperAirplaneIcon,
+	PauseIcon,
+	PencilIcon,
+	PencilSquareIcon,
+	PhotoIcon,
+	PlayCircleIcon,
+	PlayIcon,
+	PlusIcon,
+	PuzzlePieceIcon,
+	RocketLaunchIcon,
+	ShieldCheckIcon,
+	ShoppingCartIcon,
+	SparklesIcon,
 	Squares2X2Icon,
+	StarIcon,
 	StopIcon,
+	SunIcon,
+	TagIcon,
+	TrashIcon,
+	TrophyIcon,
+	UserIcon,
+	VideoCameraIcon,
+	WifiIcon,
+	WrenchIcon,
 } from "@heroicons/react/24/outline";
+import { PlayCircleIcon as PlayCircleIconSolid } from "@heroicons/react/24/solid";
 import type {
-	AtlasView,
+	DashboardOverview,
 	MapItem,
-	NotchActionButtonId,
+	NoteItem,
 	NotchPosition,
 	NotchPreferences,
+	NotchTabIcon,
+	NotchWidgetId,
+	NotchWidgetPlacement,
 	Session,
 	TaskColumn,
 	TaskItem,
 } from "../../types";
 import { useAccent } from "../../hooks";
-import { formatClock, normalizeColumns, readStorage, sessionElapsedMs, sortTasksByOrder } from "../../utils";
+import {
+	formatClock,
+	formatDuration,
+	normalizeColumns,
+	normalizeTrackedAppName,
+	readStorage,
+	sessionElapsedMs,
+	sortTasksByOrder,
+} from "../../utils";
 import { TASK_COLUMNS_KEY, TASK_ORDER_KEY, THEME_KEY, defaultTaskColumns } from "../../constants";
 
-// How often to re-poll for environment/task changes made in another window,
-// since there's no IPC broadcast for those.
+// How often to re-poll for environment/task/dashboard changes made in another
+// window, since there's no IPC broadcast for those.
 const POLL_MS = 1500;
 
 // How much of the card stays visible (the accent line plus a sliver of background)
 // when it's retracted out of view.
 const PEEK_PX = 16;
 
-const navItems: Array<{ id: NotchActionButtonId; label: string; icon: typeof ClockIcon }> = [
-	{ id: "activity", label: "Activity", icon: ClockIcon },
-	{ id: "dashboard", label: "Dashboard", icon: Squares2X2Icon },
-	{ id: "notes", label: "Notes", icon: NewspaperIcon },
-	{ id: "tasks", label: "Tasks", icon: ListBulletIcon },
-];
+// Matches tailwind's w-10/h-10 (grid cell) and gap-1.5 (gutter), so a tab's
+// grid renders identically here and in the settings editor.
+const GRID_CELL_PX = 40;
+const GRID_GAP_PX = 6;
+
+// Object shorthand works because each NotchTabIcon value is exactly the
+// imported heroicon's component name.
+const TAB_ICON_MAP: Record<NotchTabIcon, typeof ClockIcon> = {
+	AcademicCapIcon,
+	AdjustmentsHorizontalIcon,
+	ArchiveBoxIcon,
+	ArrowPathIcon,
+	BeakerIcon,
+	BellIcon,
+	BoltIcon,
+	BookOpenIcon,
+	BriefcaseIcon,
+	CalendarIcon,
+	CameraIcon,
+	ChartBarIcon,
+	ChatBubbleLeftIcon,
+	CheckCircleIcon,
+	ClipboardIcon,
+	ClockIcon,
+	CloudIcon,
+	CodeBracketIcon,
+	Cog6ToothIcon,
+	CommandLineIcon,
+	CpuChipIcon,
+	CreditCardIcon,
+	CubeIcon,
+	DocumentTextIcon,
+	EnvelopeIcon,
+	FaceSmileIcon,
+	FilmIcon,
+	FireIcon,
+	FlagIcon,
+	FolderIcon,
+	GiftIcon,
+	GlobeAltIcon,
+	HeartIcon,
+	HomeIcon,
+	InboxIcon,
+	KeyIcon,
+	LightBulbIcon,
+	ListBulletIcon,
+	MapIcon,
+	MegaphoneIcon,
+	MoonIcon,
+	MusicalNoteIcon,
+	NewspaperIcon,
+	PaintBrushIcon,
+	PaperAirplaneIcon,
+	PencilIcon,
+	PhotoIcon,
+	PlayIcon,
+	PuzzlePieceIcon,
+	RocketLaunchIcon,
+	ShieldCheckIcon,
+	ShoppingCartIcon,
+	SparklesIcon,
+	Squares2X2Icon,
+	StarIcon,
+	SunIcon,
+	TagIcon,
+	TrashIcon,
+	TrophyIcon,
+	UserIcon,
+	VideoCameraIcon,
+	WifiIcon,
+	WrenchIcon,
+};
+
+const isSameDay = (iso: string, reference: Date) => {
+	const d = new Date(iso);
+	return (
+		d.getFullYear() === reference.getFullYear() &&
+		d.getMonth() === reference.getMonth() &&
+		d.getDate() === reference.getDate()
+	);
+};
 
 const lastEnvironmentId = () => {
 	try {
@@ -54,22 +206,102 @@ const ROOT_POSITION_CLASSES: Record<NotchPosition, string> = {
 	free: "items-start justify-center p-1.5",
 };
 
+// The wrapper holds the card plus, when a tab panel is open, the detached
+// panel beside/below it with a gap: stacked vertically under the card for
+// the horizontal (top/free) notch, stacked beside it on the inward side
+// (away from the docked screen edge) for the vertical (left/right) notch.
+const WRAPPER_POSITION_CLASSES: Record<NotchPosition, string> = {
+	top: "flex-col items-center",
+	left: "flex-row items-center",
+	right: "flex-row-reverse items-center",
+	free: "flex-col items-center",
+};
+
 // Box is a fixed 40px on its short axis with a 20px corner radius, sized to match
 // the old floating mini-timer's proportions; the squared/borderless side always
 // faces the screen edge it's docked against.
 const CARD_POSITION_CLASSES: Record<NotchPosition, string> = {
 	top: "flex-col justify-between h-fit pt-2.5 pr-3.75 pb-1.25 pl-3.75 rounded-t-none rounded-b-[20px] border-t-0",
 	left: "flex-row justify-between w-fit pt-3.75 pr-1.25 pb-3.75 pl-2.5 rounded-l-none rounded-r-[20px] border-l-0",
-	right: "flex-row justify-between w-fit pt-3.75 pr-2.5 pb-3.75 pl-1.25 rounded-r-none rounded-l-[20px] border-r-0",
+	right:
+		"flex-row justify-between w-fit pt-3.75 pr-2.5 pb-3.75 pl-1.25 rounded-r-none rounded-l-[20px] border-r-0",
 	free: "flex-col justify-between h-fit pt-2.5 pr-3.75 pb-1.25 pl-3.75 rounded-[20px]",
 };
 
 const ICON_BUTTON_CLASSES =
 	"inline-flex shrink-0 items-center justify-center rounded-full text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-800 dark:text-neutral-300 dark:hover:bg-white/10 dark:hover:text-neutral-0";
 
+// Every placed widget gets the same outlined card, tinted with the accent
+// color (the same family as the record/play button's border), so the grid
+// reads as one consistent set of tiles instead of ad-hoc per-widget framing.
+// Structural widgets (divider/spacer) opt out since they're meant to blend in.
+const WIDGET_CARD_CLASSES =
+	"h-full w-full rounded-lg border border-primary/30 bg-neutral-50/80 dark:border-primary/30 dark:bg-neutral-800/60";
+const WIDGETS_WITHOUT_CARD = new Set<NotchWidgetId>(["divider", "spacer"]);
+
+// Simple "icon button that does X" widgets all share one renderer; none of
+// these close over component state, so the table lives at module scope.
+const NAV_ACTIONS: Partial<
+	Record<NotchWidgetId, { icon: typeof ClockIcon; title: string; onClick: () => void }>
+> = {
+	openDashboardButton: {
+		icon: Squares2X2Icon,
+		title: "Dashboard",
+		onClick: () => {
+			void window.atlas.focusMainIfOpen();
+			void window.atlas.requestNavigate("dashboard");
+		},
+	},
+	openActivityButton: {
+		icon: ClockIcon,
+		title: "Activity",
+		onClick: () => {
+			void window.atlas.focusMainIfOpen();
+			void window.atlas.requestNavigate("activity");
+		},
+	},
+	openTasksButton: {
+		icon: ListBulletIcon,
+		title: "Tasks",
+		onClick: () => {
+			void window.atlas.focusMainIfOpen();
+			void window.atlas.requestNavigate("tasks");
+		},
+	},
+	openNotesButton: {
+		icon: NewspaperIcon,
+		title: "Notes",
+		onClick: () => {
+			void window.atlas.focusMainIfOpen();
+			void window.atlas.requestNavigate("notes");
+		},
+	},
+	openSettingsButton: {
+		icon: Cog6ToothIcon,
+		title: "Settings",
+		onClick: () => void window.atlas.openSettingsWindow(),
+	},
+	openMiniPlayerButton: {
+		icon: ArrowUpOnSquareStackIcon,
+		title: "Mini player",
+		onClick: () => void window.atlas.openMiniWindow(),
+	},
+	minimizeButton: {
+		icon: MinusIcon,
+		title: "Minimize",
+		onClick: () => void window.atlas.windowMinimize(),
+	},
+	focusMainButton: {
+		icon: HomeIcon,
+		title: "Open Atlas",
+		onClick: () => void window.atlas.focusMainIfOpen(),
+	},
+};
+
 export function NotchApp() {
 	const { accent: globalAccent } = useAccent();
 	const cardRef = useRef<HTMLDivElement | null>(null);
+	const wrapperRef = useRef<HTMLDivElement | null>(null);
 
 	const [preferences, setPreferences] = useState<NotchPreferences>({
 		enabled: true,
@@ -80,7 +312,46 @@ export function NotchApp() {
 		locked: false,
 		activation: "always",
 		displayIds: [],
-		actionButtons: navItems.map((item) => ({ id: item.id, enabled: true })),
+		tabs: [
+			{
+				id: "timer",
+				label: "Timer",
+				icon: "ClockIcon",
+				gridCols: 5,
+				gridRows: 1,
+				placements: [
+					{ id: "start-stop", widget: "timerStartStop", x: 0, y: 0, w: 1, h: 1 },
+					{ id: "display", widget: "timerDisplay", x: 1, y: 0, w: 2, h: 1 },
+				],
+			},
+			{
+				id: "time",
+				label: "Time",
+				icon: "ChartBarIcon",
+				gridCols: 5,
+				gridRows: 4,
+				placements: [
+					{ id: "time-spent", widget: "timeSpentToday", x: 0, y: 0, w: 5, h: 2 },
+					{ id: "top-app", widget: "topApp", x: 0, y: 2, w: 3, h: 2 },
+				],
+			},
+			{
+				id: "tasks",
+				label: "Tasks",
+				icon: "ListBulletIcon",
+				gridCols: 5,
+				gridRows: 3,
+				placements: [{ id: "first-todos", widget: "firstTodoList", x: 0, y: 0, w: 3, h: 3 }],
+			},
+			{
+				id: "notes",
+				label: "Notes",
+				icon: "NewspaperIcon",
+				gridCols: 5,
+				gridRows: 2,
+				placements: [{ id: "notes-count", widget: "notesCount", x: 0, y: 0, w: 3, h: 1 }],
+			},
+		],
 		infoItems: [
 			{ id: "timer", enabled: true },
 			{ id: "todo", enabled: true },
@@ -90,9 +361,31 @@ export function NotchApp() {
 	const [activeEnvId, setActiveEnvId] = useState<string | null>(() => lastEnvironmentId());
 	const [tasks, setTasks] = useState<TaskItem[]>([]);
 	const [activeSession, setActiveSession] = useState<Session | null>(null);
+	const [dashboard, setDashboard] = useState<DashboardOverview | null>(null);
+	const [todaySessions, setTodaySessions] = useState<Session[]>([]);
 	const [now, setNow] = useState(Date.now());
 	const [hovered, setHovered] = useState(false);
-	const [size, setSize] = useState({ width: 0, height: 0 });
+	// Card's own size (for the docked retract distance) vs. the wrapper's size
+	// (card + open panel + gap, for sizing the OS window) are tracked separately
+	// since the panel must not affect how far the bare card retracts.
+	const [cardSize, setCardSize] = useState({ width: 0, height: 0 });
+	const [activeTabId, setActiveTabId] = useState<string | null>(null);
+	const [totalSessionCount, setTotalSessionCount] = useState(0);
+	const [addTaskPopupFor, setAddTaskPopupFor] = useState<string | null>(null);
+	const [addTaskTitleDraft, setAddTaskTitleDraft] = useState("");
+	const [notes, setNotes] = useState<NoteItem[]>([]);
+	const [currentAppName, setCurrentAppName] = useState("");
+	const [platform, setPlatform] = useState("");
+	const [appVersion, setAppVersion] = useState("");
+	const [hasUpdate, setHasUpdate] = useState(false);
+	const [themeValue, setThemeValue] = useState<"dark" | "light" | "system">(() =>
+		readStorage(THEME_KEY, "light"),
+	);
+	const [systemStats, setSystemStats] = useState({ cpuPercent: 0, memoryPercent: 0 });
+	const [cpuHistory, setCpuHistory] = useState<number[]>([]);
+	const [memoryHistory, setMemoryHistory] = useState<number[]>([]);
+	const [runningApps, setRunningApps] = useState<Array<{ name: string; path: string | null }>>([]);
+	const [appIcons, setAppIcons] = useState<Record<string, string | null>>({});
 
 	// Transparent backdrop for the floating window; follow the app's light/dark theme.
 	useEffect(() => {
@@ -101,6 +394,7 @@ export function NotchApp() {
 
 		const applyTheme = () => {
 			const stored = readStorage<"dark" | "light" | "system">(THEME_KEY, "light");
+			setThemeValue(stored);
 			const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
 			const resolved = stored === "system" ? (prefersDark ? "dark" : "light") : stored;
 			html.classList.toggle("dark", resolved === "dark");
@@ -170,6 +464,145 @@ export function NotchApp() {
 		return () => window.clearInterval(interval);
 	}, [activeEnvId]);
 
+	// The active environment's dashboard overview, for the "time spent today"
+	// and "top app" widgets.
+	useEffect(() => {
+		if (!activeEnvId) {
+			setDashboard(null);
+			return;
+		}
+		const sync = () => {
+			window.atlas
+				.getDashboardOverview(activeEnvId)
+				.then(setDashboard)
+				.catch(() => undefined);
+		};
+		sync();
+		const interval = window.setInterval(sync, POLL_MS);
+		return () => window.clearInterval(interval);
+	}, [activeEnvId]);
+
+	// Today's sessions for the active environment, for the "time spent today"
+	// activity bar.
+	useEffect(() => {
+		if (!activeEnvId) {
+			setTodaySessions([]);
+			setTotalSessionCount(0);
+			return;
+		}
+		const sync = () => {
+			window.atlas
+				.listSessionsByMap(activeEnvId)
+				.then((sessions) => {
+					const today = new Date();
+					setTodaySessions(sessions.filter((session) => isSameDay(session.started_at, today)));
+					setTotalSessionCount(sessions.length);
+				})
+				.catch(() => undefined);
+		};
+		sync();
+		const interval = window.setInterval(sync, POLL_MS);
+		return () => window.clearInterval(interval);
+	}, [activeEnvId]);
+
+	// CPU/memory usage, for the "system" widgets — polled at the same cadence
+	// as everything else, with a short rolling history for the graph widgets.
+	useEffect(() => {
+		const sync = () => {
+			window.atlas
+				.getSystemStats()
+				.then((stats) => {
+					setSystemStats(stats);
+					setCpuHistory((current) => [...current, stats.cpuPercent].slice(-20));
+					setMemoryHistory((current) => [...current, stats.memoryPercent].slice(-20));
+				})
+				.catch(() => undefined);
+		};
+		sync();
+		const interval = window.setInterval(sync, POLL_MS);
+		return () => window.clearInterval(interval);
+	}, []);
+
+	// Currently running apps, for the "top app" widget's open/focus action.
+	useEffect(() => {
+		const sync = () => {
+			window.atlas
+				.listOpenApps()
+				.then(setRunningApps)
+				.catch(() => undefined);
+		};
+		sync();
+		const interval = window.setInterval(sync, POLL_MS);
+		return () => window.clearInterval(interval);
+	}, []);
+
+	// Real app icons for configured "launch app" buttons, fetched once per
+	// distinct command and cached — the placeholder rocket only shows up
+	// while a button has no program configured yet.
+	useEffect(() => {
+		const commands = new Set<string>();
+		for (const tab of preferences.tabs) {
+			for (const placement of tab.placements) {
+				if (placement.widget === "launchAppButton" && placement.config) commands.add(placement.config);
+			}
+		}
+		const missing = [...commands].filter((command) => !(command in appIcons));
+		if (missing.length === 0) return;
+		for (const command of missing) {
+			window.atlas
+				.getFileIcon(command)
+				.then((icon) => setAppIcons((current) => ({ ...current, [command]: icon })))
+				.catch(() => setAppIcons((current) => ({ ...current, [command]: null })));
+		}
+	}, [preferences.tabs, appIcons]);
+
+	// The active environment's notes, for the "notes count"/"last note" widgets.
+	useEffect(() => {
+		if (!activeEnvId) {
+			setNotes([]);
+			return;
+		}
+		const sync = () => {
+			window.atlas
+				.listNotesByMap(activeEnvId)
+				.then(setNotes)
+				.catch(() => undefined);
+		};
+		sync();
+		const interval = window.setInterval(sync, POLL_MS);
+		return () => window.clearInterval(interval);
+	}, [activeEnvId]);
+
+	// The foreground app name, for the "current app" widget.
+	useEffect(() => {
+		const sync = () => {
+			window.atlas
+				.getCurrentApp()
+				.then(setCurrentAppName)
+				.catch(() => undefined);
+		};
+		sync();
+		const interval = window.setInterval(sync, POLL_MS);
+		return () => window.clearInterval(interval);
+	}, []);
+
+	// Platform/version/update-available are effectively static for the life of
+	// the window, so these only need to be fetched once.
+	useEffect(() => {
+		window.atlas
+			.getPlatform()
+			.then(setPlatform)
+			.catch(() => undefined);
+		window.atlas
+			.getAppVersion()
+			.then(setAppVersion)
+			.catch(() => undefined);
+		window.atlas
+			.checkForUpdates()
+			.then((result) => setHasUpdate(result.hasUpdate))
+			.catch(() => undefined);
+	}, []);
+
 	// The active session, for the "timer" information item.
 	useEffect(() => {
 		const sync = () => {
@@ -189,21 +622,37 @@ export function NotchApp() {
 		return () => window.clearInterval(interval);
 	}, []);
 
-	// Keep the OS window sized to the content. offsetWidth/offsetHeight reflect the
-	// element's untransformed layout box, so this stays stable while the card slides.
+	// Track the bare card's own size (for the docked retract distance).
+	// offsetWidth/offsetHeight reflect the element's untransformed layout box,
+	// so this stays stable while the card slides.
 	useEffect(() => {
 		const node = cardRef.current;
 		if (!node) return;
+		const report = () => setCardSize({ width: node.offsetWidth, height: node.offsetHeight });
+		report();
+		const observer = new ResizeObserver(report);
+		observer.observe(node);
+		return () => observer.disconnect();
+	}, []);
+
+	// Keep the OS window sized to the card plus any open tab panel.
+	useEffect(() => {
+		const node = wrapperRef.current;
+		if (!node) return;
 		const report = () => {
-			const width = node.offsetWidth;
-			const height = node.offsetHeight;
-			setSize({ width, height });
-			void window.atlas.resizeNotch(width + 16, height + 16);
+			void window.atlas.resizeNotch(node.offsetWidth + 16, node.offsetHeight + 16);
 		};
 		report();
 		const observer = new ResizeObserver(report);
 		observer.observe(node);
 		return () => observer.disconnect();
+	}, []);
+
+	// Close any open tab panel when the notch window loses focus (the user
+	// clicked elsewhere — another app, the desktop, the main window).
+	useEffect(() => {
+		const unsubscribe = window.atlas.onNotchBlur?.(() => setActiveTabId(null));
+		return () => unsubscribe?.();
 	}, []);
 
 	const isFree = preferences.position === "free";
@@ -216,32 +665,124 @@ export function NotchApp() {
 
 	const accent = environment?.accent || globalAccent;
 
-	const enabledNavItems = useMemo(() => {
-		return preferences.actionButtons
-			.filter((button) => button.enabled)
-			.map((button) => navItems.find((item) => item.id === button.id))
-			.filter((item): item is (typeof navItems)[number] => Boolean(item));
-	}, [preferences.actionButtons]);
+	const activeTab = useMemo(
+		() => preferences.tabs.find((tab) => tab.id === activeTabId) ?? null,
+		[preferences.tabs, activeTabId],
+	);
 
-	// The leftmost/first task column is treated as "to do"; the second is where
-	// the check button moves a task to.
-	const { secondColumn, firstTodo } = useMemo(() => {
-		if (!environment?.id) {
-			return { secondColumn: null as TaskColumn | null, firstTodo: null as TaskItem | null };
-		}
+	// All of the active environment's real (custom) task columns, plus
+	// per-column sorted tasks — every task widget that needs "which column"
+	// looks here instead of assuming a fixed two-column board.
+	const { columns, tasksByColumn, secondColumn, firstTodo, totalTaskCount } = useMemo(() => {
+		const empty = {
+			columns: [] as TaskColumn[],
+			tasksByColumn: new Map<string, TaskItem[]>(),
+			secondColumn: null as TaskColumn | null,
+			firstTodo: null as TaskItem | null,
+			totalTaskCount: 0,
+		};
+		if (!environment?.id) return empty;
 		const columnsByMap = readStorage<Record<string, TaskColumn[]>>(TASK_COLUMNS_KEY, {});
-		const columns = normalizeColumns(columnsByMap[environment.id] ?? defaultTaskColumns, defaultTaskColumns);
-		const first = columns[0] ?? null;
-		const second = columns[1] ?? null;
-		if (!first) {
-			return { secondColumn: second, firstTodo: null as TaskItem | null };
-		}
+		const normalizedColumns = normalizeColumns(
+			columnsByMap[environment.id] ?? defaultTaskColumns,
+			defaultTaskColumns,
+		);
 		const orderByMap = readStorage<Record<string, string[]>>(TASK_ORDER_KEY, {});
 		const order = orderByMap[environment.id] ?? [];
-		const columnTasks = tasks.filter((task) => task.status === first.status);
-		const sorted = sortTasksByOrder(columnTasks, order);
-		return { secondColumn: second, firstTodo: sorted[0] ?? null };
+		const byColumn = new Map<string, TaskItem[]>();
+		for (const column of normalizedColumns) {
+			const columnTasks = tasks.filter((task) => task.status === column.status);
+			byColumn.set(column.status, sortTasksByOrder(columnTasks, order));
+		}
+		const first = normalizedColumns[0] ?? null;
+		const second = normalizedColumns[1] ?? null;
+		const firstTasks = first ? (byColumn.get(first.status) ?? []) : [];
+		return {
+			columns: normalizedColumns,
+			tasksByColumn: byColumn,
+			secondColumn: second,
+			firstTodo: firstTasks[0] ?? null,
+			totalTaskCount: tasks.length,
+		};
 	}, [tasks, environment?.id]);
+
+	const columnCounts = useMemo(
+		() =>
+			columns.map((column) => ({
+				label: column.label,
+				count: tasksByColumn.get(column.status)?.length ?? 0,
+			})),
+		[columns, tasksByColumn],
+	);
+
+	// Resolves a widget's configured column (falling back to the first column
+	// when unset/unknown), since every column is per-environment and custom.
+	const resolveColumn = (config: string | undefined): TaskColumn | null =>
+		(config && columns.find((column) => column.status === config)) || columns[0] || null;
+
+	const columnAfter = (status: string): TaskColumn | null => {
+		const index = columns.findIndex((column) => column.status === status);
+		return index >= 0 ? (columns[index + 1] ?? null) : null;
+	};
+
+	const lastNote = useMemo(() => {
+		if (notes.length === 0) return null;
+		return [...notes].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())[0];
+	}, [notes]);
+
+	// Aggregated top app for the "top app" widget, mirroring the dashboard's
+	// own app-name cleanup/aggregation so the two stay consistent.
+	const topApp = useMemo(() => {
+		if (!dashboard || dashboard.timePerApp.length === 0) return null;
+		const totals = new Map<string, number>();
+		for (const entry of dashboard.timePerApp) {
+			const name = normalizeTrackedAppName(entry.appName);
+			totals.set(name, (totals.get(name) ?? 0) + entry.duration);
+		}
+		let top: { appName: string; duration: number } | null = null;
+		for (const [appName, duration] of totals) {
+			if (!top || duration > top.duration) top = { appName, duration };
+		}
+		return top;
+	}, [dashboard]);
+
+	// Today's active intervals as percentages of the 24h day, for the activity
+	// bar, plus where "now" falls on that same scale.
+	const { todaySegments, nowPercent } = useMemo(() => {
+		const minutesSinceMidnight = (date: Date) =>
+			date.getHours() * 60 + date.getMinutes() + date.getSeconds() / 60;
+		const nowDate = new Date(now);
+		const segments = todaySessions.map((session) => {
+			const start = minutesSinceMidnight(new Date(session.started_at));
+			const end = minutesSinceMidnight(session.ended_at ? new Date(session.ended_at) : nowDate);
+			return {
+				startPercent: (start / 1440) * 100,
+				widthPercent: Math.max((end - start) / 1440, 0) * 100,
+			};
+		});
+		return {
+			todaySegments: segments,
+			nowPercent: (minutesSinceMidnight(nowDate) / 1440) * 100,
+		};
+	}, [todaySessions, now]);
+
+	// How much of today's elapsed wall-clock time has no tracked session
+	// against it, for the "untracked today" widget.
+	const untrackedTodayMs = useMemo(() => {
+		const midnight = new Date(now);
+		midnight.setHours(0, 0, 0, 0);
+		const elapsedMs = now - midnight.getTime();
+		return Math.max(elapsedMs - (dashboard?.totalTodayMs ?? 0), 0);
+	}, [now, dashboard]);
+
+	const currentTimeLabel = useMemo(
+		() =>
+			new Date(now).toLocaleTimeString([], {
+				hour: "2-digit",
+				minute: "2-digit",
+			}),
+		[now],
+	);
 
 	// The single information slot: the first enabled item (in priority order)
 	// that actually has something to show right now.
@@ -258,16 +799,14 @@ export function NotchApp() {
 	// hovering drops it back into full view. Free-floating never retracts.
 	const collapseTarget = useMemo(() => {
 		if (isFree) return { x: 0, y: 0 };
-		if (preferences.position === "left") return { x: -Math.max(size.width - PEEK_PX, 0), y: 0 };
-		if (preferences.position === "right") return { x: Math.max(size.width - PEEK_PX, 0), y: 0 };
-		return { x: 0, y: -Math.max(size.height - PEEK_PX, 0) };
-	}, [isFree, preferences.position, size.height, size.width]);
+		if (preferences.position === "left") return { x: -Math.max(cardSize.width - PEEK_PX, 0), y: 0 };
+		if (preferences.position === "right") return { x: Math.max(cardSize.width - PEEK_PX, 0), y: 0 };
+		return { x: 0, y: -Math.max(cardSize.height - PEEK_PX, 0) };
+	}, [isFree, preferences.position, cardSize.height, cardSize.width]);
 
-	const isExpanded = isFree || hovered || preferences.locked;
-
-	const onNavigate = (view: AtlasView) => {
-		void window.atlas.requestNavigate(view);
-	};
+	// An open tab panel keeps the bar pulled into view even without a hover,
+	// since the panel only makes sense alongside a visible bar.
+	const isExpanded = isFree || hovered || preferences.locked || Boolean(activeTab);
 
 	const onToggleLock = () => {
 		void window.atlas.setNotchPreferences({ locked: !preferences.locked });
@@ -279,144 +818,792 @@ export function NotchApp() {
 		setActiveSession(null);
 	};
 
-	const onAdvanceTodo = async () => {
-		if (!firstTodo || !secondColumn) return;
-		const taskId = firstTodo.id;
-		const nextStatus = secondColumn.status;
-		await window.atlas.updateTaskStatus(taskId, nextStatus);
-		setTasks((current) => current.map((task) => (task.id === taskId ? { ...task, status: nextStatus } : task)));
+	const onStartTimer = async () => {
+		if (!environment || activeSession) return;
+		const session = await window.atlas.startSession(environment.id);
+		setActiveSession(session);
 	};
 
-	return (
-		<div
-			className={`flex h-screen w-screen overflow-hidden bg-transparent ${ROOT_POSITION_CLASSES[preferences.position]}`}
-		>
-			<motion.div
-				ref={cardRef}
-				className={`atlas-notch-card relative flex min-w-0 gap-2 cursor-default select-none overflow-hidden border border-neutral-200 bg-neutral-0 text-neutral-700 dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-50 ${CARD_POSITION_CLASSES[preferences.position]} ${
-					isFree && !preferences.locked ? "notch-drag" : ""
-				}`}
-				onMouseEnter={() => setHovered(true)}
-				onMouseLeave={() => setHovered(false)}
-				initial={false}
-				animate={isExpanded ? { x: 0, y: 0 } : { x: collapseTarget.x, y: collapseTarget.y }}
-				transition={isExpanded ? { duration: 0.25, ease: "easeOut" } : { duration: 0.5, ease: "easeInOut" }}
-			>
-				<div
-					className={`notch-no-drag flex items-center gap-4 whitespace-nowrap ${isVertical ? "flex-col py-3" : "flex-row px-3"}`}
-				>
-					{activeInfoItem ? (
-						<>
-							<div
-								className={`notch-no-drag flex items-center gap-1.5 whitespace-nowrap ${isVertical ? "flex-col" : "flex-row"}`}
+	const onTogglePause = async () => {
+		if (!activeSession) return;
+		const updated = activeSession.is_paused
+			? await window.atlas.resumeSession(activeSession.id)
+			: await window.atlas.pauseSession(activeSession.id);
+		setActiveSession(updated);
+	};
+
+	const onAdvanceTodo = async (taskId: string, nextStatus: string) => {
+		await window.atlas.updateTaskStatus(taskId, nextStatus);
+		setTasks((current) =>
+			current.map((task) => (task.id === taskId ? { ...task, status: nextStatus } : task)),
+		);
+	};
+
+	const onAddTask = async (status: string) => {
+		const title = addTaskTitleDraft.trim();
+		if (!environment || !title) return;
+		const task = await window.atlas.createTask(environment.id, title);
+		if (task.status !== status) await window.atlas.updateTaskStatus(task.id, status);
+		setTasks((current) => [...current, { ...task, status }]);
+		setAddTaskTitleDraft("");
+		setAddTaskPopupFor(null);
+	};
+
+	const onSwitchEnvironment = (envId: string) => {
+		try {
+			localStorage.setItem("atlas.lastEnvironmentId", envId);
+		} catch {
+			// Ignore storage failures (e.g. private mode); state still updates below.
+		}
+		setActiveEnvId(envId);
+	};
+
+	const onCycleEnvironment = () => {
+		if (environments.length < 2 || !environment) return;
+		const index = environments.findIndex((env) => env.id === environment.id);
+		const next = environments[(index + 1) % environments.length];
+		if (next) onSwitchEnvironment(next.id);
+	};
+
+	const onToggleTheme = () => {
+		const next = themeValue === "dark" ? "light" : "dark";
+		try {
+			localStorage.setItem(THEME_KEY, JSON.stringify(next));
+		} catch {
+			// Ignore storage failures; native theme still gets applied below.
+		}
+		setThemeValue(next);
+		document.documentElement.classList.toggle("dark", next === "dark");
+		void window.atlas.setNativeTheme(next);
+	};
+
+	// Plain text/value widgets that need no interactivity, keyed by widget id
+	// so renderWidget can render them all the same way.
+	const getDisplayText = (placement: NotchWidgetPlacement): string | null => {
+		switch (placement.widget) {
+			case "topAppCompact":
+				return topApp ? topApp.appName : "No data yet";
+			case "openTasksCount":
+				return `${dashboard?.quickStats.openTasks ?? 0} open tasks`;
+			case "untrackedToday":
+				return `${formatDuration(untrackedTodayMs)} untracked`;
+			case "taskCount": {
+				const column = resolveColumn(placement.config);
+				const count = column ? (tasksByColumn.get(column.status)?.length ?? 0) : 0;
+				return `${count} ${column?.label ?? "to do"}`;
+			}
+			case "cpuUsagePercent":
+				return `${systemStats.cpuPercent}% CPU`;
+			case "memoryUsagePercent":
+				return `${systemStats.memoryPercent}% RAM`;
+			case "taskColumnsOverview":
+				return columnCounts.length > 0 ? columnCounts.map((c) => c.count).join(" · ") : "—";
+			case "notesCount":
+				return `${notes.length} notes`;
+			case "environmentName":
+				return environment?.name ?? "No environment";
+			case "currentDate":
+				return new Date(now).toLocaleDateString([], { day: "numeric", month: "short" });
+			case "dayOfWeek":
+				return new Date(now).toLocaleDateString([], { weekday: "long" });
+			case "clockWithSeconds":
+				return new Date(now).toLocaleTimeString([], {
+					hour: "2-digit",
+					minute: "2-digit",
+					second: "2-digit",
+				});
+			case "timeUntilMidnight": {
+				const midnight = new Date(now);
+				midnight.setHours(24, 0, 0, 0);
+				return `${formatDuration(midnight.getTime() - now)} left today`;
+			}
+			case "currentAppName":
+				return currentAppName || "Unknown";
+			case "platformBadge":
+				return platform || "—";
+			case "appVersionBadge":
+				return appVersion ? `v${appVersion}` : "—";
+			case "sessionStateLabel":
+				return activeSession ? (activeSession.is_paused ? "Paused" : "Running") : "Idle";
+			case "lastNoteSnippet":
+				return lastNote ? lastNote.content.slice(0, 60) || "(empty note)" : "No notes yet";
+			default:
+				return null;
+		}
+	};
+
+	const renderWidget = (placement: NotchWidgetPlacement) => {
+		const widgetId = placement.widget;
+
+		const navAction = NAV_ACTIONS[widgetId];
+		if (navAction) {
+			const Icon = navAction.icon;
+			return (
+				<div key={placement.id} className="flex h-full items-center justify-center">
+					<button
+						type="button"
+						className={`${ICON_BUTTON_CLASSES} h-8 w-8`}
+						title={navAction.title}
+						aria-label={navAction.title}
+						onClick={navAction.onClick}
+					>
+						<Icon className="h-5 w-5" />
+					</button>
+				</div>
+			);
+		}
+
+		const text = getDisplayText(placement);
+		if (text !== null) {
+			return (
+				<div key={placement.id} className="flex h-full items-center justify-center px-1">
+					<span className="truncate text-[11px] text-neutral-700 dark:text-neutral-100">{text}</span>
+				</div>
+			);
+		}
+
+		switch (widgetId) {
+			case "timerStartStop":
+				return (
+					<div key={placement.id} className="flex h-full items-center justify-center">
+						{activeSession ? (
+							<button
+								type="button"
+								className={`${ICON_BUTTON_CLASSES} h-8 w-8`}
+								title="Stop timer"
+								aria-label="Stop timer"
+								onClick={() => void onStopTimer()}
 							>
-								{activeInfoItem === "timer" && activeSession ? (
-									<>
-										<span className="font-data text-[12px] text-neutral-700 dark:text-neutral-100">
-											{formatClock(sessionElapsedMs(activeSession, now))}
-										</span>
-										<button
-											type="button"
-											className={`${ICON_BUTTON_CLASSES} h-6 w-6`}
-											title="Stop timer"
-											aria-label="Stop timer"
-											onClick={() => void onStopTimer()}
-										>
-											<StopIcon className="h-4 w-4" />
-										</button>
-									</>
-								) : null}
-								{activeInfoItem === "todo" && firstTodo ? (
-									<>
-										<span className="max-w-28 truncate text-[12px] font-medium text-neutral-700 dark:text-neutral-100">
-											{firstTodo.title}
-										</span>
-										<button
-											type="button"
-											className={`${ICON_BUTTON_CLASSES} h-6 w-6 disabled:cursor-not-allowed disabled:opacity-40`}
-											title="Move to next column"
-											aria-label="Move to next column"
-											disabled={!secondColumn}
-											onClick={() => void onAdvanceTodo()}
-										>
-											<CheckIcon className="h-4 w-4" />
-										</button>
-									</>
-								) : null}
-							</div>
-
-							<span
-								className={`flex-shrink-0 bg-neutral-200 dark:bg-neutral-600 ${
-									isVertical ? "my-0.5 h-px w-4" : "mx-0.5 h-4 w-px"
-								}`}
-							/>
-						</>
-					) : null}
-
-					<div
-						className={`notch-no-drag flex items-center gap-2.5 whitespace-nowrap ${isVertical ? "flex-col" : "flex-row"}`}
-					>
-						{enabledNavItems.map((item) => {
-							const Icon = item.icon;
-							return (
-								<button
-									key={item.id}
-									type="button"
-									className={`${ICON_BUTTON_CLASSES} h-7 w-7`}
-									title={item.label}
-									aria-label={item.label}
-									onClick={() => onNavigate(item.id)}
-								>
-									<Icon className="h-5 w-5" />
-								</button>
-							);
-						})}
+								<StopIcon className="h-5 w-5" />
+							</button>
+						) : (
+							<button
+								type="button"
+								className="recording-trigger group inline-flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-200 bg-neutral-50 text-neutral-700 transition hover:border-primary-hover hover:bg-primary-hover hover:text-neutral-0 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-600 dark:bg-neutral-700/80 dark:text-neutral-100"
+								disabled={!environment}
+								onClick={() => void onStartTimer()}
+								aria-label="Start recording"
+							>
+								<span className="relative h-5 w-5">
+									<PlayCircleIcon className="absolute inset-0 h-5 w-5 transition-opacity duration-150 group-hover:opacity-0" />
+									<PlayCircleIconSolid className="absolute inset-0 h-5 w-5 opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
+								</span>
+							</button>
+						)}
 					</div>
-
-					<span
-						className={`flex-shrink-0 bg-neutral-200 dark:bg-neutral-600 ${
-							isVertical ? "my-0.5 h-px w-4" : "mx-0.5 h-4 w-px"
-						}`}
-					/>
-					<div
-						className={`notch-no-drag flex items-center gap-2.5 whitespace-nowrap ${isVertical ? "flex-col" : "flex-row"}`}
-					>
-						<div
-							className={`inline-flex max-w-28 cursor-pointer items-center justify-center overflow-hidden rounded-lg border px-3.5 py-0.5 text-[12px] font-semibold text-ellipsis whitespace-nowrap ${
-								isVertical
-									? `max-h-28 max-w-none px-0.5 py-1.5 [text-orientation:mixed] [writing-mode:vertical-rl] ${
-											preferences.position === "left" ? "rotate-180" : ""
-										}`
-									: ""
-							}`}
-							role="button"
-							title={environment?.name ?? "No environment"}
-							onClick={() => void window.atlas.focusMainIfOpen()}
-						>
-							{environment?.name ?? "Atlas"}
-						</div>
-
+				);
+			case "timerPause":
+				return (
+					<div key={placement.id} className="flex h-full items-center justify-center">
 						<button
 							type="button"
-							className={`${ICON_BUTTON_CLASSES} h-7 w-7`}
+							className={`${ICON_BUTTON_CLASSES} h-8 w-8 disabled:cursor-not-allowed disabled:opacity-40`}
+							title={activeSession?.is_paused ? "Resume timer" : "Pause timer"}
+							aria-label={activeSession?.is_paused ? "Resume timer" : "Pause timer"}
+							disabled={!activeSession}
+							onClick={() => void onTogglePause()}
+						>
+							{activeSession?.is_paused ? (
+								<PlayIcon className="h-5 w-5" />
+							) : (
+								<PauseIcon className="h-5 w-5" />
+							)}
+						</button>
+					</div>
+				);
+			case "timerDisplay":
+				return (
+					<div key={placement.id} className="flex h-full items-center justify-center">
+						<span className="font-data text-[13px] text-neutral-700 dark:text-neutral-100">
+							{activeSession ? formatClock(sessionElapsedMs(activeSession, now)) : "00:00:00"}
+						</span>
+					</div>
+				);
+			case "timerStatusDot":
+				return (
+					<div key={placement.id} className="flex h-full items-center justify-center">
+						<span
+							className={`h-2.5 w-2.5 rounded-full ${
+								!activeSession
+									? "bg-neutral-300 dark:bg-neutral-500"
+									: activeSession.is_paused
+										? "bg-amber-500"
+										: "bg-primary"
+							}`}
+						/>
+					</div>
+				);
+			case "lockToggle":
+				return (
+					<div key={placement.id} className="flex h-full items-center justify-center">
+						<button
+							type="button"
+							className={`${ICON_BUTTON_CLASSES} h-8 w-8`}
 							title={preferences.locked ? "Unlock position" : "Lock position"}
 							aria-label={preferences.locked ? "Unlock position" : "Lock position"}
 							onClick={onToggleLock}
 						>
 							{preferences.locked ? (
-								<LockClosedIcon className="w-5 h-5" />
+								<LockClosedIcon className="h-5 w-5" />
 							) : (
-								<LockOpenIcon className="w-5 h-5" />
+								<LockOpenIcon className="h-5 w-5" />
 							)}
 						</button>
 					</div>
-				</div>
+				);
+			case "timeSpentToday":
+				return (
+					<div key={placement.id} className="flex items-center gap-2">
+						<div className="relative h-1.5 min-w-20 flex-1 overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-600">
+							{todaySegments.map((segment, index) => (
+								<span
+									key={index}
+									className="absolute top-0 h-full bg-neutral-700 dark:bg-neutral-100"
+									style={{
+										left: `${segment.startPercent}%`,
+										width: `${segment.widthPercent}%`,
+									}}
+								/>
+							))}
+							<span
+								className="absolute top-1/2 h-2.5 w-px -translate-y-1/2 bg-primary"
+								style={{ left: `${nowPercent}%` }}
+							/>
+						</div>
+						<span className="font-data text-[11px] text-neutral-500 dark:text-neutral-300">
+							{currentTimeLabel}
+						</span>
+						<span className="font-data text-[12px] font-medium text-neutral-700 dark:text-neutral-100">
+							{formatDuration(dashboard?.totalTodayMs ?? 0)}
+						</span>
+					</div>
+				);
+			case "topApp": {
+				const match = topApp
+					? runningApps.find((app) => app.name.toLowerCase() === topApp.appName.toLowerCase())
+					: null;
+				const icon = match?.path ? appIcons[match.path] : undefined;
+				return (
+					<button
+						key={placement.id}
+						type="button"
+						disabled={!match?.path}
+						title={match?.path ? `Open ${topApp?.appName}` : (topApp?.appName ?? "No data yet")}
+						onClick={() => match?.path && void window.atlas.launchApp(`"${match.path}"`)}
+						className="flex h-full w-full items-center gap-2 px-2 text-left disabled:cursor-default"
+					>
+						<div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-amber-400/20 text-amber-600 dark:bg-amber-400/15 dark:text-amber-300">
+							{icon ? (
+								<img src={icon} alt="" className="h-4.5 w-4.5" />
+							) : (
+								<RocketLaunchIcon className="h-4 w-4" />
+							)}
+						</div>
+						<span className="max-w-24 truncate text-[12px] text-neutral-700 dark:text-neutral-100">
+							{topApp ? `${topApp.appName} · ${formatDuration(topApp.duration)}` : "No data yet"}
+						</span>
+					</button>
+				);
+			}
+			case "sessionsTodayCount":
+				return (
+					<div key={placement.id} className="flex h-full flex-col items-center justify-center gap-0">
+						<span className="font-data text-[16px] font-semibold text-neutral-800 dark:text-neutral-0">
+							{dashboard?.quickStats.sessionsToday ?? 0}
+						</span>
+						<span className="text-[10px] text-neutral-500 dark:text-neutral-300">
+							of {totalSessionCount} sessions
+						</span>
+					</div>
+				);
+			case "cpuUsageGraph":
+			case "memoryUsageGraph": {
+				const history = placement.widget === "cpuUsageGraph" ? cpuHistory : memoryHistory;
+				const latest = history[history.length - 1] ?? 0;
+				return (
+					<div key={placement.id} className="flex h-full w-full flex-col gap-1 px-2 py-1.5">
+						<div className="flex items-end gap-0.5" style={{ height: "calc(100% - 14px)" }}>
+							{history.length === 0 ? (
+								<span className="text-[10px] text-neutral-400">No data yet</span>
+							) : (
+								history.map((value, index) => (
+									<span
+										key={index}
+										className="flex-1 rounded-sm bg-primary/60"
+										style={{ height: `${Math.max(value, 4)}%` }}
+									/>
+								))
+							)}
+						</div>
+						<span className="text-[10px] text-neutral-500 dark:text-neutral-300">
+							{latest}% {placement.widget === "cpuUsageGraph" ? "CPU" : "RAM"}
+						</span>
+					</div>
+				);
+			}
+			case "dashboardSummary":
+				return (
+					<div key={placement.id} className="flex h-full flex-col items-center justify-center gap-0.5">
+						<span className="font-data text-[12px] font-medium text-neutral-700 dark:text-neutral-100">
+							{formatDuration(dashboard?.totalTodayMs ?? 0)}
+						</span>
+						<span className="text-[10px] text-neutral-500 dark:text-neutral-300">
+							{dashboard?.quickStats.sessionsToday ?? 0} sessions · {dashboard?.quickStats.openTasks ?? 0}{" "}
+							tasks
+						</span>
+					</div>
+				);
+			case "currentTime":
+				return (
+					<div key={placement.id} className="flex h-full items-center justify-center">
+						<span className="font-data text-[12px] text-neutral-700 dark:text-neutral-100">
+							{currentTimeLabel}
+						</span>
+					</div>
+				);
+			case "firstTodoList": {
+				const column = resolveColumn(placement.config);
+				const columnTasks = column ? (tasksByColumn.get(column.status) ?? []).slice(0, 3) : [];
+				const nextColumn = column ? columnAfter(column.status) : null;
+				return (
+					<div key={placement.id} className="flex flex-col gap-1">
+						{columnTasks.length === 0 ? (
+							<span className="text-[12px] text-neutral-500 dark:text-neutral-300">No tasks</span>
+						) : (
+							columnTasks.map((task) => (
+								<div key={task.id} className="flex items-center justify-between gap-2">
+									<span className="max-w-28 truncate text-[12px] text-neutral-700 dark:text-neutral-100">
+										{task.title}
+									</span>
+									<button
+										type="button"
+										className={`${ICON_BUTTON_CLASSES} h-6 w-6 disabled:cursor-not-allowed disabled:opacity-40`}
+										title="Move to next column"
+										aria-label="Move to next column"
+										disabled={!nextColumn}
+										onClick={() => nextColumn && void onAdvanceTodo(task.id, nextColumn.status)}
+									>
+										<CheckIcon className="h-4 w-4" />
+									</button>
+								</div>
+							))
+						)}
+					</div>
+				);
+			}
+			case "nextTaskOnly": {
+				const column = resolveColumn(placement.config);
+				const task = column ? ((tasksByColumn.get(column.status) ?? [])[0] ?? null) : null;
+				const nextColumn = column ? columnAfter(column.status) : null;
+				return (
+					<div key={placement.id} className="flex h-full items-center justify-between gap-2">
+						<span className="max-w-28 truncate text-[12px] text-neutral-700 dark:text-neutral-100">
+							{task?.title ?? "No tasks"}
+						</span>
+						<button
+							type="button"
+							className={`${ICON_BUTTON_CLASSES} h-6 w-6 disabled:cursor-not-allowed disabled:opacity-40`}
+							title="Move to next column"
+							aria-label="Move to next column"
+							disabled={!task || !nextColumn}
+							onClick={() => task && nextColumn && void onAdvanceTodo(task.id, nextColumn.status)}
+						>
+							<CheckIcon className="h-4 w-4" />
+						</button>
+					</div>
+				);
+			}
+			case "quickAddTask": {
+				const column = resolveColumn(placement.config);
+				const isOpen = addTaskPopupFor === placement.id;
+				return (
+					<div key={placement.id} className="relative flex h-full items-center justify-center">
+						<button
+							type="button"
+							className={`${ICON_BUTTON_CLASSES} h-8 w-8 disabled:cursor-not-allowed disabled:opacity-40`}
+							title={column ? `Add task to ${column.label}` : "Add task"}
+							aria-label="Add task"
+							disabled={!environment || !column}
+							onClick={() => {
+								setAddTaskTitleDraft("");
+								setAddTaskPopupFor(isOpen ? null : placement.id);
+							}}
+						>
+							<PlusIcon className="h-5 w-5" />
+						</button>
+						{isOpen && column ? (
+							<>
+								<div className="fixed inset-0 z-40" onClick={() => setAddTaskPopupFor(null)} />
+								<div className="notch-no-drag absolute left-1/2 top-full z-50 mt-1 w-52 -translate-x-1/2 rounded-lg border border-neutral-200 bg-neutral-0 p-2 shadow-lg dark:border-neutral-600 dark:bg-neutral-800">
+									<span className="mb-1 block text-[10px] text-neutral-500 dark:text-neutral-300">
+										New task in {column.label}
+									</span>
+									<input
+										type="text"
+										autoFocus
+										value={addTaskTitleDraft}
+										onChange={(event) => setAddTaskTitleDraft(event.target.value)}
+										onKeyDown={(event) => {
+											if (event.key === "Enter") void onAddTask(column.status);
+											if (event.key === "Escape") setAddTaskPopupFor(null);
+										}}
+										placeholder="Task title..."
+										className="w-full rounded-md border border-neutral-200 bg-transparent px-2 py-1 text-[12px] outline-none focus:border-primary dark:border-neutral-600"
+									/>
+									<div className="mt-1.5 flex justify-end gap-1.5">
+										<button
+											type="button"
+											onClick={() => setAddTaskPopupFor(null)}
+											className="rounded-md px-2 py-1 text-[11px] text-neutral-500 transition-colors hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-700/60"
+										>
+											Cancel
+										</button>
+										<button
+											type="button"
+											disabled={!addTaskTitleDraft.trim()}
+											onClick={() => void onAddTask(column.status)}
+											className="rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-neutral-0 transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
+										>
+											Add
+										</button>
+									</div>
+								</div>
+							</>
+						) : null}
+					</div>
+				);
+			}
+			case "taskProgressBar": {
+				const column = resolveColumn(placement.config) ?? columns[columns.length - 1] ?? null;
+				const doneCount = column ? (tasksByColumn.get(column.status)?.length ?? 0) : 0;
+				const ratio = totalTaskCount > 0 ? doneCount / totalTaskCount : 0;
+				return (
+					<div key={placement.id} className="flex h-full flex-col justify-center gap-1 px-1">
+						<div className="relative h-1.5 w-full overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-600">
+							<span
+								className="absolute inset-y-0 left-0 bg-primary"
+								style={{ width: `${Math.round(ratio * 100)}%` }}
+							/>
+						</div>
+						<span className="text-[10px] text-neutral-500 dark:text-neutral-300">
+							{doneCount}/{totalTaskCount} {column?.label.toLowerCase() ?? "done"}
+						</span>
+					</div>
+				);
+			}
+			case "environmentAccentDot":
+				return (
+					<div key={placement.id} className="flex h-full items-center justify-center">
+						<span className="h-3 w-3 rounded-full" style={{ backgroundColor: accent }} />
+					</div>
+				);
+			case "environmentSwitcher":
+				return (
+					<div key={placement.id} className="flex h-full items-center justify-center">
+						<button
+							type="button"
+							className={`${ICON_BUTTON_CLASSES} h-8 w-8 disabled:cursor-not-allowed disabled:opacity-40`}
+							title="Switch environment"
+							aria-label="Switch environment"
+							disabled={environments.length < 2}
+							onClick={onCycleEnvironment}
+						>
+							<ArrowPathIcon className="h-5 w-5" />
+						</button>
+					</div>
+				);
+			case "environmentList":
+				return (
+					<div key={placement.id} className="flex h-full flex-col justify-center gap-0.5 px-1">
+						{environments.length === 0 ? (
+							<span className="text-[11px] text-neutral-500 dark:text-neutral-300">No environments</span>
+						) : (
+							environments.slice(0, 3).map((env) => (
+								<button
+									key={env.id}
+									type="button"
+									onClick={() => onSwitchEnvironment(env.id)}
+									className={`truncate rounded px-1 text-left text-[11px] transition-colors hover:bg-neutral-100 dark:hover:bg-white/10 ${
+										env.id === environment?.id
+											? "font-semibold text-neutral-800 dark:text-neutral-0"
+											: "text-neutral-600 dark:text-neutral-300"
+									}`}
+								>
+									{env.name}
+								</button>
+							))
+						)}
+					</div>
+				);
+			case "launchAppButton": {
+				const icon = placement.config ? appIcons[placement.config] : undefined;
+				return (
+					<div key={placement.id} className="flex h-full items-center justify-center">
+						<button
+							type="button"
+							className={`${ICON_BUTTON_CLASSES} h-8 w-8 disabled:cursor-not-allowed disabled:opacity-40`}
+							title={placement.config ? `Launch: ${placement.config}` : "No program set"}
+							aria-label="Launch app"
+							disabled={!placement.config}
+							onClick={() => placement.config && void window.atlas.launchApp(placement.config)}
+						>
+							{icon ? (
+								<img src={icon} alt="" className="h-5 w-5" />
+							) : (
+								<RocketLaunchIcon className="h-5 w-5" />
+							)}
+						</button>
+					</div>
+				);
+			}
+			case "openUrlButton":
+				return (
+					<div key={placement.id} className="flex h-full items-center justify-center">
+						<button
+							type="button"
+							className={`${ICON_BUTTON_CLASSES} h-8 w-8 disabled:cursor-not-allowed disabled:opacity-40`}
+							title={placement.config ? `Open: ${placement.config}` : "No URL set"}
+							aria-label="Open URL"
+							disabled={!placement.config}
+							onClick={() =>
+								placement.config && void window.atlas.launchApp(`start "" "${placement.config}"`)
+							}
+						>
+							<GlobeAltIcon className="h-5 w-5" />
+						</button>
+					</div>
+				);
+			case "updateAvailableBadge":
+				return (
+					<div key={placement.id} className="flex h-full items-center justify-center px-1">
+						<span
+							className={`truncate text-[11px] ${
+								hasUpdate
+									? "font-medium text-amber-600 dark:text-amber-400"
+									: "text-neutral-500 dark:text-neutral-300"
+							}`}
+						>
+							{hasUpdate ? "Update available" : "Up to date"}
+						</span>
+					</div>
+				);
+			case "divider":
+				return (
+					<div key={placement.id} className="flex h-full items-center justify-center">
+						<span className="h-full w-px bg-neutral-200 dark:bg-neutral-600" />
+					</div>
+				);
+			case "label":
+				return (
+					<div key={placement.id} className="flex h-full items-center justify-center px-1">
+						<span className="truncate text-[11px] text-neutral-700 dark:text-neutral-100">
+							{placement.config || "Label"}
+						</span>
+					</div>
+				);
+			case "spacer":
+				return <div key={placement.id} />;
+			case "accentSwatch":
+				return (
+					<div key={placement.id} className="flex h-full items-center justify-center">
+						<span className="h-4 w-4 rounded-md" style={{ backgroundColor: accent }} />
+					</div>
+				);
+			case "themeToggle":
+				return (
+					<div key={placement.id} className="flex h-full items-center justify-center">
+						<button
+							type="button"
+							className={`${ICON_BUTTON_CLASSES} h-8 w-8`}
+							title={themeValue === "dark" ? "Switch to light" : "Switch to dark"}
+							aria-label={themeValue === "dark" ? "Switch to light" : "Switch to dark"}
+							onClick={onToggleTheme}
+						>
+							{themeValue === "dark" ? <SunIcon className="h-5 w-5" /> : <MoonIcon className="h-5 w-5" />}
+						</button>
+					</div>
+				);
+			default:
+				return null;
+		}
+	};
 
-				<div
-					className={`shrink-0 rounded-2xl ${isVertical ? "self-stretch w-px" : "h-px w-full"} ${isExpanded ? "hidden" : ""}`}
-					style={{ backgroundColor: accent }}
-				/>
-			</motion.div>
+	return (
+		<div
+			className={`flex h-screen w-screen overflow-hidden bg-transparent ${ROOT_POSITION_CLASSES[preferences.position]}`}
+			onMouseDown={(event) => {
+				// A click on the transparent root background (not bubbled from the
+				// card or panel) closes an open tab panel.
+				if (event.target === event.currentTarget) setActiveTabId(null);
+			}}
+		>
+			<div ref={wrapperRef} className={`flex gap-2 ${WRAPPER_POSITION_CLASSES[preferences.position]}`}>
+				<motion.div
+					ref={cardRef}
+					className={`atlas-notch-card relative flex min-w-0 gap-2 cursor-default select-none overflow-hidden border border-neutral-200 bg-neutral-0 text-neutral-700 dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-50 ${CARD_POSITION_CLASSES[preferences.position]} ${
+						isFree && !preferences.locked ? "notch-drag" : ""
+					}`}
+					onMouseEnter={() => setHovered(true)}
+					onMouseLeave={() => setHovered(false)}
+					initial={false}
+					animate={isExpanded ? { x: 0, y: 0 } : { x: collapseTarget.x, y: collapseTarget.y }}
+					transition={isExpanded ? { duration: 0.25, ease: "easeOut" } : { duration: 0.5, ease: "easeInOut" }}
+				>
+					<div
+						className={`notch-no-drag flex items-center gap-4 whitespace-nowrap ${isVertical ? "flex-col py-3" : "flex-row px-3"}`}
+					>
+						{activeInfoItem ? (
+							<>
+								<div
+									className={`notch-no-drag flex items-center gap-1.5 whitespace-nowrap ${isVertical ? "flex-col" : "flex-row"}`}
+								>
+									{activeInfoItem === "timer" && activeSession ? (
+										<>
+											<span className="font-data text-[12px] text-neutral-700 dark:text-neutral-100">
+												{formatClock(sessionElapsedMs(activeSession, now))}
+											</span>
+											<button
+												type="button"
+												className={`${ICON_BUTTON_CLASSES} h-6 w-6`}
+												title="Stop timer"
+												aria-label="Stop timer"
+												onClick={() => void onStopTimer()}
+											>
+												<StopIcon className="h-4 w-4" />
+											</button>
+										</>
+									) : null}
+									{activeInfoItem === "todo" && firstTodo ? (
+										<>
+											<span className="max-w-28 truncate text-[12px] font-medium text-neutral-700 dark:text-neutral-100">
+												{firstTodo.title}
+											</span>
+											<button
+												type="button"
+												className={`${ICON_BUTTON_CLASSES} h-6 w-6 disabled:cursor-not-allowed disabled:opacity-40`}
+												title="Move to next column"
+												aria-label="Move to next column"
+												disabled={!secondColumn}
+												onClick={() => secondColumn && void onAdvanceTodo(firstTodo.id, secondColumn.status)}
+											>
+												<CheckIcon className="h-4 w-4" />
+											</button>
+										</>
+									) : null}
+								</div>
+
+								<span
+									className={`flex-shrink-0 bg-neutral-200 dark:bg-neutral-600 ${
+										isVertical ? "my-0.5 h-px w-4" : "mx-0.5 h-4 w-px"
+									}`}
+								/>
+							</>
+						) : null}
+
+						<div
+							className={`notch-no-drag flex items-center gap-2.5 whitespace-nowrap ${isVertical ? "flex-col" : "flex-row"}`}
+						>
+							{preferences.tabs.map((tab) => {
+								const Icon = TAB_ICON_MAP[tab.icon] ?? Squares2X2Icon;
+								const isActive = activeTabId === tab.id;
+								return (
+									<button
+										key={tab.id}
+										type="button"
+										className={`${ICON_BUTTON_CLASSES} h-7 w-7 ${
+											isActive ? "bg-neutral-100 text-neutral-800 dark:bg-white/10 dark:text-neutral-0" : ""
+										}`}
+										title={tab.label}
+										aria-label={tab.label}
+										onClick={() => setActiveTabId((current) => (current === tab.id ? null : tab.id))}
+									>
+										<Icon className="h-5 w-5" />
+									</button>
+								);
+							})}
+							<button
+								type="button"
+								className={`${ICON_BUTTON_CLASSES} h-7 w-7`}
+								title="Edit action buttons"
+								aria-label="Edit action buttons"
+								onClick={() => void window.atlas.openActionEditorWindow()}
+							>
+								<PencilSquareIcon className="h-4.5 w-4.5" />
+							</button>
+						</div>
+
+						<span
+							className={`flex-shrink-0 bg-neutral-200 dark:bg-neutral-600 ${
+								isVertical ? "my-0.5 h-px w-4" : "mx-0.5 h-4 w-px"
+							}`}
+						/>
+						<div
+							className={`notch-no-drag flex items-center gap-2.5 whitespace-nowrap ${isVertical ? "flex-col" : "flex-row"}`}
+						>
+							<div
+								className={`inline-flex max-w-28 cursor-pointer items-center justify-center overflow-hidden rounded-lg border border-neutral-200 px-3.5 py-0.5 text-[12px] font-semibold text-ellipsis whitespace-nowrap dark:border-neutral-600 ${
+									isVertical
+										? `max-h-28 max-w-none px-0.5 py-1.5 [text-orientation:mixed] [writing-mode:vertical-rl] ${
+												preferences.position === "left" ? "rotate-180" : ""
+											}`
+										: ""
+								}`}
+								role="button"
+								title={environment?.name ?? "No environment"}
+								onClick={() => void window.atlas.focusMainIfOpen()}
+							>
+								{environment?.name ?? "Atlas"}
+							</div>
+
+							<button
+								type="button"
+								className={`${ICON_BUTTON_CLASSES} h-7 w-7`}
+								title={preferences.locked ? "Unlock position" : "Lock position"}
+								aria-label={preferences.locked ? "Unlock position" : "Lock position"}
+								onClick={onToggleLock}
+							>
+								{preferences.locked ? (
+									<LockClosedIcon className="w-5 h-5" />
+								) : (
+									<LockOpenIcon className="w-5 h-5" />
+								)}
+							</button>
+						</div>
+					</div>
+
+					<div
+						className={`shrink-0 rounded-2xl ${isVertical ? "self-stretch w-px" : "h-px w-full"} ${isExpanded ? "hidden" : ""}`}
+						style={{ backgroundColor: accent }}
+					/>
+				</motion.div>
+
+				{activeTab && activeTab.placements.length > 0 ? (
+					<div
+						className="notch-no-drag rounded-[20px] border border-neutral-200 bg-neutral-0 p-3 text-neutral-700 dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-50"
+						style={{
+							display: "grid",
+							gridTemplateColumns: `repeat(${activeTab.gridCols}, ${GRID_CELL_PX}px)`,
+							gridTemplateRows: `repeat(${activeTab.gridRows}, ${GRID_CELL_PX}px)`,
+							gap: `${GRID_GAP_PX}px`,
+						}}
+					>
+						{activeTab.placements.map((placement) => (
+							<div
+								key={placement.id}
+								className={`overflow-hidden ${
+									WIDGETS_WITHOUT_CARD.has(placement.widget) ? "" : WIDGET_CARD_CLASSES
+								}`}
+								style={{
+									gridColumn: `${placement.x + 1} / span ${placement.w}`,
+									gridRow: `${placement.y + 1} / span ${placement.h}`,
+								}}
+							>
+								{renderWidget(placement)}
+							</div>
+						))}
+					</div>
+				) : null}
+			</div>
 		</div>
 	);
 }

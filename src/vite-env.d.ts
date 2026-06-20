@@ -28,7 +28,9 @@ declare global {
 			}>;
 			getUpdatePreferences: () => Promise<UpdatePreferences>;
 			setUpdatePreferences: (preferences: UpdatePreferences) => Promise<UpdatePreferences>;
-			downloadAndInstallUpdate: (options?: { includePrerelease?: boolean }) => Promise<DownloadAndInstallResult>;
+			downloadAndInstallUpdate: (options?: {
+				includePrerelease?: boolean;
+			}) => Promise<DownloadAndInstallResult>;
 			listMaps: () => Promise<MapItem[]>;
 			createMap: (
 				name: string,
@@ -75,11 +77,17 @@ declare global {
 			setNotchPreferences: (preferences: Partial<NotchPreferences>) => Promise<NotchPreferences>;
 			resizeNotch: (width: number, height: number) => Promise<boolean>;
 			onNotchPreferencesChanged: (callback: (preferences: NotchPreferences) => void) => () => void;
+			onNotchBlur: (callback: () => void) => () => void;
 			listDisplays: () => Promise<DisplaySummary[]>;
 
 			windowMinimize: () => Promise<boolean>;
 			openMiniWindow: () => Promise<boolean>;
 			openSettingsWindow: () => Promise<boolean>;
+			openActionEditorWindow: () => Promise<boolean>;
+			pickAppFile: () => Promise<string | null>;
+			getFileIcon: (filePath: string) => Promise<string | null>;
+			listOpenApps: () => Promise<Array<{ name: string; path: string | null }>>;
+			getSystemStats: () => Promise<{ cpuPercent: number; memoryPercent: number }>;
 			resizeMiniWindow: (width: number, height: number) => Promise<boolean>;
 			showMainWindow: () => Promise<boolean>;
 			focusMainIfOpen: () => Promise<boolean>;

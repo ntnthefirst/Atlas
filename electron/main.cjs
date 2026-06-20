@@ -2,16 +2,28 @@ const path = require("node:path");
 const https = require("node:https");
 const fs = require("node:fs");
 const { spawn } = require("node:child_process");
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, nativeTheme, screen } = require("electron");
+const {
+	app,
+	BrowserWindow,
+	dialog,
+	ipcMain,
+	Menu,
+	Tray,
+	nativeImage,
+	nativeTheme,
+	screen,
+} = require("electron");
 const { autoUpdater } = require("electron-updater");
 
 const { AtlasDatabase } = require("./db.cjs");
 const { ActivityTracker } = require("./activity-tracker.cjs");
+const { getSystemStats, listOpenApps } = require("./system-info.cjs");
 
 let mainWindow = null;
 let miniWindow = null;
 let welcomeWindow = null;
 let settingsWindow = null;
+let actionEditorWindow = null;
 // Keyed by display id, since the notch can be shown on multiple screens at once.
 let notchWindows = new Map();
 let tray = null;
@@ -37,10 +49,187 @@ const NOTCH_PREFS_FILE = "notch-preferences.json";
 const NOTCH_POSITIONS = ["top", "left", "right", "free"];
 const NOTCH_IDLE_OPACITIES = ["subtle", "balanced", "solid"];
 const NOTCH_ACTIVATIONS = ["always", "withMain"];
-const NOTCH_ACTION_BUTTON_IDS = ["activity", "dashboard", "notes", "tasks"];
 const NOTCH_INFO_ITEM_IDS = ["timer", "todo"];
-const defaultNotchActionButtons = NOTCH_ACTION_BUTTON_IDS.map((id) => ({ id, enabled: true }));
 const defaultNotchInfoItems = NOTCH_INFO_ITEM_IDS.map((id) => ({ id, enabled: true }));
+
+const NOTCH_WIDGET_IDS = [
+	// Timer/session
+	"timerStartStop",
+	"timerPause",
+	"timerDisplay",
+	"timerStatusDot",
+	"sessionStateLabel",
+	"lockToggle",
+	// Time/stats
+	"timeSpentToday",
+	"topApp",
+	"topAppCompact",
+	"sessionsTodayCount",
+	"openTasksCount",
+	"dashboardSummary",
+	"untrackedToday",
+	// Tasks
+	"firstTodoList",
+	"taskCount",
+	"quickAddTask",
+	"nextTaskOnly",
+	"taskColumnsOverview",
+	"taskProgressBar",
+	// Notes
+	"notesCount",
+	"lastNoteSnippet",
+	// Environment
+	"environmentName",
+	"environmentAccentDot",
+	"environmentSwitcher",
+	"environmentList",
+	// App launcher / navigation
+	"launchAppButton",
+	"openUrlButton",
+	"openDashboardButton",
+	"openActivityButton",
+	"openTasksButton",
+	"openNotesButton",
+	"openSettingsButton",
+	"openMiniPlayerButton",
+	// Clock/date
+	"currentTime",
+	"currentDate",
+	"dayOfWeek",
+	"clockWithSeconds",
+	"timeUntilMidnight",
+	// System/app
+	"currentAppName",
+	"platformBadge",
+	"appVersionBadge",
+	"updateAvailableBadge",
+	"minimizeButton",
+	"focusMainButton",
+	"cpuUsagePercent",
+	"cpuUsageGraph",
+	"memoryUsagePercent",
+	"memoryUsageGraph",
+	// Visual/utility
+	"divider",
+	"label",
+	"spacer",
+	"accentSwatch",
+	"themeToggle",
+];
+// Mirrors src/types.ts's NOTCH_TAB_ICONS — kept as plain strings here since
+// main.cjs only needs to validate them, not render them.
+const NOTCH_TAB_ICONS = [
+	"AcademicCapIcon",
+	"AdjustmentsHorizontalIcon",
+	"ArchiveBoxIcon",
+	"ArrowPathIcon",
+	"BeakerIcon",
+	"BellIcon",
+	"BoltIcon",
+	"BookOpenIcon",
+	"BriefcaseIcon",
+	"CalendarIcon",
+	"CameraIcon",
+	"ChartBarIcon",
+	"ChatBubbleLeftIcon",
+	"CheckCircleIcon",
+	"ClipboardIcon",
+	"ClockIcon",
+	"CloudIcon",
+	"CodeBracketIcon",
+	"Cog6ToothIcon",
+	"CommandLineIcon",
+	"CpuChipIcon",
+	"CreditCardIcon",
+	"CubeIcon",
+	"DocumentTextIcon",
+	"EnvelopeIcon",
+	"FaceSmileIcon",
+	"FilmIcon",
+	"FireIcon",
+	"FlagIcon",
+	"FolderIcon",
+	"GiftIcon",
+	"GlobeAltIcon",
+	"HeartIcon",
+	"HomeIcon",
+	"InboxIcon",
+	"KeyIcon",
+	"LightBulbIcon",
+	"ListBulletIcon",
+	"MapIcon",
+	"MegaphoneIcon",
+	"MoonIcon",
+	"MusicalNoteIcon",
+	"NewspaperIcon",
+	"PaintBrushIcon",
+	"PaperAirplaneIcon",
+	"PencilIcon",
+	"PhotoIcon",
+	"PlayIcon",
+	"PuzzlePieceIcon",
+	"RocketLaunchIcon",
+	"ShieldCheckIcon",
+	"ShoppingCartIcon",
+	"SparklesIcon",
+	"Squares2X2Icon",
+	"StarIcon",
+	"SunIcon",
+	"TagIcon",
+	"TrashIcon",
+	"TrophyIcon",
+	"UserIcon",
+	"VideoCameraIcon",
+	"WifiIcon",
+	"WrenchIcon",
+];
+// The settings grid editor and the notch itself both lay tabs out on a grid
+// of fixed-size (tailwind w-10/h-10) cells with a gap-1.5 gutter; 5x1 is both
+// the default and the floor for a freshly added tab.
+const NOTCH_GRID_MIN_COLS = 5;
+const NOTCH_GRID_MAX_COLS = 20;
+const NOTCH_GRID_MIN_ROWS = 1;
+const NOTCH_GRID_MAX_ROWS = 20;
+const defaultNotchTabs = [
+	{
+		id: "timer",
+		label: "Timer",
+		icon: "ClockIcon",
+		gridCols: 5,
+		gridRows: 1,
+		placements: [
+			{ id: "start-stop", widget: "timerStartStop", x: 0, y: 0, w: 1, h: 1 },
+			{ id: "display", widget: "timerDisplay", x: 1, y: 0, w: 2, h: 1 },
+		],
+	},
+	{
+		id: "time",
+		label: "Time",
+		icon: "ChartBarIcon",
+		gridCols: 5,
+		gridRows: 4,
+		placements: [
+			{ id: "time-spent", widget: "timeSpentToday", x: 0, y: 0, w: 5, h: 2 },
+			{ id: "top-app", widget: "topApp", x: 0, y: 2, w: 3, h: 2 },
+		],
+	},
+	{
+		id: "tasks",
+		label: "Tasks",
+		icon: "ListBulletIcon",
+		gridCols: 5,
+		gridRows: 3,
+		placements: [{ id: "first-todos", widget: "firstTodoList", x: 0, y: 0, w: 3, h: 3 }],
+	},
+	{
+		id: "notes",
+		label: "Notes",
+		icon: "NewspaperIcon",
+		gridCols: 5,
+		gridRows: 2,
+		placements: [{ id: "notes-count", widget: "notesCount", x: 0, y: 0, w: 3, h: 1 }],
+	},
+];
 const defaultNotchPreferences = {
 	enabled: true,
 	position: "top",
@@ -50,7 +239,7 @@ const defaultNotchPreferences = {
 	locked: false,
 	activation: "always",
 	displayIds: [],
-	actionButtons: defaultNotchActionButtons,
+	tabs: defaultNotchTabs,
 	infoItems: defaultNotchInfoItems,
 };
 
@@ -76,6 +265,97 @@ function normalizeIdEnabledList(value, validIds, defaults) {
 		}
 	}
 	return result;
+}
+
+function clampNumber(value, fallback, min, max) {
+	const n = Number.isFinite(value) ? Math.round(value) : fallback;
+	return Math.min(Math.max(n, min), max);
+}
+
+// Normalizes a single tab's placements against its (already-clamped) grid
+// size: drops entries with an unknown widget or duplicate id, clamps each
+// placement's w/h to fit inside the grid and its x/y to fit alongside that
+// size, so a placement can never end up partially or fully off-grid (e.g.
+// after the user shrinks the grid from settings).
+// Two placements overlap if their cell rectangles intersect.
+function placementsOverlap(a, b) {
+	return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function normalizeNotchPlacements(value, gridCols, gridRows) {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+	const seen = new Set();
+	const result = [];
+	value.forEach((entry, index) => {
+		if (!entry || typeof entry !== "object" || !NOTCH_WIDGET_IDS.includes(entry.widget)) {
+			return;
+		}
+		const id = typeof entry.id === "string" && entry.id.trim() ? entry.id.trim() : `placement-${index}`;
+		if (seen.has(id)) {
+			return;
+		}
+		const w = clampNumber(entry.w, 1, 1, gridCols);
+		const h = clampNumber(entry.h, 1, 1, gridRows);
+		const x = clampNumber(entry.x, 0, 0, gridCols - w);
+		const y = clampNumber(entry.y, 0, 0, gridRows - h);
+		const placement = { id, widget: entry.widget, x, y, w, h };
+		// Never let a hand-edited or corrupted preferences file produce two
+		// placements stacked on the same cells — keep whichever came first and
+		// drop the rest, same as the settings grid editor does live.
+		if (result.some((existing) => placementsOverlap(placement, existing))) {
+			return;
+		}
+		seen.add(id);
+		// Only the handful of widgets that use it (launchAppButton, openUrlButton,
+		// label) carry a config string; cap its length defensively.
+		if (typeof entry.config === "string" && entry.config.trim()) {
+			placement.config = entry.config.trim().slice(0, 200);
+		}
+		result.push(placement);
+	});
+	return result;
+}
+
+// Normalizes a user-editable tab list: each tab needs a unique string id, a
+// label, a valid icon, a grid size clamped to the allowed range, and a
+// placements[] that fits inside that grid. A tab has no separate enabled
+// flag — it either exists (and shows) or is removed. Falls back to the
+// defaults wholesale if the saved value is missing/empty/malformed, since a
+// half-broken custom list isn't recoverable item-by-item the way the old
+// fixed-id lists were.
+function normalizeNotchTabs(value, defaults) {
+	const fallback = () =>
+		defaults.map((tab) => ({ ...tab, placements: tab.placements.map((p) => ({ ...p })) }));
+	if (!Array.isArray(value) || value.length === 0) {
+		return fallback();
+	}
+	const seen = new Set();
+	const result = [];
+	for (const entry of value) {
+		if (!entry || typeof entry !== "object") continue;
+		const id = typeof entry.id === "string" && entry.id.trim() ? entry.id.trim() : null;
+		if (!id || seen.has(id)) continue;
+		seen.add(id);
+		const label = typeof entry.label === "string" && entry.label.trim() ? entry.label.trim() : "Tab";
+		const icon = NOTCH_TAB_ICONS.includes(entry.icon) ? entry.icon : "Squares2X2Icon";
+		const gridCols = clampNumber(
+			entry.gridCols,
+			NOTCH_GRID_MIN_COLS,
+			NOTCH_GRID_MIN_COLS,
+			NOTCH_GRID_MAX_COLS,
+		);
+		const gridRows = clampNumber(
+			entry.gridRows,
+			NOTCH_GRID_MIN_ROWS,
+			NOTCH_GRID_MIN_ROWS,
+			NOTCH_GRID_MAX_ROWS,
+		);
+		const placements = normalizeNotchPlacements(entry.placements, gridCols, gridRows);
+		result.push({ id, label, icon, gridCols, gridRows, placements });
+	}
+	return result.length > 0 ? result : fallback();
 }
 
 let notchPreferences = { ...defaultNotchPreferences };
@@ -134,7 +414,8 @@ function normalizeUpdatePreferences(rawValue) {
 	}
 
 	return {
-		autoCheck: typeof rawValue.autoCheck === "boolean" ? rawValue.autoCheck : defaultUpdatePreferences.autoCheck,
+		autoCheck:
+			typeof rawValue.autoCheck === "boolean" ? rawValue.autoCheck : defaultUpdatePreferences.autoCheck,
 		includeBeta:
 			typeof rawValue.includeBeta === "boolean" ? rawValue.includeBeta : defaultUpdatePreferences.includeBeta,
 	};
@@ -580,6 +861,68 @@ function createSettingsWindow(parentWindow = null) {
 	return settingsWindow;
 }
 
+// A standalone window for editing the notch's action-button tabs/grids —
+// the same editor embedded in Settings, but reachable directly from a button
+// on the notch itself without going through the full Settings window.
+function createActionEditorWindow(parentWindow = null) {
+	if (actionEditorWindow && !actionEditorWindow.isDestroyed()) {
+		actionEditorWindow.show();
+		actionEditorWindow.focus();
+		return actionEditorWindow;
+	}
+
+	actionEditorWindow = new BrowserWindow({
+		width: 900,
+		height: 720,
+		minWidth: 640,
+		minHeight: 480,
+		autoHideMenuBar: true,
+		show: false,
+		center: true,
+		backgroundColor: "#070707",
+		icon: isDev
+			? path.join(__dirname, "..", "src", "assets", "logosmall.png")
+			: path.join(__dirname, "..", "dist", "assets", "logosmall.png"),
+		frame: isMac,
+		titleBarStyle: isMac ? "hiddenInset" : "hidden",
+		titleBarOverlay: isWindows
+			? {
+					color: "#2a2a2a",
+					symbolColor: "#e2e2e2",
+					height: 49,
+				}
+			: false,
+		parent: parentWindow && !parentWindow.isDestroyed() ? parentWindow : undefined,
+		webPreferences: {
+			preload: path.join(__dirname, "preload.cjs"),
+			contextIsolation: true,
+			nodeIntegration: false,
+		},
+	});
+
+	if (isDev) {
+		actionEditorWindow.loadURL("http://localhost:5173?mode=actions");
+	} else {
+		actionEditorWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"), {
+			query: { mode: "actions" },
+		});
+	}
+
+	actionEditorWindow.once("ready-to-show", () => {
+		if (!actionEditorWindow || actionEditorWindow.isDestroyed()) {
+			return;
+		}
+		actionEditorWindow.show();
+		actionEditorWindow.focus();
+	});
+
+	actionEditorWindow.on("closed", () => {
+		actionEditorWindow = null;
+	});
+
+	return actionEditorWindow;
+}
+
 function hasAnyMaps() {
 	return Boolean(db && db.listMaps().length > 0);
 }
@@ -752,7 +1095,7 @@ function normalizeNotchPreferences(value) {
 		displayIds: Array.isArray(value.displayIds)
 			? [...new Set(value.displayIds.filter((id) => typeof id === "number" && Number.isFinite(id)))]
 			: defaultNotchPreferences.displayIds,
-		actionButtons: normalizeIdEnabledList(value.actionButtons, NOTCH_ACTION_BUTTON_IDS, defaultNotchActionButtons),
+		tabs: normalizeNotchTabs(value.tabs, defaultNotchTabs),
 		infoItems: normalizeIdEnabledList(value.infoItems, NOTCH_INFO_ITEM_IDS, defaultNotchInfoItems),
 	};
 }
@@ -891,6 +1234,14 @@ function createNotchWindowForDisplay(display) {
 		}
 	});
 
+	// Lets the renderer close an open tab panel when the user clicks anywhere
+	// outside the notch window (another app, the desktop, the main window).
+	notchWindow.on("blur", () => {
+		if (!notchWindow.isDestroyed()) {
+			notchWindow.webContents.send("notch:blur");
+		}
+	});
+
 	notchWindows.set(display.id, notchWindow);
 	positionNotchWindow(notchWindow, display, 300, 70);
 	ensureTray();
@@ -950,7 +1301,8 @@ function applyNotchPreferences(next) {
 			continue;
 		}
 		notchWindow.setMovable(notchPreferences.position === "free" && !notchPreferences.locked);
-		const display = screen.getAllDisplays().find((item) => item.id === displayId) ?? screen.getPrimaryDisplay();
+		const display =
+			screen.getAllDisplays().find((item) => item.id === displayId) ?? screen.getPrimaryDisplay();
 		const [width, height] = notchWindow.getContentSize();
 		positionNotchWindow(notchWindow, display, width, height);
 	}
@@ -1232,7 +1584,9 @@ function wireIpc() {
 
 	ipcMain.handle("notch:getPreferences", () => notchPreferences);
 
-	ipcMain.handle("notch:setPreferences", (_event, prefs) => applyNotchPreferences({ ...notchPreferences, ...(prefs || {}) }));
+	ipcMain.handle("notch:setPreferences", (_event, prefs) =>
+		applyNotchPreferences({ ...notchPreferences, ...(prefs || {}) }),
+	);
 
 	ipcMain.handle("notch:resize", (event, width, height) => {
 		const notchWindow = BrowserWindow.fromWebContents(event.sender);
@@ -1240,7 +1594,8 @@ function wireIpc() {
 			return false;
 		}
 		const display =
-			screen.getAllDisplays().find((item) => item.id === notchWindow.notchDisplayId) ?? screen.getPrimaryDisplay();
+			screen.getAllDisplays().find((item) => item.id === notchWindow.notchDisplayId) ??
+			screen.getPrimaryDisplay();
 		const safeWidth = Math.max(120, Math.min(900, Math.ceil(Number(width) || 0)));
 		const safeHeight = Math.max(44, Math.min(600, Math.ceil(Number(height) || 0)));
 		positionNotchWindow(notchWindow, display, safeWidth, safeHeight);
@@ -1268,6 +1623,51 @@ function wireIpc() {
 		createSettingsWindow(parentWindow);
 		return true;
 	});
+
+	ipcMain.handle("window:openActionEditor", () => {
+		// No parent window: this is opened from the notch as often as from
+		// Settings, and should stay open/independent either way rather than
+		// being tied to (and modal-blocked behind) whichever window asked.
+		createActionEditorWindow(null);
+		return true;
+	});
+
+	ipcMain.handle("app:pickFile", async (event) => {
+		const ownerWindow = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+		const result = await dialog.showOpenDialog(ownerWindow, {
+			properties: ["openFile"],
+			filters: isWindows
+				? [
+						{ name: "Programs", extensions: ["exe", "bat", "cmd"] },
+						{ name: "All files", extensions: ["*"] },
+					]
+				: [{ name: "All files", extensions: ["*"] }],
+		});
+		if (result.canceled || result.filePaths.length === 0) {
+			return null;
+		}
+		return result.filePaths[0];
+	});
+
+	ipcMain.handle("app:getFileIcon", async (_event, filePath) => {
+		if (!filePath) return null;
+		// Strip surrounding quotes and any trailing arguments a launch command
+		// might have (e.g. `"C:\Program Files\App\app.exe" --flag`).
+		const target = filePath
+			.trim()
+			.replace(/^"([^"]+)".*$/, "$1")
+			.split(" ")[0];
+		try {
+			const icon = await app.getFileIcon(target, { size: "normal" });
+			return icon.isEmpty() ? null : icon.toDataURL();
+		} catch {
+			return null;
+		}
+	});
+
+	ipcMain.handle("system:listOpenApps", () => listOpenApps());
+
+	ipcMain.handle("system:getStats", () => getSystemStats());
 
 	ipcMain.handle("window:resizeMini", (_event, width, height) => {
 		if (!miniWindow || miniWindow.isDestroyed()) {
@@ -1356,7 +1756,9 @@ function wireIpc() {
 
 	ipcMain.handle("app:checkUpdates", async (_event, options = {}) => {
 		const includePrerelease =
-			typeof options?.includePrerelease === "boolean" ? options.includePrerelease : updatePreferences.includeBeta;
+			typeof options?.includePrerelease === "boolean"
+				? options.includePrerelease
+				: updatePreferences.includeBeta;
 		const localVersion = app.getVersion();
 
 		try {
@@ -1393,7 +1795,9 @@ function wireIpc() {
 
 	ipcMain.handle("app:releaseHistory", async (_event, options = {}) => {
 		const includePrerelease =
-			typeof options?.includePrerelease === "boolean" ? options.includePrerelease : updatePreferences.includeBeta;
+			typeof options?.includePrerelease === "boolean"
+				? options.includePrerelease
+				: updatePreferences.includeBeta;
 
 		try {
 			const releases = await fetchReleases(includePrerelease);
@@ -1409,7 +1813,9 @@ function wireIpc() {
 
 	ipcMain.handle("app:downloadAndInstallUpdate", async (_event, options = {}) => {
 		const includePrerelease =
-			typeof options?.includePrerelease === "boolean" ? options.includePrerelease : updatePreferences.includeBeta;
+			typeof options?.includePrerelease === "boolean"
+				? options.includePrerelease
+				: updatePreferences.includeBeta;
 		return performInAppUpdate(includePrerelease);
 	});
 }

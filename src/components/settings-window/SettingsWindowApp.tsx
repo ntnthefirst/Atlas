@@ -10,10 +10,10 @@ import {
 } from "@heroicons/react/24/solid";
 import { AccentPicker, Select, ThemeModePicker, Toggle } from "../ui";
 import { useAccent } from "../../hooks";
+import { NotchTabsEditor } from "./NotchTabsEditor";
 import type {
 	AppRelease,
 	DisplaySummary,
-	NotchActionButtonConfig,
 	NotchActivation,
 	NotchIdleOpacity,
 	NotchInfoItemConfig,
@@ -27,20 +27,17 @@ type SettingsTab = "general" | "appearance" | "notch" | "keybindings" | "updates
 
 type ThemeOption = "dark" | "light" | "system";
 
-const settingsTabs: Array<{ id: SettingsTab; label: string; icon: typeof WrenchScrewdriverIcon }> = [
+const settingsTabs: Array<{
+	id: SettingsTab;
+	label: string;
+	icon: typeof WrenchScrewdriverIcon;
+}> = [
 	{ id: "general", label: "General", icon: WrenchScrewdriverIcon },
 	{ id: "appearance", label: "Appearance", icon: PaintBrushIcon },
 	{ id: "notch", label: "Smart Notch", icon: RectangleGroupIcon },
 	{ id: "keybindings", label: "Keybindings", icon: CommandLineIcon },
 	{ id: "updates", label: "Updates", icon: ArrowPathIcon },
 ];
-
-const ACTION_BUTTON_LABELS: Record<NotchActionButtonConfig["id"], string> = {
-	activity: "Activity",
-	dashboard: "Dashboard",
-	notes: "Notes",
-	tasks: "Tasks",
-};
 
 const INFO_ITEM_LABELS: Record<NotchInfoItemConfig["id"], string> = {
 	timer: "Active timer",
@@ -83,11 +80,45 @@ export function SettingsWindowApp() {
 		locked: false,
 		activation: "always",
 		displayIds: [],
-		actionButtons: [
-			{ id: "activity", enabled: true },
-			{ id: "dashboard", enabled: true },
-			{ id: "notes", enabled: true },
-			{ id: "tasks", enabled: true },
+		tabs: [
+			{
+				id: "timer",
+				label: "Timer",
+				icon: "ClockIcon",
+				gridCols: 5,
+				gridRows: 1,
+				placements: [
+					{ id: "start-stop", widget: "timerStartStop", x: 0, y: 0, w: 1, h: 1 },
+					{ id: "display", widget: "timerDisplay", x: 1, y: 0, w: 2, h: 1 },
+				],
+			},
+			{
+				id: "time",
+				label: "Time",
+				icon: "ChartBarIcon",
+				gridCols: 5,
+				gridRows: 4,
+				placements: [
+					{ id: "time-spent", widget: "timeSpentToday", x: 0, y: 0, w: 5, h: 2 },
+					{ id: "top-app", widget: "topApp", x: 0, y: 2, w: 3, h: 2 },
+				],
+			},
+			{
+				id: "tasks",
+				label: "Tasks",
+				icon: "ListBulletIcon",
+				gridCols: 5,
+				gridRows: 3,
+				placements: [{ id: "first-todos", widget: "firstTodoList", x: 0, y: 0, w: 3, h: 3 }],
+			},
+			{
+				id: "notes",
+				label: "Notes",
+				icon: "NewspaperIcon",
+				gridCols: 5,
+				gridRows: 2,
+				placements: [{ id: "notes-count", widget: "notesCount", x: 0, y: 0, w: 3, h: 1 }],
+			},
 		],
 		infoItems: [
 			{ id: "timer", enabled: true },
@@ -98,15 +129,23 @@ export function SettingsWindowApp() {
 	const [timeFormat, setTimeFormat] = useState(() => readStorage("atlas.settings.timeFormat", "24h"));
 	const [startWeekOn, setStartWeekOn] = useState(() => readStorage("atlas.settings.startWeekOn", "monday"));
 	const [density, setDensity] = useState(() => readStorage("atlas.settings.density", "comfortable"));
-	const [softAnimations, setSoftAnimations] = useState(() => readStorage("atlas.settings.softAnimations", true));
+	const [softAnimations, setSoftAnimations] = useState(() =>
+		readStorage("atlas.settings.softAnimations", true),
+	);
 	const [highlightSession, setHighlightSession] = useState(() =>
 		readStorage("atlas.settings.highlightSession", true),
 	);
-	const [pinMapSwitcher, setPinMapSwitcher] = useState(() => readStorage("atlas.settings.pinMapSwitcher", false));
+	const [pinMapSwitcher, setPinMapSwitcher] = useState(() =>
+		readStorage("atlas.settings.pinMapSwitcher", false),
+	);
 	const [vimMode, setVimMode] = useState(() => readStorage("atlas.settings.vimMode", false));
-	const [commandPalette, setCommandPalette] = useState(() => readStorage("atlas.settings.commandPalette", true));
+	const [commandPalette, setCommandPalette] = useState(() =>
+		readStorage("atlas.settings.commandPalette", true),
+	);
 	const [autoUpdates, setAutoUpdates] = useState(() => readStorage("atlas.autoUpdates", true));
-	const [includeBetaUpdates, setIncludeBetaUpdates] = useState(() => readStorage("atlas.includeBetaUpdates", false));
+	const [includeBetaUpdates, setIncludeBetaUpdates] = useState(() =>
+		readStorage("atlas.includeBetaUpdates", false),
+	);
 	const [appVersion, setAppVersion] = useState<string | null>(null);
 	const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
 	const [releaseHistory, setReleaseHistory] = useState<AppRelease[]>([]);
@@ -128,7 +167,10 @@ export function SettingsWindowApp() {
 		[appVersion, normalizeVersion, updateInfo?.local],
 	);
 
-	const tabLabel = useMemo(() => settingsTabs.find((tab) => tab.id === activeTab)?.label ?? "General", [activeTab]);
+	const tabLabel = useMemo(
+		() => settingsTabs.find((tab) => tab.id === activeTab)?.label ?? "General",
+		[activeTab],
+	);
 	const currentRelease = useMemo(() => {
 		const localVersion = localDisplayVersion;
 		if (!localVersion) {
@@ -136,8 +178,9 @@ export function SettingsWindowApp() {
 		}
 
 		return (
-			releaseHistory.find((release) => release.version === localVersion || release.tag === `v${localVersion}`) ??
-			null
+			releaseHistory.find(
+				(release) => release.version === localVersion || release.tag === `v${localVersion}`,
+			) ?? null
 		);
 	}, [localDisplayVersion, releaseHistory]);
 	const isMacPlatform = platform === "darwin";
@@ -189,15 +232,10 @@ export function SettingsWindowApp() {
 		updateNotch({ displayIds: next });
 	};
 
-	const toggleActionButton = (id: NotchActionButtonConfig["id"]) => {
-		const next = notchPrefs.actionButtons.map((button) =>
-			button.id === id ? { ...button, enabled: !button.enabled } : button,
-		);
-		updateNotch({ actionButtons: next });
-	};
-
 	const toggleInfoItem = (id: NotchInfoItemConfig["id"]) => {
-		const next = notchPrefs.infoItems.map((item) => (item.id === id ? { ...item, enabled: !item.enabled } : item));
+		const next = notchPrefs.infoItems.map((item) =>
+			item.id === id ? { ...item, enabled: !item.enabled } : item,
+		);
 		updateNotch({ infoItems: next });
 	};
 
@@ -228,7 +266,16 @@ export function SettingsWindowApp() {
 		localStorage.setItem("atlas.settings.pinMapSwitcher", JSON.stringify(pinMapSwitcher));
 		localStorage.setItem("atlas.settings.vimMode", JSON.stringify(vimMode));
 		localStorage.setItem("atlas.settings.commandPalette", JSON.stringify(commandPalette));
-	}, [timeFormat, startWeekOn, density, softAnimations, highlightSession, pinMapSwitcher, vimMode, commandPalette]);
+	}, [
+		timeFormat,
+		startWeekOn,
+		density,
+		softAnimations,
+		highlightSession,
+		pinMapSwitcher,
+		vimMode,
+		commandPalette,
+	]);
 
 	useEffect(() => {
 		localStorage.setItem("atlas.autoUpdates", JSON.stringify(autoUpdates));
@@ -269,11 +316,15 @@ export function SettingsWindowApp() {
 			try {
 				const [version, historyResponse] = await Promise.all([
 					window.atlas.getAppVersion(),
-					window.atlas.listReleaseHistory({ includePrerelease: includeBetaUpdates }),
+					window.atlas.listReleaseHistory({
+						includePrerelease: includeBetaUpdates,
+					}),
 				]);
 
 				const latestCheck = withVersionScan
-					? await window.atlas.checkForUpdates({ includePrerelease: includeBetaUpdates })
+					? await window.atlas.checkForUpdates({
+							includePrerelease: includeBetaUpdates,
+						})
 					: {
 							local: version,
 							hasUpdate: false,
@@ -314,7 +365,10 @@ export function SettingsWindowApp() {
 
 	const persistUpdatePreferences = async (nextAutoCheck: boolean, nextIncludeBeta: boolean) => {
 		try {
-			await window.atlas.setUpdatePreferences({ autoCheck: nextAutoCheck, includeBeta: nextIncludeBeta });
+			await window.atlas.setUpdatePreferences({
+				autoCheck: nextAutoCheck,
+				includeBeta: nextIncludeBeta,
+			});
 		} catch {
 			// Keep local values active even if persistence fails.
 		}
@@ -336,7 +390,9 @@ export function SettingsWindowApp() {
 			setUpdatesError(null);
 
 			try {
-				const result = await window.atlas.downloadAndInstallUpdate({ includePrerelease: includeBetaUpdates });
+				const result = await window.atlas.downloadAndInstallUpdate({
+					includePrerelease: includeBetaUpdates,
+				});
 				if (!result.started) {
 					if (updateInfo?.downloadUrl) {
 						void window.atlas.launchApp(`start "" "${updateInfo.downloadUrl}"`);
@@ -371,11 +427,7 @@ export function SettingsWindowApp() {
 					}`}
 				>
 					<div className="titlebar-left no-drag flex min-w-0 items-center gap-2 text-base">
-						<img
-							src={logo}
-							alt="Atlas"
-							className="h-7 w-7 shrink-0"
-						/>
+						<img src={logo} alt="Atlas" className="h-7 w-7 shrink-0" />
 					</div>
 					<div className="titlebar-center absolute left-1/2 w-2/5 max-w-2xl min-w-72 -translate-x-1/2">
 						<div className="inline-flex h-6 w-full items-center justify-center rounded-lg border border-neutral-300 px-2.5 py-0.5 text-body-small text-neutral-700 dark:border-neutral-500 dark:text-neutral-50">
@@ -463,8 +515,16 @@ export function SettingsWindowApp() {
 											value={timeFormat}
 											onChange={setTimeFormat}
 											options={[
-												{ value: "24h", label: "24-hour", description: "13:00, 18:30" },
-												{ value: "12h", label: "12-hour", description: "1:00 PM, 6:30 PM" },
+												{
+													value: "24h",
+													label: "24-hour",
+													description: "13:00, 18:30",
+												},
+												{
+													value: "12h",
+													label: "12-hour",
+													description: "1:00 PM, 6:30 PM",
+												},
 											]}
 										/>
 										<Select
@@ -472,8 +532,16 @@ export function SettingsWindowApp() {
 											value={startWeekOn}
 											onChange={setStartWeekOn}
 											options={[
-												{ value: "monday", label: "Monday", description: "ISO week layout" },
-												{ value: "sunday", label: "Sunday", description: "US week layout" },
+												{
+													value: "monday",
+													label: "Monday",
+													description: "ISO week layout",
+												},
+												{
+													value: "sunday",
+													label: "Sunday",
+													description: "US week layout",
+												},
 											]}
 										/>
 										<Select
@@ -481,7 +549,11 @@ export function SettingsWindowApp() {
 											value={density}
 											onChange={setDensity}
 											options={[
-												{ value: "compact", label: "Compact", description: "Tighter spacing" },
+												{
+													value: "compact",
+													label: "Compact",
+													description: "Tighter spacing",
+												},
 												{
 													value: "comfortable",
 													label: "Comfortable",
@@ -506,16 +578,10 @@ export function SettingsWindowApp() {
 								{activeTab === "appearance" && (
 									<div className="flex gap-3 flex-col">
 										<div className="atlas-settings-card-stack">
-											<ThemeModePicker
-												value={theme}
-												onChange={(nextTheme) => setTheme(nextTheme)}
-											/>
+											<ThemeModePicker value={theme} onChange={(nextTheme) => setTheme(nextTheme)} />
 										</div>
 										<div className="atlas-settings-card-stack">
-											<AccentPicker
-												value={accent}
-												onChange={setAccent}
-											/>
+											<AccentPicker value={accent} onChange={setAccent} />
 										</div>
 										<Toggle
 											label="Soft panel animations"
@@ -533,7 +599,7 @@ export function SettingsWindowApp() {
 								)}
 
 								{activeTab === "notch" && (
-									<div className="flex gap-3 flex-col">
+									<div className="flex flex-col gap-4">
 										<div className="atlas-settings-card-stack grid gap-3">
 											<Toggle
 												label="Enable smart notch"
@@ -541,98 +607,12 @@ export function SettingsWindowApp() {
 												checked={notchPrefs.enabled}
 												onChange={(value) => updateNotch({ enabled: value })}
 											/>
+
 											{notchPrefs.enabled && (
-												<>
-													<div className="grid gap-2">
-														<span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
-															Action buttons
-														</span>
-														<div className="grid gap-1.5">
-															{notchPrefs.actionButtons.map((button) => (
-																<button
-																	key={button.id}
-																	type="button"
-																	onClick={() => toggleActionButton(button.id)}
-																	className="flex items-center justify-between rounded-lg border border-neutral-200 px-3 py-2 text-left text-sm transition-colors hover:bg-neutral-50 dark:border-neutral-600 dark:hover:bg-neutral-700/60"
-																>
-																	<span className="text-neutral-700 dark:text-neutral-100">
-																		{ACTION_BUTTON_LABELS[button.id]}
-																	</span>
-																	<span
-																		className={`flex h-4 w-4 items-center justify-center rounded border ${
-																			button.enabled
-																				? "border-primary bg-primary"
-																				: "border-neutral-300 dark:border-neutral-500"
-																		}`}
-																	>
-																		{button.enabled && (
-																			<span className="h-2 w-2 rounded-sm bg-white" />
-																		)}
-																	</span>
-																</button>
-															))}
-														</div>
-													</div>
-
-													<div className="grid gap-2">
-														<span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
-															Information screen
-														</span>
-														<p className="m-0 text-xs text-neutral-500 dark:text-neutral-300">
-															Shows only when there's something to display. Ranked top to bottom — the
-															highest-ranked enabled item with information wins the slot.
-														</p>
-														<div className="grid gap-1.5">
-															{notchPrefs.infoItems.map((item, index) => (
-																<div
-																	key={item.id}
-																	className="flex items-center justify-between rounded-lg border border-neutral-200 px-3 py-2 text-sm dark:border-neutral-600"
-																>
-																	<span className="text-neutral-700 dark:text-neutral-100">
-																		{INFO_ITEM_LABELS[item.id]}
-																	</span>
-																	<div className="flex items-center gap-1.5">
-																		<button
-																			type="button"
-																			onClick={() => moveInfoItem(item.id, "up")}
-																			disabled={index === 0}
-																			className="flex h-6 w-6 items-center justify-center rounded text-neutral-500 transition-colors hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-30 dark:text-neutral-300 dark:hover:bg-neutral-700"
-																			title="Move up"
-																			aria-label="Move up"
-																		>
-																			<ChevronUpIcon className="h-3.5 w-3.5" />
-																		</button>
-																		<button
-																			type="button"
-																			onClick={() => moveInfoItem(item.id, "down")}
-																			disabled={index === notchPrefs.infoItems.length - 1}
-																			className="flex h-6 w-6 items-center justify-center rounded text-neutral-500 transition-colors hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-30 dark:text-neutral-300 dark:hover:bg-neutral-700"
-																			title="Move down"
-																			aria-label="Move down"
-																		>
-																			<ChevronDownIcon className="h-3.5 w-3.5" />
-																		</button>
-																		<button
-																			type="button"
-																			onClick={() => toggleInfoItem(item.id)}
-																			className={`flex h-4 w-4 items-center justify-center rounded border ${
-																				item.enabled
-																					? "border-primary bg-primary"
-																					: "border-neutral-300 dark:border-neutral-500"
-																			}`}
-																			title={item.enabled ? "Disable" : "Enable"}
-																			aria-label={item.enabled ? "Disable" : "Enable"}
-																		>
-																			{item.enabled && (
-																				<span className="h-2 w-2 rounded-sm bg-white" />
-																			)}
-																		</button>
-																	</div>
-																</div>
-															))}
-														</div>
-													</div>
-
+												<div className="grid gap-3 border-t border-neutral-200 pt-3 dark:border-neutral-600">
+													<span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
+														Behavior &amp; position
+													</span>
 													<Select
 														label="Run notch"
 														value={notchPrefs.activation}
@@ -641,7 +621,8 @@ export function SettingsWindowApp() {
 															{
 																value: "always",
 																label: "Independently",
-																description: "Stays around even when Atlas's main window is closed, including at startup",
+																description:
+																	"Stays around even when Atlas's main window is closed, including at startup",
 															},
 															{
 																value: "withMain",
@@ -660,16 +641,8 @@ export function SettingsWindowApp() {
 																label: "Top center",
 																description: "Docked flush against the top edge",
 															},
-															{
-																value: "left",
-																label: "Left",
-																description: "Middle of the left edge",
-															},
-															{
-																value: "right",
-																label: "Right",
-																description: "Middle of the right edge",
-															},
+															{ value: "left", label: "Left", description: "Middle of the left edge" },
+															{ value: "right", label: "Right", description: "Middle of the right edge" },
 															{
 																value: "free",
 																label: "Free floating",
@@ -705,42 +678,108 @@ export function SettingsWindowApp() {
 														checked={notchPrefs.locked}
 														onChange={(value) => updateNotch({ locked: value })}
 													/>
-													{displays.length > 1 && (
-														<div className="grid gap-2">
-															<span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
-																Show notch on
-															</span>
-															<div className="grid gap-1.5">
-																{displays.map((display) => {
-																	const checked = selectedDisplayIds.includes(display.id);
-																	return (
-																		<button
-																			key={display.id}
-																			type="button"
-																			onClick={() => toggleNotchDisplay(display.id)}
-																			className="flex items-center justify-between rounded-lg border border-neutral-200 px-3 py-2 text-left text-sm transition-colors hover:bg-neutral-50 dark:border-neutral-600 dark:hover:bg-neutral-700/60"
-																		>
-																			<span className="text-neutral-700 dark:text-neutral-100">
-																				{display.label}
-																			</span>
-																			<span
-																				className={`flex h-4 w-4 items-center justify-center rounded border ${
-																					checked
-																						? "border-primary bg-primary"
-																						: "border-neutral-300 dark:border-neutral-500"
-																				}`}
-																			>
-																				{checked && <span className="h-2 w-2 rounded-sm bg-white" />}
-																			</span>
-																		</button>
-																	);
-																})}
-															</div>
-														</div>
-													)}
-												</>
+												</div>
 											)}
 										</div>
+
+										{notchPrefs.enabled && (
+											<>
+												{displays.length > 1 && (
+													<div className="atlas-settings-card-stack grid gap-2">
+														<span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
+															Show notch on
+														</span>
+														<div className="grid gap-1.5">
+															{displays.map((display) => {
+																const checked = selectedDisplayIds.includes(display.id);
+																return (
+																	<button
+																		key={display.id}
+																		type="button"
+																		onClick={() => toggleNotchDisplay(display.id)}
+																		className="flex items-center justify-between rounded-lg border border-neutral-200 px-3 py-2 text-left text-sm transition-colors hover:bg-neutral-50 dark:border-neutral-600 dark:hover:bg-neutral-700/60"
+																	>
+																		<span className="text-neutral-700 dark:text-neutral-100">
+																			{display.label}
+																		</span>
+																		<span
+																			className={`flex h-4 w-4 items-center justify-center rounded border ${
+																				checked
+																					? "border-primary bg-primary"
+																					: "border-neutral-300 dark:border-neutral-500"
+																			}`}
+																		>
+																			{checked && <span className="h-2 w-2 rounded-sm bg-white" />}
+																		</span>
+																	</button>
+																);
+															})}
+														</div>
+													</div>
+												)}
+
+												<div className="atlas-settings-card-stack grid gap-2">
+													<span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
+														Information screen
+													</span>
+													<p className="m-0 text-xs text-neutral-500 dark:text-neutral-300">
+														Shows only when there is something to display. Ranked top to bottom — the
+														highest-ranked enabled item with information wins the slot.
+													</p>
+													<div className="grid gap-1.5">
+														{notchPrefs.infoItems.map((item, index) => (
+															<div
+																key={item.id}
+																className="flex items-center justify-between rounded-lg border border-neutral-200 px-3 py-2 text-sm dark:border-neutral-600"
+															>
+																<span className="text-neutral-700 dark:text-neutral-100">
+																	{INFO_ITEM_LABELS[item.id]}
+																</span>
+																<div className="flex items-center gap-1.5">
+																	<button
+																		type="button"
+																		onClick={() => moveInfoItem(item.id, "up")}
+																		disabled={index === 0}
+																		className="flex h-6 w-6 items-center justify-center rounded text-neutral-500 transition-colors hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-30 dark:text-neutral-300 dark:hover:bg-neutral-700"
+																		title="Move up"
+																		aria-label="Move up"
+																	>
+																		<ChevronUpIcon className="h-3.5 w-3.5" />
+																	</button>
+																	<button
+																		type="button"
+																		onClick={() => moveInfoItem(item.id, "down")}
+																		disabled={index === notchPrefs.infoItems.length - 1}
+																		className="flex h-6 w-6 items-center justify-center rounded text-neutral-500 transition-colors hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-30 dark:text-neutral-300 dark:hover:bg-neutral-700"
+																		title="Move down"
+																		aria-label="Move down"
+																	>
+																		<ChevronDownIcon className="h-3.5 w-3.5" />
+																	</button>
+																	<button
+																		type="button"
+																		onClick={() => toggleInfoItem(item.id)}
+																		className={`flex h-4 w-4 items-center justify-center rounded border ${
+																			item.enabled
+																				? "border-primary bg-primary"
+																				: "border-neutral-300 dark:border-neutral-500"
+																		}`}
+																		title={item.enabled ? "Disable" : "Enable"}
+																		aria-label={item.enabled ? "Disable" : "Enable"}
+																	>
+																		{item.enabled && <span className="h-2 w-2 rounded-sm bg-white" />}
+																	</button>
+																</div>
+															</div>
+														))}
+													</div>
+												</div>
+
+												<div className="atlas-settings-card-stack grid gap-3">
+													<NotchTabsEditor />
+												</div>
+											</>
+										)}
 									</div>
 								)}
 
@@ -813,9 +852,7 @@ export function SettingsWindowApp() {
 													Update available: v{updateInfo.latest}
 												</p>
 											) : (
-												<p className="mt-3 mb-0 text-xs text-neutral-500 dark:text-neutral-300">
-													Up to date
-												</p>
+												<p className="mt-3 mb-0 text-xs text-neutral-500 dark:text-neutral-300">Up to date</p>
 											)}
 											{updateInfo?.hasUpdate && updateInfo.downloadUrl && (
 												<button
@@ -852,9 +889,7 @@ export function SettingsWindowApp() {
 																<button
 																	type="button"
 																	onClick={() => {
-																		void window.atlas.launchApp(
-																			`start "" "${release.url}"`,
-																		);
+																		void window.atlas.launchApp(`start "" "${release.url}"`);
 																	}}
 																	className="action-btn"
 																>
