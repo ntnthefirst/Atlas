@@ -153,11 +153,11 @@ export type NotchWidgetId =
 	| "lockToggle"
 	// Time/stats
 	| "timeSpentToday"
+	| "activityTimeline"
 	| "topApp"
 	| "topAppCompact"
 	| "sessionsTodayCount"
 	| "openTasksCount"
-	| "dashboardSummary"
 	| "untrackedToday"
 	// Tasks
 	| "firstTodoList"

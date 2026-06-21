@@ -1078,6 +1078,34 @@ export function NotchApp() {
 						</span>
 					</div>
 				);
+			case "activityTimeline":
+				return (
+					<div key={placement.id} className="flex h-full w-full flex-col justify-center gap-1 px-2">
+						<div className="relative h-3 w-full overflow-hidden rounded-md bg-neutral-200 dark:bg-neutral-600">
+							{todaySegments.map((segment, index) => (
+								<span
+									key={index}
+									className="absolute top-0 h-full bg-primary"
+									style={{
+										left: `${segment.startPercent}%`,
+										width: `${Math.max(segment.widthPercent, 0.4)}%`,
+									}}
+								/>
+							))}
+							<span
+								className="absolute top-0 h-full w-px bg-neutral-700 dark:bg-neutral-100"
+								style={{ left: `${nowPercent}%` }}
+							/>
+						</div>
+						<div className="flex justify-between text-[9px] text-neutral-500 dark:text-neutral-300">
+							<span>00</span>
+							<span>06</span>
+							<span>12</span>
+							<span>18</span>
+							<span>24</span>
+						</div>
+					</div>
+				);
 			case "topApp": {
 				const match = topApp
 					? runningApps.find((app) => app.name.toLowerCase() === topApp.appName.toLowerCase())
@@ -1107,8 +1135,8 @@ export function NotchApp() {
 			}
 			case "sessionsTodayCount":
 				return (
-					<div key={placement.id} className="flex h-full flex-col items-center justify-center gap-0">
-						<span className="font-data text-[16px] font-semibold text-neutral-800 dark:text-neutral-0">
+					<div key={placement.id} className="flex h-full items-center justify-center gap-1">
+						<span className="font-data text-[13px] font-semibold text-neutral-800 dark:text-neutral-0">
 							{dashboard?.quickStats.sessionsToday ?? 0}
 						</span>
 						<span className="text-[10px] text-neutral-500 dark:text-neutral-300">
@@ -1121,38 +1149,24 @@ export function NotchApp() {
 				const history = placement.widget === "cpuUsageGraph" ? cpuHistory : memoryHistory;
 				const latest = history[history.length - 1] ?? 0;
 				return (
-					<div key={placement.id} className="flex h-full w-full flex-col gap-1 px-2 py-1.5">
-						<div className="flex items-end gap-0.5" style={{ height: "calc(100% - 14px)" }}>
-							{history.length === 0 ? (
-								<span className="text-[10px] text-neutral-400">No data yet</span>
-							) : (
-								history.map((value, index) => (
-									<span
-										key={index}
-										className="flex-1 rounded-sm bg-primary/60"
-										style={{ height: `${Math.max(value, 4)}%` }}
-									/>
-								))
-							)}
-						</div>
-						<span className="text-[10px] text-neutral-500 dark:text-neutral-300">
+					<div key={placement.id} className="relative flex h-full w-full items-end gap-0.5 px-2 py-1.5">
+						<span className="absolute left-1.5 top-1 text-[10px] text-neutral-500 dark:text-neutral-300">
 							{latest}% {placement.widget === "cpuUsageGraph" ? "CPU" : "RAM"}
 						</span>
+						{history.length === 0 ? (
+							<span className="text-[10px] text-neutral-400">No data yet</span>
+						) : (
+							history.map((value, index) => (
+								<span
+									key={index}
+									className="flex-1 rounded-sm bg-primary/60"
+									style={{ height: `${Math.max(value, 4)}%` }}
+								/>
+							))
+						)}
 					</div>
 				);
 			}
-			case "dashboardSummary":
-				return (
-					<div key={placement.id} className="flex h-full flex-col items-center justify-center gap-0.5">
-						<span className="font-data text-[12px] font-medium text-neutral-700 dark:text-neutral-100">
-							{formatDuration(dashboard?.totalTodayMs ?? 0)}
-						</span>
-						<span className="text-[10px] text-neutral-500 dark:text-neutral-300">
-							{dashboard?.quickStats.sessionsToday ?? 0} sessions · {dashboard?.quickStats.openTasks ?? 0}{" "}
-							tasks
-						</span>
-					</div>
-				);
 			case "currentTime":
 				return (
 					<div key={placement.id} className="flex h-full items-center justify-center">

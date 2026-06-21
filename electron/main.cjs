@@ -75,11 +75,11 @@ const NOTCH_WIDGET_IDS = [
 	"lockToggle",
 	// Time/stats
 	"timeSpentToday",
+	"activityTimeline",
 	"topApp",
 	"topAppCompact",
 	"sessionsTodayCount",
 	"openTasksCount",
-	"dashboardSummary",
 	"untrackedToday",
 	// Tasks
 	"firstTodoList",

@@ -63,11 +63,11 @@ const WIDGET_CATEGORIES: Array<{ label: string; widgets: NotchWidgetId[] }> = [
 		label: "Time / stats",
 		widgets: [
 			"timeSpentToday",
+			"activityTimeline",
 			"topApp",
 			"topAppCompact",
 			"sessionsTodayCount",
 			"openTasksCount",
-			"dashboardSummary",
 			"untrackedToday",
 		],
 	},
@@ -130,11 +130,11 @@ export const WIDGET_LABELS: Record<NotchWidgetId, string> = {
 	sessionStateLabel: "Session state",
 	lockToggle: "Lock toggle",
 	timeSpentToday: "Time spent today",
+	activityTimeline: "Activity timeline (24h)",
 	topApp: "Top app",
 	topAppCompact: "Top app (compact)",
 	sessionsTodayCount: "Sessions today",
 	openTasksCount: "Open tasks count",
-	dashboardSummary: "Dashboard summary",
 	untrackedToday: "Untracked today",
 	firstTodoList: "First to-dos",
 	taskCount: "Task count",
@@ -215,11 +215,11 @@ const WIDGET_DEFAULT_SIZE: Record<NotchWidgetId, { w: number; h: number }> = {
 	sessionStateLabel: { w: 2, h: 1 },
 	lockToggle: { w: 1, h: 1 },
 	timeSpentToday: { w: 5, h: 2 },
+	activityTimeline: { w: 6, h: 2 },
 	topApp: { w: 3, h: 2 },
 	topAppCompact: { w: 2, h: 1 },
 	sessionsTodayCount: { w: 2, h: 1 },
 	openTasksCount: { w: 2, h: 1 },
-	dashboardSummary: { w: 3, h: 2 },
 	untrackedToday: { w: 2, h: 1 },
 	firstTodoList: { w: 3, h: 3 },
 	taskCount: { w: 2, h: 1 },
@@ -551,6 +551,23 @@ function WidgetPreview({ widgetId, config }: { widgetId: NotchWidgetId; config?:
 					</div>
 				</div>
 			);
+		case "activityTimeline":
+			return (
+				<div className="flex h-full w-full flex-col justify-center gap-1 px-2">
+					<div className="relative h-3 w-full overflow-hidden rounded-md bg-neutral-200 dark:bg-neutral-600">
+						<span className="absolute top-0 left-[8%] h-full w-[15%] bg-primary" />
+						<span className="absolute top-0 left-[40%] h-full w-[10%] bg-primary" />
+						<span className="absolute top-0 left-[65%] h-full w-[20%] bg-primary" />
+					</div>
+					<div className="flex justify-between text-[9px] text-neutral-500 dark:text-neutral-300">
+						<span>00</span>
+						<span>06</span>
+						<span>12</span>
+						<span>18</span>
+						<span>24</span>
+					</div>
+				</div>
+			);
 		case "topApp":
 			return (
 				<div className="flex h-full w-full items-center justify-center gap-2 px-2">
@@ -564,27 +581,21 @@ function WidgetPreview({ widgetId, config }: { widgetId: NotchWidgetId; config?:
 			);
 		case "sessionsTodayCount":
 			return (
-				<div className="flex h-full w-full flex-col items-center justify-center gap-0">
-					<span className="font-data text-[14px] font-semibold text-neutral-800 dark:text-neutral-0">3</span>
+				<div className="flex h-full w-full items-center justify-center gap-1">
+					<span className="font-data text-[12px] font-semibold text-neutral-800 dark:text-neutral-0">3</span>
 					<span className="text-[9px] text-neutral-500 dark:text-neutral-300">of 14 sessions</span>
 				</div>
 			);
 		case "cpuUsageGraph":
 		case "memoryUsageGraph":
 			return (
-				<div className="flex h-full w-full items-end gap-0.5 px-2 py-2">
+				<div className="relative flex h-full w-full items-end gap-0.5 px-2 py-2">
+					<span className="absolute left-1.5 top-1 text-[10px] text-neutral-500 dark:text-neutral-300">
+						42% {widgetId === "cpuUsageGraph" ? "CPU" : "RAM"}
+					</span>
 					{[30, 55, 40, 70, 50, 65, 45, 80, 60, 35].map((value, index) => (
 						<span key={index} className="flex-1 rounded-sm bg-primary/60" style={{ height: `${value}%` }} />
 					))}
-				</div>
-			);
-		case "dashboardSummary":
-			return (
-				<div className="flex h-full w-full flex-col items-center justify-center gap-0.5">
-					<span className="font-data text-[11px] font-medium text-neutral-700 dark:text-neutral-100">
-						2h 15m
-					</span>
-					<span className="text-[9px] text-neutral-500 dark:text-neutral-300">3 sessions · 5 tasks</span>
 				</div>
 			);
 		case "firstTodoList":
