@@ -4,6 +4,7 @@ import type {
 	ActivityBlock,
 	AppRelease,
 	AtlasView,
+	DashboardPreferences,
 	DisplaySummary,
 	DownloadAndInstallResult,
 	DashboardOverview,
@@ -75,6 +76,9 @@ declare global {
 
 			getNotchPreferences: () => Promise<NotchPreferences>;
 			setNotchPreferences: (preferences: Partial<NotchPreferences>) => Promise<NotchPreferences>;
+			getDashboardLayout: () => Promise<DashboardPreferences>;
+			setDashboardLayout: (preferences: Partial<DashboardPreferences>) => Promise<DashboardPreferences>;
+			onDashboardLayoutChanged: (callback: (preferences: DashboardPreferences) => void) => () => void;
 			resizeNotch: (width: number, height: number) => Promise<boolean>;
 			onNotchPreferencesChanged: (callback: (preferences: NotchPreferences) => void) => () => void;
 			onNotchBlur: (callback: () => void) => () => void;

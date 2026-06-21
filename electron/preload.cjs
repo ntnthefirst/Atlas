@@ -50,6 +50,14 @@ contextBridge.exposeInMainWorld("atlas", {
 
 	getNotchPreferences: () => ipcRenderer.invoke("notch:getPreferences"),
 	setNotchPreferences: (preferences) => ipcRenderer.invoke("notch:setPreferences", preferences),
+
+	getDashboardLayout: () => ipcRenderer.invoke("dashboard:getLayout"),
+	setDashboardLayout: (preferences) => ipcRenderer.invoke("dashboard:setLayout", preferences),
+	onDashboardLayoutChanged: (callback) => {
+		const listener = (_event, preferences) => callback(preferences);
+		ipcRenderer.on("dashboard:layout-changed", listener);
+		return () => ipcRenderer.removeListener("dashboard:layout-changed", listener);
+	},
 	resizeNotch: (width, height) => ipcRenderer.invoke("notch:resize", width, height),
 	onNotchPreferencesChanged: (callback) => {
 		const listener = (_event, preferences) => callback(preferences);

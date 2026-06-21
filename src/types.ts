@@ -342,3 +342,36 @@ export type DisplaySummary = {
 	width: number;
 	height: number;
 };
+
+// What a card on the customizable main dashboard can show. Unlike the notch
+// widgets (small, single-purpose), these are full dashboard cards built from
+// the data already loaded for the dashboard view.
+export type DashboardWidgetId =
+	| "totalTimeToday"
+	| "quickStats"
+	| "sessionsToday"
+	| "openTasks"
+	| "timePerApp"
+	| "timePerEnvironment"
+	| "quickActions"
+	| "activityTimeline"
+	| "topApp"
+	| "currentApp"
+	| "currentEnvironment"
+	| "taskProgress"
+	| "notesCount";
+
+// One card placed on the dashboard. Order in the array is the layout order;
+// w/h are spans on a responsive column grid (the rendered column count shrinks
+// as the window narrows, and a card's width is clamped to whatever columns are
+// available), so there are no absolute x/y coordinates to keep valid.
+export type DashboardWidgetPlacement = {
+	id: string;
+	widget: DashboardWidgetId;
+	w: number;
+	h: number;
+};
+
+export type DashboardPreferences = {
+	widgets: DashboardWidgetPlacement[];
+};

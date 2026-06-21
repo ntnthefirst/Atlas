@@ -58,6 +58,36 @@ const defaultUpdatePreferences = {
 
 let updatePreferences = { ...defaultUpdatePreferences };
 
+const DASHBOARD_PREFS_FILE = "dashboard-preferences.json";
+// Mirrors src/components/main-content/dashboard/catalog.ts — kept as plain
+// strings here since main.cjs only validates them, not renders them.
+const DASHBOARD_WIDGET_IDS = [
+	"totalTimeToday",
+	"quickStats",
+	"sessionsToday",
+	"openTasks",
+	"timePerApp",
+	"timePerEnvironment",
+	"quickActions",
+	"activityTimeline",
+	"topApp",
+	"currentApp",
+	"currentEnvironment",
+	"taskProgress",
+	"notesCount",
+];
+const DASHBOARD_MAX_COLS = 4;
+const DASHBOARD_WIDGET_MAX_H = 4;
+const defaultDashboardWidgets = [
+	{ id: "dash-total", widget: "totalTimeToday", w: 2, h: 1 },
+	{ id: "dash-stats", widget: "quickStats", w: 2, h: 2 },
+	{ id: "dash-timeline", widget: "activityTimeline", w: 4, h: 1 },
+	{ id: "dash-apps", widget: "timePerApp", w: 2, h: 2 },
+	{ id: "dash-envs", widget: "timePerEnvironment", w: 2, h: 2 },
+	{ id: "dash-actions", widget: "quickActions", w: 2, h: 1 },
+];
+const defaultDashboardPreferences = { widgets: defaultDashboardWidgets };
+
 const NOTCH_PREFS_FILE = "notch-preferences.json";
 const NOTCH_POSITIONS = ["top", "left", "right", "free"];
 const NOTCH_IDLE_OPACITIES = ["subtle", "balanced", "solid"];
@@ -375,6 +405,7 @@ function normalizeNotchTabs(value, defaults) {
 }
 
 let notchPreferences = { ...defaultNotchPreferences };
+let dashboardPreferences = { ...defaultDashboardPreferences };
 
 if (isDev) {
 	// Keep development state fully isolated from the installed production app.
@@ -1109,6 +1140,65 @@ function saveNotchPreferences(value) {
 	return notchPreferences;
 }
 
+// Normalizes the dashboard layout: keeps only known widgets with unique ids,
+// clamps each card's span to the grid bounds, and falls back to the default
+// layout wholesale when the saved value is missing or empty (a blank
+// dashboard isn't recoverable card-by-card).
+function normalizeDashboardPreferences(value) {
+	const fallback = () => ({ widgets: defaultDashboardWidgets.map((w) => ({ ...w })) });
+	if (!value || typeof value !== "object" || !Array.isArray(value.widgets)) {
+		return fallback();
+	}
+	const seen = new Set();
+	const widgets = [];
+	value.widgets.forEach((entry, index) => {
+		if (!entry || typeof entry !== "object" || !DASHBOARD_WIDGET_IDS.includes(entry.widget)) {
+			return;
+		}
+		const id = typeof entry.id === "string" && entry.id.trim() ? entry.id.trim() : `dash-${index}`;
+		if (seen.has(id)) return;
+		seen.add(id);
+		widgets.push({
+			id,
+			widget: entry.widget,
+			w: clampNumber(entry.w, 1, 1, DASHBOARD_MAX_COLS),
+			h: clampNumber(entry.h, 1, 1, DASHBOARD_WIDGET_MAX_H),
+		});
+	});
+	return widgets.length > 0 ? { widgets } : fallback();
+}
+
+function loadDashboardPreferences() {
+	try {
+		const raw = fs.readFileSync(path.join(app.getPath("userData"), DASHBOARD_PREFS_FILE), "utf8");
+		dashboardPreferences = normalizeDashboardPreferences(JSON.parse(raw));
+	} catch {
+		dashboardPreferences = normalizeDashboardPreferences(null);
+	}
+	return dashboardPreferences;
+}
+
+function saveDashboardPreferences(value) {
+	dashboardPreferences = normalizeDashboardPreferences(value);
+	try {
+		fs.writeFileSync(
+			path.join(app.getPath("userData"), DASHBOARD_PREFS_FILE),
+			JSON.stringify(dashboardPreferences, null, 2),
+			"utf8",
+		);
+	} catch {
+		// Non-blocking: dashboard still works with in-memory preferences.
+	}
+	// Broadcast so a layout edited in one window (e.g. the main window's own
+	// edit mode) reflects anywhere else the dashboard might be shown.
+	for (const browserWindow of BrowserWindow.getAllWindows()) {
+		if (!browserWindow.isDestroyed()) {
+			browserWindow.webContents.send("dashboard:layout-changed", dashboardPreferences);
+		}
+	}
+	return dashboardPreferences;
+}
+
 // Resolves which displays should currently show a notch. Falls back to the
 // primary display whenever the saved selection is empty or none of the saved
 // ids are connected, so there's always at least one.
@@ -1573,6 +1663,12 @@ function wireIpc() {
 		applyNotchPreferences({ ...notchPreferences, ...(prefs || {}) }),
 	);
 
+	ipcMain.handle("dashboard:getLayout", () => dashboardPreferences);
+
+	ipcMain.handle("dashboard:setLayout", (_event, prefs) =>
+		saveDashboardPreferences({ ...dashboardPreferences, ...(prefs || {}) }),
+	);
+
 	ipcMain.handle("notch:resize", (event, width, height) => {
 		const notchWindow = BrowserWindow.fromWebContents(event.sender);
 		if (!notchWindow || notchWindow.isDestroyed()) {
@@ -1809,6 +1905,7 @@ function wireIpc() {
 app.whenReady().then(async () => {
 	loadUpdatePreferences();
 	loadNotchPreferences();
+	loadDashboardPreferences();
 	autoUpdater.autoDownload = false;
 	autoUpdater.autoInstallOnAppQuit = true;
 
