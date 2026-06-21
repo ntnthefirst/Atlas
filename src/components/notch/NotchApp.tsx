@@ -100,6 +100,7 @@ import {
 	sortTasksByOrder,
 } from "../../utils";
 import { TASK_COLUMNS_KEY, TASK_ORDER_KEY, THEME_KEY, defaultTaskColumns } from "../../constants";
+import { parseSceneConfig, type NotchSceneConfig } from "../../scenes";
 
 // How often to re-poll for environment/task/dashboard changes made in another
 // window, since there's no IPC broadcast for those.
@@ -865,6 +866,57 @@ export function NotchApp() {
 		if (next) onSwitchEnvironment(next.id);
 	};
 
+	// Runs a saved scene: switches environment, toggles the timer, drops preset
+	// tasks onto the board, then launches apps and opens URLs. Each step is
+	// guarded and best-effort so one failing action (e.g. a missing app) never
+	// stops the rest of the scene.
+	const runScene = async (scene: NotchSceneConfig) => {
+		let targetEnvId = environment?.id;
+		if (scene.environmentId && environments.some((env) => env.id === scene.environmentId)) {
+			onSwitchEnvironment(scene.environmentId);
+			targetEnvId = scene.environmentId;
+		}
+
+		if (scene.timer === "start" && !activeSession && targetEnvId) {
+			try {
+				const session = await window.atlas.startSession(targetEnvId);
+				setActiveSession(session);
+			} catch {
+				// Ignore: scene continues with its remaining actions.
+			}
+		} else if (scene.timer === "stop" && activeSession) {
+			try {
+				await window.atlas.stopSession(activeSession.id);
+				setActiveSession(null);
+			} catch {
+				// Ignore.
+			}
+		}
+
+		for (const task of scene.tasks) {
+			const title = task.title.trim();
+			if (!title || !targetEnvId) continue;
+			try {
+				const created = await window.atlas.createTask(targetEnvId, title);
+				if (task.column && created.status !== task.column) {
+					await window.atlas.updateTaskStatus(created.id, task.column);
+				}
+				const status = task.column || created.status;
+				setTasks((current) => [...current, { ...created, status }]);
+			} catch {
+				// Ignore a single failed task creation.
+			}
+		}
+
+		for (const command of scene.apps) {
+			if (command.trim()) void window.atlas.launchApp(command);
+		}
+		for (const url of scene.urls) {
+			const trimmed = url.trim();
+			if (trimmed) void window.atlas.launchApp(`start "" "${trimmed}"`);
+		}
+	};
+
 	const onToggleTheme = () => {
 		const next = themeValue === "dark" ? "light" : "dark";
 		try {
@@ -1349,6 +1401,25 @@ export function NotchApp() {
 						)}
 					</div>
 				);
+			case "scene": {
+				const scene = parseSceneConfig(placement.config);
+				const SceneIcon = TAB_ICON_MAP[scene.icon] ?? RocketLaunchIcon;
+				const showLabel = placement.w > 1 && Boolean(scene.label);
+				return (
+					<div key={placement.id} className="flex h-full items-center justify-center">
+						<button
+							type="button"
+							className={`${ICON_BUTTON_CLASSES} h-full w-full gap-1.5 px-1`}
+							title={scene.label || "Run scene"}
+							aria-label={scene.label || "Run scene"}
+							onClick={() => void runScene(scene)}
+						>
+							<SceneIcon className="h-5 w-5 shrink-0" />
+							{showLabel ? <span className="truncate text-[11px]">{scene.label}</span> : null}
+						</button>
+					</div>
+				);
+			}
 			case "launchAppButton": {
 				const icon = placement.config ? appIcons[placement.config] : undefined;
 				return (

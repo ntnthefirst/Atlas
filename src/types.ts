@@ -175,6 +175,7 @@ export type NotchWidgetId =
 	| "environmentSwitcher"
 	| "environmentList"
 	// App launcher / navigation
+	| "scene"
 	| "launchAppButton"
 	| "openUrlButton"
 	| "openDashboardButton"

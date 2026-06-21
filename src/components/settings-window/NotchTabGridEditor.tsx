@@ -23,6 +23,9 @@ import {
 import type { NotchTab, NotchWidgetId, NotchWidgetPlacement } from "../../types";
 import { defaultTaskColumns } from "../../constants";
 import { getActiveMapTaskColumns } from "../../utils";
+import { parseSceneConfig } from "../../scenes";
+import { TAB_ICON_MAP } from "./tabIconMap";
+import { SceneConfigEditor } from "./SceneConfigEditor";
 
 // Mirrors NotchApp.tsx's own lastEnvironmentId() — reading the same
 // localStorage key lets this editor (a separate window) show the active
@@ -90,6 +93,7 @@ const WIDGET_CATEGORIES: Array<{ label: string; widgets: NotchWidgetId[] }> = [
 	{
 		label: "Launch / navigate",
 		widgets: [
+			"scene",
 			"launchAppButton",
 			"openUrlButton",
 			"openDashboardButton",
@@ -156,6 +160,7 @@ export const WIDGET_LABELS: Record<NotchWidgetId, string> = {
 	openNotesButton: "Open notes",
 	openSettingsButton: "Open settings",
 	openMiniPlayerButton: "Open mini player",
+	scene: "Scene",
 	currentTime: "Current time",
 	currentDate: "Current date",
 	dayOfWeek: "Day of week",
@@ -241,6 +246,7 @@ const WIDGET_DEFAULT_SIZE: Record<NotchWidgetId, { w: number; h: number }> = {
 	openNotesButton: { w: 1, h: 1 },
 	openSettingsButton: { w: 1, h: 1 },
 	openMiniPlayerButton: { w: 1, h: 1 },
+	scene: { w: 2, h: 1 },
 	currentTime: { w: 2, h: 2 },
 	currentDate: { w: 2, h: 1 },
 	dayOfWeek: { w: 2, h: 1 },
@@ -517,6 +523,18 @@ function AppIconPreview({ command }: { command: string }) {
 function WidgetPreview({ widgetId, config }: { widgetId: NotchWidgetId; config?: string }) {
 	if (widgetId === "launchAppButton") {
 		return config ? <AppIconPreview command={config} /> : <IconPreview icon={RocketLaunchIcon} />;
+	}
+	if (widgetId === "scene") {
+		const scene = parseSceneConfig(config);
+		const SceneIcon = TAB_ICON_MAP[scene.icon] ?? RocketLaunchIcon;
+		return (
+			<div className="flex h-full w-full items-center justify-center gap-1.5 px-1">
+				<SceneIcon className="h-4.5 w-4.5 shrink-0 text-neutral-600 dark:text-neutral-200" />
+				<span className="truncate text-[10px] font-medium text-neutral-700 dark:text-neutral-100">
+					{scene.label || "Scene"}
+				</span>
+			</div>
+		);
 	}
 	const icon = ICON_PREVIEWS[widgetId];
 	if (icon) return <IconPreview icon={icon} />;
@@ -806,6 +824,7 @@ export function NotchTabGridEditor({ tab, onChange }: { tab: NotchTab; onChange:
 	const selectedPlacement = tab.placements.find((placement) => placement.id === selectedPlacementId) ?? null;
 	const configLabel = selectedPlacement ? CONFIG_LABELS[selectedPlacement.widget] : undefined;
 	const isLaunchAppButton = selectedPlacement?.widget === "launchAppButton";
+	const isScene = selectedPlacement?.widget === "scene";
 	const isColumnWidget = selectedPlacement ? COLUMN_CONFIG_WIDGETS.has(selectedPlacement.widget) : false;
 	const taskColumns = getActiveMapTaskColumns(lastEnvironmentId(), defaultTaskColumns);
 
@@ -921,6 +940,10 @@ export function NotchTabGridEditor({ tab, onChange }: { tab: NotchTab; onChange:
 					/>
 				)}
 			</div>
+
+			{selectedPlacement && isScene && (
+				<SceneConfigEditor config={selectedPlacement.config} onChange={setSelectedConfig} />
+			)}
 
 			{selectedPlacement && isLaunchAppButton && (
 				<div className="flex items-center gap-2 rounded-lg border border-neutral-200 bg-neutral-50 p-2 dark:border-neutral-600 dark:bg-neutral-800/40">

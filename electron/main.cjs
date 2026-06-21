@@ -97,6 +97,7 @@ const NOTCH_WIDGET_IDS = [
 	"environmentSwitcher",
 	"environmentList",
 	// App launcher / navigation
+	"scene",
 	"launchAppButton",
 	"openUrlButton",
 	"openDashboardButton",
@@ -321,10 +322,12 @@ function normalizeNotchPlacements(value, gridCols, gridRows) {
 			return;
 		}
 		seen.add(id);
-		// Only the handful of widgets that use it (launchAppButton, openUrlButton,
-		// label) carry a config string; cap its length defensively.
+		// Widgets that use it (launchAppButton, openUrlButton, label, task-column
+		// widgets) carry a config string; the "scene" widget stores a JSON blob
+		// here, so the cap is generous enough to hold a handful of apps/urls/tasks
+		// while still bounding a corrupted file defensively.
 		if (typeof entry.config === "string" && entry.config.trim()) {
-			placement.config = entry.config.trim().slice(0, 200);
+			placement.config = entry.config.trim().slice(0, 4000);
 		}
 		result.push(placement);
 	});
