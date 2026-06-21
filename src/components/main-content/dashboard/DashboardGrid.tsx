@@ -1,12 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-	ArrowPathIcon,
+	ArrowUturnLeftIcon,
 	CheckIcon,
-	MinusIcon,
 	PencilSquareIcon,
 	PlusIcon,
 	Squares2X2Icon,
-	TrashIcon,
+	XMarkIcon,
 } from "@heroicons/react/24/outline";
 import type { DashboardWidgetId, DashboardWidgetPlacement } from "../../../types";
 import {
@@ -14,18 +13,22 @@ import {
 	DASHBOARD_MAX_COLS,
 	DASHBOARD_MIN_COL_PX,
 	DASHBOARD_ROW_PX,
-	DASHBOARD_WIDGET_DEFAULT_SIZE,
 	DASHBOARD_WIDGET_DESCRIPTIONS,
 	DASHBOARD_WIDGET_IDS,
 	DASHBOARD_WIDGET_LABELS,
-	DASHBOARD_WIDGET_MAX_H,
-	DASHBOARD_WIDGET_MIN_H,
+	DASHBOARD_WIDGET_SIZES,
+	type DashboardWidgetSize,
 	createDashboardPlacementId,
-	createDefaultDashboardWidgets,
 } from "./catalog";
 import { DashboardWidget, type DashboardWidgetData } from "./DashboardWidget";
 
 const DRAG_MIME = "application/x-atlas-dashboard-card";
+
+// Nominal cell size used only to render faithful, scaled-down previews in the
+// gallery — independent of the live grid's responsive column width.
+const PREVIEW_SCALE = 0.42;
+const PREVIEW_COL_PX = 220;
+const PREVIEW_ROW_PX = 88;
 
 // Tracks the live (responsive) column count from the grid's own width, so a
 // card whose width-span exceeds what currently fits collapses to full width
@@ -50,8 +53,9 @@ function useColumnCount(ref: React.RefObject<HTMLElement | null>) {
 
 export function DashboardGrid({ data }: { data: DashboardWidgetData }) {
 	const [widgets, setWidgets] = useState<DashboardWidgetPlacement[]>([]);
+	const [history, setHistory] = useState<DashboardWidgetPlacement[][]>([]);
 	const [editing, setEditing] = useState(false);
-	const [addOpen, setAddOpen] = useState(false);
+	const [galleryOpen, setGalleryOpen] = useState(false);
 	const [dragId, setDragId] = useState<string | null>(null);
 	const gridRef = useRef<HTMLDivElement | null>(null);
 	const cols = useColumnCount(gridRef);
@@ -60,40 +64,36 @@ export function DashboardGrid({ data }: { data: DashboardWidgetData }) {
 		window.atlas
 			.getDashboardLayout()
 			.then((prefs) => setWidgets(prefs.widgets))
-			.catch(() => setWidgets(createDefaultDashboardWidgets()));
+			.catch(() => undefined);
 		const unsubscribe = window.atlas.onDashboardLayoutChanged?.((prefs) => setWidgets(prefs.widgets));
 		return () => unsubscribe?.();
 	}, []);
 
-	// Single write path: update local state and persist. The main process
-	// re-broadcasts, but the local set keeps the UI snappy.
+	// Single write path: snapshot the current layout for undo, then update
+	// local state and persist (the main process re-broadcasts).
 	const commit = (next: DashboardWidgetPlacement[]) => {
+		setHistory((stack) => [...stack, widgets].slice(-50));
 		setWidgets(next);
 		void window.atlas.setDashboardLayout({ widgets: next });
 	};
 
-	const addWidget = (widget: DashboardWidgetId) => {
-		const size = DASHBOARD_WIDGET_DEFAULT_SIZE[widget] ?? { w: 2, h: 1 };
+	const undo = () => {
+		if (history.length === 0) return;
+		const previous = history[history.length - 1];
+		setHistory(history.slice(0, -1));
+		setWidgets(previous);
+		void window.atlas.setDashboardLayout({ widgets: previous });
+	};
+
+	const addWidget = (widget: DashboardWidgetId, size: DashboardWidgetSize) => {
 		commit([...widgets, { id: createDashboardPlacementId(), widget, w: size.w, h: size.h }]);
-		setAddOpen(false);
+		setGalleryOpen(false);
 	};
 
 	const removeWidget = (id: string) => commit(widgets.filter((placement) => placement.id !== id));
 
-	const resizeWidget = (id: string, key: "w" | "h", delta: number) => {
-		const max = key === "w" ? DASHBOARD_MAX_COLS : DASHBOARD_WIDGET_MAX_H;
-		const min = key === "w" ? 1 : DASHBOARD_WIDGET_MIN_H;
-		commit(
-			widgets.map((placement) =>
-				placement.id === id
-					? { ...placement, [key]: Math.min(max, Math.max(min, placement[key] + delta)) }
-					: placement,
-			),
-		);
-	};
-
 	// Move the dragged card to just before the target card (or to the end when
-	// dropped on the trailing zone), then persist the new order.
+	// dropped on empty grid space), then persist the new order.
 	const reorder = (draggedId: string, targetId: string | null) => {
 		if (draggedId === targetId) return;
 		const from = widgets.findIndex((placement) => placement.id === draggedId);
@@ -105,67 +105,34 @@ export function DashboardGrid({ data }: { data: DashboardWidgetData }) {
 		commit(next);
 	};
 
-	const placedWidgets = new Set(widgets.map((placement) => placement.widget));
-
 	return (
 		<div className="grid gap-3">
 			<div className="flex items-center justify-end gap-2">
 				{editing && (
 					<>
-						<div className="relative">
-							<button
-								type="button"
-								onClick={() => setAddOpen((open) => !open)}
-								className="flex items-center gap-1.5 rounded-lg border border-neutral-200 px-3 py-1.5 text-sm text-neutral-700 transition-colors hover:bg-neutral-100 dark:border-neutral-600 dark:text-neutral-100 dark:hover:bg-neutral-700/60"
-							>
-								<PlusIcon className="h-4 w-4" />
-								Add card
-							</button>
-							{addOpen && (
-								<>
-									<div className="fixed inset-0 z-40" onClick={() => setAddOpen(false)} />
-									<div className="absolute right-0 top-full z-50 mt-1 grid max-h-80 w-72 gap-0.5 overflow-y-auto rounded-lg border border-neutral-200 bg-neutral-0 p-1.5 shadow-lg dark:border-neutral-600 dark:bg-neutral-800">
-										{DASHBOARD_WIDGET_IDS.map((widgetId) => (
-											<button
-												key={widgetId}
-												type="button"
-												onClick={() => addWidget(widgetId)}
-												className="grid gap-0.5 rounded-md px-2.5 py-1.5 text-left transition-colors hover:bg-neutral-100 dark:hover:bg-neutral-700/60"
-											>
-												<span className="flex items-center gap-1.5 text-sm text-neutral-800 dark:text-neutral-100">
-													{DASHBOARD_WIDGET_LABELS[widgetId]}
-													{placedWidgets.has(widgetId) && (
-														<span className="rounded bg-neutral-200 px-1 text-[9px] uppercase tracking-wide text-neutral-500 dark:bg-neutral-700 dark:text-neutral-300">
-															added
-														</span>
-													)}
-												</span>
-												<span className="text-[11px] text-neutral-500 dark:text-neutral-300">
-													{DASHBOARD_WIDGET_DESCRIPTIONS[widgetId]}
-												</span>
-											</button>
-										))}
-									</div>
-								</>
-							)}
-						</div>
 						<button
 							type="button"
-							onClick={() => commit(createDefaultDashboardWidgets())}
-							title="Reset to default layout"
+							onClick={() => setGalleryOpen(true)}
 							className="flex items-center gap-1.5 rounded-lg border border-neutral-200 px-3 py-1.5 text-sm text-neutral-700 transition-colors hover:bg-neutral-100 dark:border-neutral-600 dark:text-neutral-100 dark:hover:bg-neutral-700/60"
 						>
-							<ArrowPathIcon className="h-4 w-4" />
-							Reset
+							<PlusIcon className="h-4 w-4" />
+							Add widget
+						</button>
+						<button
+							type="button"
+							onClick={undo}
+							disabled={history.length === 0}
+							title="Undo last change"
+							className="flex items-center gap-1.5 rounded-lg border border-neutral-200 px-3 py-1.5 text-sm text-neutral-700 transition-colors hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-600 dark:text-neutral-100 dark:hover:bg-neutral-700/60"
+						>
+							<ArrowUturnLeftIcon className="h-4 w-4" />
+							Undo
 						</button>
 					</>
 				)}
 				<button
 					type="button"
-					onClick={() => {
-						setEditing((open) => !open);
-						setAddOpen(false);
-					}}
+					onClick={() => setEditing((open) => !open)}
 					className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors ${
 						editing
 							? "border-primary bg-primary text-neutral-0"
@@ -212,41 +179,27 @@ export function DashboardGrid({ data }: { data: DashboardWidgetData }) {
 							setDragId(null);
 						}}
 						className={`atlas-card relative min-h-0 overflow-hidden ${
-							editing ? "cursor-grab ring-1 ring-primary/30 active:cursor-grabbing" : ""
+							editing ? "atlas-dashboard-jiggle cursor-grab ring-1 ring-primary/30 active:cursor-grabbing" : ""
 						} ${dragId === placement.id ? "opacity-50" : ""}`}
 						style={{
 							gridColumn: `span ${Math.min(placement.w, cols)}`,
 							gridRow: `span ${placement.h}`,
 						}}
 					>
-						<div className="h-full overflow-auto">
+						<div className={`h-full overflow-auto ${editing ? "pointer-events-none" : ""}`}>
 							<DashboardWidget widget={placement.widget} data={data} />
 						</div>
 
 						{editing && (
-							<div className="absolute right-1.5 top-1.5 flex items-center gap-1 rounded-lg border border-neutral-200 bg-neutral-0/95 p-0.5 shadow-sm backdrop-blur dark:border-neutral-600 dark:bg-neutral-800/95">
-								<SizeControl
-									label="W"
-									value={placement.w}
-									onDecrease={() => resizeWidget(placement.id, "w", -1)}
-									onIncrease={() => resizeWidget(placement.id, "w", 1)}
-								/>
-								<SizeControl
-									label="H"
-									value={placement.h}
-									onDecrease={() => resizeWidget(placement.id, "h", -1)}
-									onIncrease={() => resizeWidget(placement.id, "h", 1)}
-								/>
-								<button
-									type="button"
-									onClick={() => removeWidget(placement.id)}
-									title="Remove card"
-									aria-label="Remove card"
-									className="flex h-6 w-6 items-center justify-center rounded text-neutral-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:text-neutral-300 dark:hover:bg-red-950/40 dark:hover:text-red-400"
-								>
-									<TrashIcon className="h-3.5 w-3.5" />
-								</button>
-							</div>
+							<button
+								type="button"
+								onClick={() => removeWidget(placement.id)}
+								title="Remove card"
+								aria-label="Remove card"
+								className="absolute left-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border border-neutral-300 bg-neutral-0 text-neutral-700 shadow-sm transition-colors hover:bg-red-50 hover:text-red-600 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+							>
+								<XMarkIcon className="h-3.5 w-3.5" />
+							</button>
 						)}
 					</div>
 				))}
@@ -255,57 +208,141 @@ export function DashboardGrid({ data }: { data: DashboardWidgetData }) {
 					<div className="col-span-full flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-neutral-300 py-12 text-neutral-500 dark:border-neutral-600 dark:text-neutral-300">
 						<Squares2X2Icon className="h-8 w-8" />
 						<p className="m-0 text-sm">Your dashboard is empty.</p>
-						{!editing && (
-							<button
-								type="button"
-								onClick={() => setEditing(true)}
-								className="text-sm font-medium text-primary"
-							>
-								Edit layout to add cards
-							</button>
-						)}
+						<button
+							type="button"
+							onClick={() => {
+								setEditing(true);
+								setGalleryOpen(true);
+							}}
+							className="text-sm font-medium text-primary"
+						>
+							Add a widget
+						</button>
 					</div>
 				)}
+			</div>
+
+			{galleryOpen && (
+				<WidgetGallery data={data} onAdd={addWidget} onClose={() => setGalleryOpen(false)} />
+			)}
+		</div>
+	);
+}
+
+// The iOS-style "Add Widget" gallery: every widget shown with a live,
+// scaled-down preview of each size it offers. Clicking a size tile drops that
+// card onto the dashboard.
+function WidgetGallery({
+	data,
+	onAdd,
+	onClose,
+}: {
+	data: DashboardWidgetData;
+	onAdd: (widget: DashboardWidgetId, size: DashboardWidgetSize) => void;
+	onClose: () => void;
+}) {
+	return (
+		<div className="fixed inset-0 z-50 flex items-center justify-center p-6" onClick={onClose}>
+			<div className="absolute inset-0 bg-neutral-900/40 backdrop-blur-sm" />
+			<div
+				className="relative flex max-h-[80vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-neutral-0 shadow-xl dark:border-neutral-600 dark:bg-neutral-800"
+				onClick={(event) => event.stopPropagation()}
+			>
+				<header className="flex items-center justify-between border-b border-neutral-200 px-5 py-3.5 dark:border-neutral-600">
+					<div>
+						<h2 className="m-0 text-subtitle-small">Add widget</h2>
+						<p className="m-0 text-[12px] text-neutral-500 dark:text-neutral-300">
+							Pick a widget and a size. Sizes are fixed once added.
+						</p>
+					</div>
+					<button
+						type="button"
+						onClick={onClose}
+						aria-label="Close"
+						className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-500 transition-colors hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-700/60"
+					>
+						<XMarkIcon className="h-5 w-5" />
+					</button>
+				</header>
+
+				<div className="grid gap-5 overflow-y-auto p-5">
+					{DASHBOARD_WIDGET_IDS.map((widgetId) => (
+						<section key={widgetId} className="grid gap-2">
+							<div>
+								<h3 className="m-0 text-body-regular font-semibold text-neutral-800 dark:text-neutral-100">
+									{DASHBOARD_WIDGET_LABELS[widgetId]}
+								</h3>
+								<p className="m-0 text-[12px] text-neutral-500 dark:text-neutral-300">
+									{DASHBOARD_WIDGET_DESCRIPTIONS[widgetId]}
+								</p>
+							</div>
+							<div className="flex flex-wrap items-end gap-3">
+								{DASHBOARD_WIDGET_SIZES[widgetId].map((size) => (
+									<GalleryTile
+										key={size.label}
+										widget={widgetId}
+										size={size}
+										data={data}
+										onClick={() => onAdd(widgetId, size)}
+									/>
+								))}
+							</div>
+						</section>
+					))}
+				</div>
 			</div>
 		</div>
 	);
 }
 
-function SizeControl({
-	label,
-	value,
-	onDecrease,
-	onIncrease,
+function GalleryTile({
+	widget,
+	size,
+	data,
+	onClick,
 }: {
-	label: string;
-	value: number;
-	onDecrease: () => void;
-	onIncrease: () => void;
+	widget: DashboardWidgetId;
+	size: DashboardWidgetSize;
+	data: DashboardWidgetData;
+	onClick: () => void;
 }) {
+	const innerW = size.w * PREVIEW_COL_PX + (size.w - 1) * DASHBOARD_GAP_PX;
+	const innerH = size.h * PREVIEW_ROW_PX + (size.h - 1) * DASHBOARD_GAP_PX;
 	return (
-		<div className="flex items-center">
-			<button
-				type="button"
-				onClick={onDecrease}
-				title={`Decrease ${label}`}
-				aria-label={`Decrease ${label}`}
-				className="flex h-6 w-6 items-center justify-center text-neutral-500 transition-colors hover:text-neutral-800 dark:text-neutral-300 dark:hover:text-neutral-0"
+		<div
+			role="button"
+			tabIndex={0}
+			onClick={onClick}
+			onKeyDown={(event) => {
+				if (event.key === "Enter" || event.key === " ") {
+					event.preventDefault();
+					onClick();
+				}
+			}}
+			title={`Add ${size.label} (${size.w}×${size.h})`}
+			className="group grid cursor-pointer gap-1.5 outline-none"
+		>
+			<div
+				className="overflow-hidden rounded-xl border border-neutral-200 transition-colors group-hover:border-primary group-focus-visible:border-primary dark:border-neutral-600"
+				style={{ width: innerW * PREVIEW_SCALE, height: innerH * PREVIEW_SCALE }}
 			>
-				<MinusIcon className="h-3 w-3" />
-			</button>
-			<span className="w-7 text-center font-data text-[11px] text-neutral-600 dark:text-neutral-200">
-				{label}
-				{value}
+				<div
+					className="atlas-card pointer-events-none overflow-hidden"
+					style={{
+						width: innerW,
+						height: innerH,
+						transform: `scale(${PREVIEW_SCALE})`,
+						transformOrigin: "top left",
+					}}
+				>
+					<div className="h-full overflow-hidden">
+						<DashboardWidget widget={widget} data={data} />
+					</div>
+				</div>
+			</div>
+			<span className="text-center text-[11px] text-neutral-500 dark:text-neutral-300">
+				{size.label} · {size.w}×{size.h}
 			</span>
-			<button
-				type="button"
-				onClick={onIncrease}
-				title={`Increase ${label}`}
-				aria-label={`Increase ${label}`}
-				className="flex h-6 w-6 items-center justify-center text-neutral-500 transition-colors hover:text-neutral-800 dark:text-neutral-300 dark:hover:text-neutral-0"
-			>
-				<PlusIcon className="h-3 w-3" />
-			</button>
 		</div>
 	);
 }
