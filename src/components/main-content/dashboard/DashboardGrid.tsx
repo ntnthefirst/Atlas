@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
 	ArrowUturnLeftIcon,
 	CheckIcon,
@@ -57,8 +58,12 @@ export function DashboardGrid({ data }: { data: DashboardWidgetData }) {
 	const [editing, setEditing] = useState(false);
 	const [galleryOpen, setGalleryOpen] = useState(false);
 	const [dragId, setDragId] = useState<string | null>(null);
+	// The order at the moment the drag began, so the whole drag collapses into
+	// a single undo step (and we can tell if anything actually moved).
+	const dragStartOrderRef = useRef<DashboardWidgetPlacement[] | null>(null);
 	const gridRef = useRef<HTMLDivElement | null>(null);
 	const cols = useColumnCount(gridRef);
+	const reduceMotion = useReducedMotion();
 
 	useEffect(() => {
 		window.atlas
@@ -92,17 +97,37 @@ export function DashboardGrid({ data }: { data: DashboardWidgetData }) {
 
 	const removeWidget = (id: string) => commit(widgets.filter((placement) => placement.id !== id));
 
-	// Move the dragged card to just before the target card (or to the end when
-	// dropped on empty grid space), then persist the new order.
-	const reorder = (draggedId: string, targetId: string | null) => {
-		if (draggedId === targetId) return;
-		const from = widgets.findIndex((placement) => placement.id === draggedId);
-		if (from < 0) return;
+	const startDrag = (id: string) => {
+		dragStartOrderRef.current = widgets;
+		setDragId(id);
+	};
+
+	// Live reorder while dragging: as the pointer crosses another card, move the
+	// dragged card into that slot in local state immediately. Framer Motion's
+	// layout animation then slides every card to its new place, so the grid
+	// reflows under the cursor (iOS-style) instead of only snapping on drop.
+	const dragOverCard = (targetId: string) => {
+		if (!dragId || dragId === targetId) return;
+		const from = widgets.findIndex((placement) => placement.id === dragId);
+		const to = widgets.findIndex((placement) => placement.id === targetId);
+		if (from < 0 || to < 0 || from === to) return;
 		const next = widgets.slice();
 		const [moved] = next.splice(from, 1);
-		const targetIndex = targetId ? next.findIndex((placement) => placement.id === targetId) : next.length;
-		next.splice(targetIndex < 0 ? next.length : targetIndex, 0, moved);
-		commit(next);
+		next.splice(to, 0, moved);
+		setWidgets(next); // local only — persisted once the drop lands
+	};
+
+	// On drop: if the order actually changed, persist it and record a single
+	// undo entry for the whole gesture.
+	const endDrag = () => {
+		const start = dragStartOrderRef.current;
+		dragStartOrderRef.current = null;
+		setDragId(null);
+		if (!start) return;
+		const changed = start.map((w) => w.id).join() !== widgets.map((w) => w.id).join();
+		if (!changed) return;
+		setHistory((stack) => [...stack, start].slice(-50));
+		void window.atlas.setDashboardLayout({ widgets });
 	};
 
 	return (
@@ -157,52 +182,78 @@ export function DashboardGrid({ data }: { data: DashboardWidgetData }) {
 					if (editing && dragId) event.preventDefault();
 				}}
 				onDrop={() => {
-					if (editing && dragId) reorder(dragId, null);
-					setDragId(null);
+					if (editing && dragId) endDrag();
 				}}
 			>
-				{widgets.map((placement) => (
-					<div
-						key={placement.id}
-						draggable={editing}
-						onDragStart={(event) => {
-							event.dataTransfer.setData(DRAG_MIME, placement.id);
-							setDragId(placement.id);
-						}}
-						onDragEnd={() => setDragId(null)}
-						onDragOver={(event) => {
-							if (editing && dragId && dragId !== placement.id) event.preventDefault();
-						}}
-						onDrop={(event) => {
-							event.stopPropagation();
-							if (editing && dragId) reorder(dragId, placement.id);
-							setDragId(null);
-						}}
-						className={`atlas-card relative min-h-0 overflow-hidden ${
-							editing ? "atlas-dashboard-jiggle cursor-grab ring-1 ring-primary/30 active:cursor-grabbing" : ""
-						} ${dragId === placement.id ? "opacity-50" : ""}`}
-						style={{
-							gridColumn: `span ${Math.min(placement.w, cols)}`,
-							gridRow: `span ${placement.h}`,
-						}}
-					>
-						<div className={`h-full overflow-auto ${editing ? "pointer-events-none" : ""}`}>
-							<DashboardWidget widget={placement.widget} data={data} />
-						</div>
-
-						{editing && (
-							<button
-								type="button"
-								onClick={() => removeWidget(placement.id)}
-								title="Remove card"
-								aria-label="Remove card"
-								className="absolute left-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border border-neutral-300 bg-neutral-0 text-neutral-700 shadow-sm transition-colors hover:bg-red-50 hover:text-red-600 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+				<AnimatePresence initial={false}>
+					{widgets.map((placement) => {
+						const isDragged = dragId === placement.id;
+						return (
+							<motion.div
+								key={placement.id}
+								layout
+								initial={{ opacity: 0, scale: 0.85 }}
+								animate={{ opacity: isDragged ? 0.4 : 1, scale: isDragged ? 0.97 : 1 }}
+								exit={{ opacity: 0, scale: 0.85 }}
+								transition={
+									reduceMotion
+										? { duration: 0 }
+										: { type: "spring", stiffness: 600, damping: 42, mass: 0.7 }
+								}
+								className={`atlas-card relative min-h-0 overflow-hidden ${
+									isDragged ? "border-dashed border-primary ring-2 ring-primary/40" : ""
+								}`}
+								style={{
+									gridColumn: `span ${Math.min(placement.w, cols)}`,
+									gridRow: `span ${placement.h}`,
+								}}
 							>
-								<XMarkIcon className="h-3.5 w-3.5" />
-							</button>
-						)}
-					</div>
-				))}
+								<div className={`h-full overflow-auto ${editing ? "pointer-events-none" : ""}`}>
+									<DashboardWidget widget={placement.widget} data={data} />
+								</div>
+
+								{/* Native HTML5 drag lives on a transparent overlay rather than the
+								    motion.div, whose own onDragStart/onDragEnd props are reserved by
+								    Framer Motion's gesture system and would never fire. */}
+								{editing && (
+									<>
+										<div
+											className="absolute inset-0 cursor-grab active:cursor-grabbing"
+											draggable
+											onDragStart={(event) => {
+												event.dataTransfer.setData(DRAG_MIME, placement.id);
+												event.dataTransfer.effectAllowed = "move";
+												const card = event.currentTarget.parentElement;
+												if (card) event.dataTransfer.setDragImage(card, 24, 24);
+												startDrag(placement.id);
+											}}
+											onDragEnd={endDrag}
+											onDragOver={(event) => {
+												if (dragId && dragId !== placement.id) {
+													event.preventDefault();
+													dragOverCard(placement.id);
+												}
+											}}
+											onDrop={(event) => {
+												event.stopPropagation();
+												if (dragId) endDrag();
+											}}
+										/>
+										<button
+											type="button"
+											onClick={() => removeWidget(placement.id)}
+											title="Remove card"
+											aria-label="Remove card"
+											className="absolute left-1.5 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-neutral-300 bg-neutral-0 text-neutral-700 shadow-sm transition-colors hover:bg-red-50 hover:text-red-600 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+										>
+											<XMarkIcon className="h-3.5 w-3.5" />
+										</button>
+									</>
+								)}
+							</motion.div>
+						);
+					})}
+				</AnimatePresence>
 
 				{widgets.length === 0 && (
 					<div className="col-span-full flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-neutral-300 py-12 text-neutral-500 dark:border-neutral-600 dark:text-neutral-300">

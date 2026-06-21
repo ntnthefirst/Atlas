@@ -1742,31 +1742,3 @@ textarea {
 		display: none;
 	}
 }
-
-/* Subtle iOS-style wobble on dashboard cards while the layout is in edit
-   mode; even/odd cards are phase-offset so they don't jiggle in lockstep. */
-@keyframes atlas-dashboard-jiggle {
-	0% {
-		transform: rotate(-0.5deg);
-	}
-	50% {
-		transform: rotate(0.5deg);
-	}
-	100% {
-		transform: rotate(-0.5deg);
-	}
-}
-
-.atlas-dashboard-jiggle {
-	animation: atlas-dashboard-jiggle 0.32s ease-in-out infinite;
-}
-
-.atlas-dashboard-jiggle:nth-child(even) {
-	animation-delay: -0.16s;
-}
-
-@media (prefers-reduced-motion: reduce) {
-	.atlas-dashboard-jiggle {
-		animation: none;
-	}
-}
