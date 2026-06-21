@@ -24,7 +24,7 @@ export const DASHBOARD_WIDGET_LABELS: Record<DashboardWidgetId, string> = {
 	currentApp: "Current app",
 	currentEnvironment: "Current environment",
 	taskProgress: "Task progress",
-	notesCount: "Notes",
+	notesCount: "Notebook",
 };
 
 // A short blurb shown under each widget in the "add card" library.
@@ -41,7 +41,7 @@ export const DASHBOARD_WIDGET_DESCRIPTIONS: Record<DashboardWidgetId, string> = 
 	currentApp: "The app in the foreground right now",
 	currentEnvironment: "The active environment",
 	taskProgress: "Completed vs. total tasks",
-	notesCount: "How many notes this environment has",
+	notesCount: "Words in this environment's notebook",
 };
 
 export const DASHBOARD_WIDGET_DEFAULT_SIZE: Record<DashboardWidgetId, { w: number; h: number }> = {
