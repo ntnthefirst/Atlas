@@ -34,6 +34,19 @@ let tracker = null;
 const isDev = !app.isPackaged;
 const isMac = process.platform === "darwin";
 const isWindows = process.platform === "win32";
+
+// Windows draws its own minimize/maximize/close glyphs into our frameless
+// window via titleBarOverlay, so unlike the rest of the UI those buttons
+// can't pick up dark: classes - they need their colors pushed from here,
+// in sync with whatever theme is currently active.
+function getTitleBarOverlay() {
+	if (!isWindows) {
+		return false;
+	}
+	return nativeTheme.shouldUseDarkColors
+		? { color: "#2a2a2a", symbolColor: "#e2e2e2", height: 49 }
+		: { color: "#f7f7f7", symbolColor: "#4a4a4a", height: 49 };
+}
 const APP_USER_MODEL_ID = isDev ? "com.atlas.app.dev" : "com.atlas.app";
 const GITHUB_OWNER = "ntnthefirst";
 const GITHUB_REPO = "Atlas";
@@ -684,13 +697,7 @@ function createMainWindow() {
 		icon: iconPath,
 		frame: isMac,
 		titleBarStyle: isMac ? "hiddenInset" : "hidden",
-		titleBarOverlay: isWindows
-			? {
-					color: "#2a2a2a",
-					symbolColor: "#e2e2e2",
-					height: 49,
-				}
-			: false,
+		titleBarOverlay: getTitleBarOverlay(),
 		webPreferences: {
 			preload: path.join(__dirname, "preload.cjs"),
 			contextIsolation: true,
@@ -758,13 +765,7 @@ function createWelcomeWindow() {
 			: path.join(__dirname, "..", "dist", "assets", "logosmall.png"),
 		frame: isMac,
 		titleBarStyle: isMac ? "hiddenInset" : "hidden",
-		titleBarOverlay: isWindows
-			? {
-					color: "#2a2a2a",
-					symbolColor: "#e2e2e2",
-					height: 49,
-				}
-			: false,
+		titleBarOverlay: getTitleBarOverlay(),
 		autoHideMenuBar: true,
 		webPreferences: {
 			preload: path.join(__dirname, "preload.cjs"),
@@ -821,13 +822,7 @@ function createSettingsWindow(parentWindow = null) {
 			: path.join(__dirname, "..", "dist", "assets", "logosmall.png"),
 		frame: isMac,
 		titleBarStyle: isMac ? "hiddenInset" : "hidden",
-		titleBarOverlay: isWindows
-			? {
-					color: "#2a2a2a",
-					symbolColor: "#e2e2e2",
-					height: 49,
-				}
-			: false,
+		titleBarOverlay: getTitleBarOverlay(),
 		parent: parentWindow && !parentWindow.isDestroyed() ? parentWindow : undefined,
 		modal: Boolean(parentWindow && !parentWindow.isDestroyed()),
 		resizable: false,
@@ -885,13 +880,7 @@ function createActionEditorWindow(parentWindow = null) {
 			: path.join(__dirname, "..", "dist", "assets", "logosmall.png"),
 		frame: isMac,
 		titleBarStyle: isMac ? "hiddenInset" : "hidden",
-		titleBarOverlay: isWindows
-			? {
-					color: "#2a2a2a",
-					symbolColor: "#e2e2e2",
-					height: 49,
-				}
-			: false,
+		titleBarOverlay: getTitleBarOverlay(),
 		parent: parentWindow && !parentWindow.isDestroyed() ? parentWindow : undefined,
 		webPreferences: {
 			preload: path.join(__dirname, "preload.cjs"),
@@ -949,18 +938,7 @@ function applyNativeTheme(theme) {
 	}
 
 	nativeTheme.themeSource = theme;
-	const overlay =
-		theme === "light"
-			? {
-					color: "#f7f7f7",
-					symbolColor: "#4a4a4a",
-					height: 49,
-				}
-			: {
-					color: "#2a2a2a",
-					symbolColor: "#e2e2e2",
-					height: 49,
-				};
+	const overlay = getTitleBarOverlay();
 
 	if (mainWindow && !mainWindow.isDestroyed()) {
 		mainWindow.setTitleBarOverlay(overlay);
@@ -972,6 +950,10 @@ function applyNativeTheme(theme) {
 
 	if (welcomeWindow && !welcomeWindow.isDestroyed()) {
 		welcomeWindow.setTitleBarOverlay(overlay);
+	}
+
+	if (actionEditorWindow && !actionEditorWindow.isDestroyed()) {
+		actionEditorWindow.setTitleBarOverlay(overlay);
 	}
 }
 
