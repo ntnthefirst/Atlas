@@ -41,7 +41,6 @@ import {
 	KeyIcon,
 	LightBulbIcon,
 	ListBulletIcon,
-	LockClosedIcon,
 	LockOpenIcon,
 	MapIcon,
 	MegaphoneIcon,
@@ -75,7 +74,8 @@ import {
 	WifiIcon,
 	WrenchIcon,
 } from "@heroicons/react/24/outline";
-import { PlayCircleIcon as PlayCircleIconSolid } from "@heroicons/react/24/solid";
+import { LockClosedIcon as LockClosedIconSolid, PlayCircleIcon as PlayCircleIconSolid } from "@heroicons/react/24/solid";
+import * as HeroIconsSolid from "@heroicons/react/24/solid";
 import type {
 	DashboardOverview,
 	MapItem,
@@ -183,6 +183,10 @@ const TAB_ICON_MAP: Record<NotchTabIcon, typeof ClockIcon> = {
 	WrenchIcon,
 };
 
+// Filled counterparts of the same icons, used to mark a tab as active
+// without changing its color (no bg highlight, just outline -> solid).
+const TAB_ICON_SOLID_MAP = HeroIconsSolid as unknown as Record<NotchTabIcon, typeof ClockIcon>;
+
 const isSameDay = (iso: string, reference: Date) => {
 	const d = new Date(iso);
 	return (
@@ -229,15 +233,16 @@ const CARD_POSITION_CLASSES: Record<NotchPosition, string> = {
 	free: "flex-col justify-between h-fit pt-2.5 pr-3.75 pb-1.25 pl-3.75 rounded-[20px]",
 };
 
+// Shared by every plain icon button in the notch - bar buttons and widget
+// buttons alike - just a color shift on hover, no rounded background.
 const ICON_BUTTON_CLASSES =
-	"inline-flex shrink-0 items-center justify-center rounded-full text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-800 dark:text-neutral-300 dark:hover:bg-white/10 dark:hover:text-neutral-0";
+	"inline-flex shrink-0 items-center justify-center text-neutral-500 transition-colors hover:text-neutral-800 dark:text-neutral-300 dark:hover:text-neutral-0";
 
-// Every placed widget gets the same outlined card, tinted with the accent
-// color (the same family as the record/play button's border), so the grid
-// reads as one consistent set of tiles instead of ad-hoc per-widget framing.
-// Structural widgets (divider/spacer) opt out since they're meant to blend in.
+// Every placed widget gets the same outlined card so the grid reads as one
+// consistent set of tiles instead of ad-hoc per-widget framing. Structural
+// widgets (divider/spacer) opt out since they're meant to blend in.
 const WIDGET_CARD_CLASSES =
-	"h-full w-full rounded-lg border border-primary/30 bg-neutral-50/80 dark:border-primary/30 dark:bg-neutral-800/60";
+	"h-full w-full rounded-lg border border-neutral-200 bg-neutral-50 p-0.5 text-neutral-700 transition-colors hover:border-neutral-500 dark:border-neutral-600 dark:bg-neutral-800/60 dark:text-neutral-100 dark:hover:border-neutral-400";
 const WIDGETS_WITHOUT_CARD = new Set<NotchWidgetId>(["divider", "spacer"]);
 
 // Simple "icon button that does X" widgets all share one renderer; none of
@@ -1031,7 +1036,7 @@ export function NotchApp() {
 						) : (
 							<button
 								type="button"
-								className="recording-trigger group inline-flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-200 bg-neutral-50 text-neutral-700 transition hover:border-primary-hover hover:bg-primary-hover hover:text-neutral-0 disabled:cursor-not-allowed disabled:opacity-40 dark:border-neutral-600 dark:bg-neutral-700/80 dark:text-neutral-100"
+								className={`recording-trigger group ${ICON_BUTTON_CLASSES} h-8 w-8 disabled:cursor-not-allowed disabled:opacity-40`}
 								disabled={!environment}
 								onClick={() => void onStartTimer()}
 								aria-label="Start recording"
@@ -1096,7 +1101,7 @@ export function NotchApp() {
 							onClick={onToggleLock}
 						>
 							{preferences.locked ? (
-								<LockClosedIcon className="h-5 w-5" />
+								<LockClosedIconSolid className="h-5 w-5" />
 							) : (
 								<LockOpenIcon className="h-5 w-5" />
 							)}
@@ -1589,15 +1594,15 @@ export function NotchApp() {
 							className={`notch-no-drag flex items-center gap-2.5 whitespace-nowrap ${isVertical ? "flex-col" : "flex-row"}`}
 						>
 							{preferences.tabs.map((tab) => {
-								const Icon = TAB_ICON_MAP[tab.icon] ?? Squares2X2Icon;
 								const isActive = activeTabId === tab.id;
+								const OutlineIcon = TAB_ICON_MAP[tab.icon] ?? Squares2X2Icon;
+								const SolidIcon = TAB_ICON_SOLID_MAP[tab.icon] ?? OutlineIcon;
+								const Icon = isActive ? SolidIcon : OutlineIcon;
 								return (
 									<button
 										key={tab.id}
 										type="button"
-										className={`${ICON_BUTTON_CLASSES} h-7 w-7 ${
-											isActive ? "bg-neutral-100 text-neutral-800 dark:bg-white/10 dark:text-neutral-0" : ""
-										}`}
+										className={`${ICON_BUTTON_CLASSES} h-7 w-7`}
 										title={tab.label}
 										aria-label={tab.label}
 										onClick={() => setActiveTabId((current) => (current === tab.id ? null : tab.id))}
@@ -1606,15 +1611,6 @@ export function NotchApp() {
 									</button>
 								);
 							})}
-							<button
-								type="button"
-								className={`${ICON_BUTTON_CLASSES} h-7 w-7`}
-								title="Edit action buttons"
-								aria-label="Edit action buttons"
-								onClick={() => void window.atlas.openActionEditorWindow()}
-							>
-								<PencilSquareIcon className="h-4.5 w-4.5" />
-							</button>
 						</div>
 
 						<span
@@ -1643,12 +1639,22 @@ export function NotchApp() {
 							<button
 								type="button"
 								className={`${ICON_BUTTON_CLASSES} h-7 w-7`}
+								title="Edit action buttons"
+								aria-label="Edit action buttons"
+								onClick={() => void window.atlas.openActionEditorWindow()}
+							>
+								<PencilSquareIcon className="h-4.5 w-4.5" />
+							</button>
+
+							<button
+								type="button"
+								className={`${ICON_BUTTON_CLASSES} h-7 w-7`}
 								title={preferences.locked ? "Unlock position" : "Lock position"}
 								aria-label={preferences.locked ? "Unlock position" : "Lock position"}
 								onClick={onToggleLock}
 							>
 								{preferences.locked ? (
-									<LockClosedIcon className="w-5 h-5" />
+									<LockClosedIconSolid className="w-5 h-5" />
 								) : (
 									<LockOpenIcon className="w-5 h-5" />
 								)}
