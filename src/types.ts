@@ -46,15 +46,28 @@ export type TaskColumn = {
 	label: string;
 };
 
+export type TaskPriority = "none" | "low" | "medium" | "high" | "urgent";
+
+export const TASK_PRIORITIES: TaskPriority[] = ["none", "low", "medium", "high", "urgent"];
+
 export type TaskItem = {
 	id: string;
 	map_id: string;
 	title: string;
 	description: string;
 	status: TaskStatus;
+	priority: TaskPriority;
+	tags: string[];
+	due_date: string | null;
 	created_at: string;
 	updated_at: string;
 };
+
+// Fields the task detail panel can edit. All optional — only what's passed is
+// written.
+export type TaskUpdate = Partial<
+	Pick<TaskItem, "title" | "description" | "status" | "priority" | "tags" | "due_date">
+>;
 
 export type NoteItem = {
 	id: string;

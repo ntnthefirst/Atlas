@@ -23,6 +23,33 @@ const createEmptyNotebookDocument = () =>
 		nodes: [],
 	});
 
+const TASK_PRIORITIES = ["none", "low", "medium", "high", "urgent"];
+
+// Tasks store tags as a JSON string and may predate the priority/due columns;
+// normalize every row the app sees into a stable shape (tags: string[],
+// priority: enum, due_date: string|null).
+const normalizeTask = (task) => {
+	if (!task) {
+		return task;
+	}
+	let tags = [];
+	try {
+		const parsed = typeof task.tags === "string" ? JSON.parse(task.tags) : task.tags;
+		if (Array.isArray(parsed)) {
+			tags = parsed.filter((tag) => typeof tag === "string");
+		}
+	} catch {
+		tags = [];
+	}
+	return {
+		...task,
+		description: task.description ?? "",
+		priority: TASK_PRIORITIES.includes(task.priority) ? task.priority : "none",
+		tags,
+		due_date: task.due_date || null,
+	};
+};
+
 const normalizeSession = (session) => {
 	if (!session) {
 		return session;
@@ -166,6 +193,19 @@ class AtlasDatabase {
         updated_at TEXT NOT NULL
       )`,
 		);
+
+		// GitHub-Projects-style task fields, added incrementally so existing
+		// databases migrate in place. tags is a JSON array string; due_date is an
+		// ISO date (yyyy-mm-dd) or null.
+		for (const [column, ddl] of [
+			["priority", "TEXT DEFAULT 'none'"],
+			["tags", "TEXT DEFAULT '[]'"],
+			["due_date", "TEXT"],
+		]) {
+			if (!this.columnExists("tasks", column)) {
+				this.run(`ALTER TABLE tasks ADD COLUMN ${column} ${ddl}`);
+			}
+		}
 
 		this.run(
 			`CREATE TABLE IF NOT EXISTS notes (
@@ -677,29 +717,43 @@ class AtlasDatabase {
 
 	listTasksByMap(mapId) {
 		return this.all(
-			`SELECT id, map_id, title, description, status, created_at, updated_at
+			`SELECT id, map_id, title, description, status, priority, tags, due_date, created_at, updated_at
        FROM tasks
        WHERE map_id = ?
        ORDER BY created_at DESC`,
 			[mapId],
-		);
+		).map(normalizeTask);
 	}
 
-	createTask(mapId, title, description = "") {
+	createTask(mapId, title, description = "", fields = {}) {
 		const task = {
 			id: randomUUID(),
 			map_id: mapId,
 			title,
 			description,
-			status: "todo",
+			status: typeof fields.status === "string" && fields.status ? fields.status : "todo",
+			priority: TASK_PRIORITIES.includes(fields.priority) ? fields.priority : "none",
+			tags: Array.isArray(fields.tags) ? fields.tags.filter((tag) => typeof tag === "string") : [],
+			due_date: fields.due_date || null,
 			created_at: nowIso(),
 			updated_at: nowIso(),
 		};
 
 		this.run(
-			`INSERT INTO tasks (id, map_id, title, description, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			[task.id, task.map_id, task.title, task.description, task.status, task.created_at, task.updated_at],
+			`INSERT INTO tasks (id, map_id, title, description, status, priority, tags, due_date, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			[
+				task.id,
+				task.map_id,
+				task.title,
+				task.description,
+				task.status,
+				task.priority,
+				JSON.stringify(task.tags),
+				task.due_date,
+				task.created_at,
+				task.updated_at,
+			],
 		);
 
 		return task;
@@ -707,7 +761,34 @@ class AtlasDatabase {
 
 	updateTaskStatus(taskId, status) {
 		this.run("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?", [status, nowIso(), taskId]);
-		return this.first("SELECT * FROM tasks WHERE id = ?", [taskId]);
+		return normalizeTask(this.first("SELECT * FROM tasks WHERE id = ?", [taskId]));
+	}
+
+	// General task editor used by the task detail panel: updates only the fields
+	// present in `fields` (title/description/status/priority/tags/due_date).
+	updateTask(taskId, fields = {}) {
+		const sets = [];
+		const values = [];
+		for (const key of ["title", "description", "status", "priority", "due_date"]) {
+			if (key in fields) {
+				sets.push(`${key} = ?`);
+				values.push(key === "priority" && !TASK_PRIORITIES.includes(fields[key]) ? "none" : fields[key]);
+			}
+		}
+		if ("tags" in fields) {
+			sets.push("tags = ?");
+			values.push(JSON.stringify(Array.isArray(fields.tags) ? fields.tags.filter((t) => typeof t === "string") : []));
+		}
+		sets.push("updated_at = ?");
+		values.push(nowIso());
+		values.push(taskId);
+		this.run(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`, values);
+		return normalizeTask(this.first("SELECT * FROM tasks WHERE id = ?", [taskId]));
+	}
+
+	deleteTask(taskId) {
+		this.run("DELETE FROM tasks WHERE id = ?", [taskId]);
+		return true;
 	}
 
 	listNotesByMap(mapId) {

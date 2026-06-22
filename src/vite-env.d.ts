@@ -14,6 +14,7 @@ import type {
 	Session,
 	TaskItem,
 	TaskStatus,
+	TaskUpdate,
 	UpdatePreferences,
 	UpdateCheckResult,
 } from "./types";
@@ -56,8 +57,15 @@ declare global {
 			getCurrentApp: () => Promise<string>;
 
 			listTasksByMap: (mapId: string) => Promise<TaskItem[]>;
-			createTask: (mapId: string, title: string, description?: string) => Promise<TaskItem>;
+			createTask: (
+				mapId: string,
+				title: string,
+				description?: string,
+				fields?: TaskUpdate,
+			) => Promise<TaskItem>;
 			updateTaskStatus: (taskId: string, status: TaskStatus) => Promise<TaskItem>;
+			updateTask: (taskId: string, fields: TaskUpdate) => Promise<TaskItem>;
+			deleteTask: (taskId: string) => Promise<boolean>;
 
 			listNotesByMap: (mapId: string) => Promise<NoteItem[]>;
 			createNote: (mapId: string, content?: string) => Promise<NoteItem>;

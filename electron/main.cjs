@@ -1553,11 +1553,11 @@ function wireIpc() {
 		return db.listTasksByMap(mapId);
 	});
 
-	ipcMain.handle("task:create", (_event, mapId, title, description) => {
+	ipcMain.handle("task:create", (_event, mapId, title, description, fields) => {
 		if (!mapId || !title || !title.trim()) {
 			throw new Error("Task map and title are required.");
 		}
-		return db.createTask(mapId, title.trim(), (description || "").trim());
+		return db.createTask(mapId, title.trim(), (description || "").trim(), fields || {});
 	});
 
 	ipcMain.handle("task:updateStatus", (_event, taskId, status) => {
@@ -1565,6 +1565,20 @@ function wireIpc() {
 			throw new Error("Task id and status are required.");
 		}
 		return db.updateTaskStatus(taskId, status);
+	});
+
+	ipcMain.handle("task:update", (_event, taskId, fields) => {
+		if (!taskId || !fields || typeof fields !== "object") {
+			throw new Error("Task id and fields are required.");
+		}
+		return db.updateTask(taskId, fields);
+	});
+
+	ipcMain.handle("task:delete", (_event, taskId) => {
+		if (!taskId) {
+			throw new Error("Task id is required.");
+		}
+		return db.deleteTask(taskId);
 	});
 
 	ipcMain.handle("note:listByMap", (_event, mapId) => {

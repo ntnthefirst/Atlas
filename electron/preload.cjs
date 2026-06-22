@@ -19,8 +19,11 @@ contextBridge.exposeInMainWorld("atlas", {
 	getCurrentApp: () => ipcRenderer.invoke("activity:current-app"),
 
 	listTasksByMap: (mapId) => ipcRenderer.invoke("task:listByMap", mapId),
-	createTask: (mapId, title, description) => ipcRenderer.invoke("task:create", mapId, title, description),
+	createTask: (mapId, title, description, fields) =>
+		ipcRenderer.invoke("task:create", mapId, title, description, fields),
 	updateTaskStatus: (taskId, status) => ipcRenderer.invoke("task:updateStatus", taskId, status),
+	updateTask: (taskId, fields) => ipcRenderer.invoke("task:update", taskId, fields),
+	deleteTask: (taskId) => ipcRenderer.invoke("task:delete", taskId),
 
 	listNotesByMap: (mapId) => ipcRenderer.invoke("note:listByMap", mapId),
 	createNote: (mapId, content) => ipcRenderer.invoke("note:create", mapId, content),
