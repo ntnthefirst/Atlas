@@ -11,11 +11,12 @@ type AtlasMainContentProps = {
 export function AtlasMainContent({ view, errorMessage, children }: AtlasMainContentProps) {
 	const isActivityView = view === "activity";
 	const isNotesView = view === "notes";
+	const isDashboardView = view === "dashboard";
 	const isFullBleed = isActivityView || isNotesView;
 
 	return (
 		<main
-			className={`grid h-full min-h-0 w-full ${isNotesView ? "" : "gap-3.5 p-3.5"} ${isFullBleed ? "overflow-hidden" : "overflow-auto"}`}
+			className={`grid h-full min-h-0 w-full ${isNotesView ? "" : "gap-3.5 p-3.5"} ${isFullBleed ? "overflow-hidden" : "overflow-auto"} ${isDashboardView ? "atlas-grid-surface" : ""}`}
 		>
 			<AnimatePresence mode="wait">
 				<motion.section

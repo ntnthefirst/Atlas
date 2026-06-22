@@ -229,7 +229,9 @@ export function DashboardGrid({ data }: { data: DashboardWidgetData }) {
 									gridRow: `span ${placement.h}`,
 								}}
 							>
-								<div className={`h-full overflow-auto ${editing ? "pointer-events-none" : ""}`}>
+								<div
+									className={`h-full overflow-y-auto overflow-x-hidden ${editing ? "pointer-events-none" : ""}`}
+								>
 									<DashboardWidget widget={placement.widget} data={data} config={placement.config} />
 								</div>
 

@@ -42,11 +42,11 @@ const isToday = (iso: string, reference: Date) => {
 
 function Stat({ value, label }: { value: string | number; label: string }) {
 	return (
-		<div className="flex h-full flex-col items-start justify-center gap-1">
-			<span className="font-data text-[28px] font-semibold leading-none text-neutral-800 dark:text-neutral-0">
+		<div className="flex h-full w-full min-w-0 flex-col items-start justify-center gap-1">
+			<span className="block w-full truncate font-data text-[28px] font-semibold leading-none text-neutral-800 dark:text-neutral-0">
 				{value}
 			</span>
-			<span className="text-[12px] uppercase tracking-[0.1em] text-neutral-500 dark:text-neutral-300">
+			<span className="block w-full truncate text-[12px] uppercase tracking-[0.1em] text-neutral-500 dark:text-neutral-300">
 				{label}
 			</span>
 		</div>
@@ -196,15 +196,17 @@ export function DashboardWidget({
 							<span className="text-data-small">Open tasks</span>
 							<strong className="text-body-regular font-semibold">{dashboard.quickStats.openTasks}</strong>
 						</div>
-						<div>
+						<div className="min-w-0">
 							<span className="text-data-small">Current app</span>
-							<strong className="text-body-regular font-semibold">
+							<strong className="block truncate text-body-regular font-semibold">
 								{cleanAppLabel(data.currentAppName)}
 							</strong>
 						</div>
-						<div>
+						<div className="min-w-0">
 							<span className="text-data-small">Current environment</span>
-							<strong className="text-body-regular font-semibold">{data.selectedMapName}</strong>
+							<strong className="block truncate text-body-regular font-semibold">
+								{data.selectedMapName}
+							</strong>
 						</div>
 					</div>
 				</>
@@ -261,8 +263,8 @@ export function DashboardWidget({
 						{totals.map((entry, index) => (
 							<div key={`${entry.appName}-${index}`}>
 								<div className="stack-row text-body-small">
-									<span>{entry.appName}</span>
-									<span className="font-semibold">{formatDuration(entry.duration)}</span>
+									<span className="min-w-0 truncate">{entry.appName}</span>
+									<span className="shrink-0 font-semibold">{formatDuration(entry.duration)}</span>
 								</div>
 								<div className="meter">
 									<div style={{ width: `${Math.max(8, (entry.duration / top) * 100)}%` }} />
@@ -282,8 +284,10 @@ export function DashboardWidget({
 					<ul className="simple-list">
 						{dashboard.timePerMap.map((entry) => (
 							<li key={entry.mapName}>
-								<span className="text-body-small">{entry.mapName}</span>
-								<strong className="text-body-small font-semibold">{formatDuration(entry.duration)}</strong>
+								<span className="min-w-0 truncate text-body-small">{entry.mapName}</span>
+								<strong className="shrink-0 text-body-small font-semibold">
+									{formatDuration(entry.duration)}
+								</strong>
 							</li>
 						))}
 						{!dashboard.timePerMap.length && <li className="empty">No environment totals yet.</li>}
@@ -412,8 +416,8 @@ export function DashboardWidget({
 					<ul className="simple-list">
 						{counts.map((entry) => (
 							<li key={entry.label}>
-								<span className="text-body-small">{entry.label}</span>
-								<strong className="text-body-small font-semibold">{entry.count}</strong>
+								<span className="min-w-0 truncate text-body-small">{entry.label}</span>
+								<strong className="shrink-0 text-body-small font-semibold">{entry.count}</strong>
 							</li>
 						))}
 						{!counts.length && <li className="empty">No columns yet.</li>}
@@ -488,9 +492,11 @@ export function DashboardWidget({
 			const hour = new Date(data.now).getHours();
 			const part = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 			return (
-				<div className="grid h-full content-center gap-1">
-					<span className="text-[20px] font-semibold text-neutral-800 dark:text-neutral-0">{part}</span>
-					<span className="text-body-small text-neutral-500 dark:text-neutral-300">
+				<div className="grid h-full min-w-0 content-center gap-1">
+					<span className="truncate text-[20px] font-semibold text-neutral-800 dark:text-neutral-0">
+						{part}
+					</span>
+					<span className="truncate text-body-small text-neutral-500 dark:text-neutral-300">
 						You're in {data.selectedMapName}
 					</span>
 				</div>

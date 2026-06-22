@@ -129,15 +129,24 @@ html[data-mini-mode="true"] #root {
 	height: 100vh;
 	min-height: 100vh;
 	background-color: var(--neutral-50);
-	background-image:
-		linear-gradient(var(--neutral-200) 1px, transparent 1px),
-		linear-gradient(90deg, var(--neutral-200) 1px, transparent 1px);
-	background-size: 22px 22px;
 	overflow: hidden;
 }
 
 .dark .atlas-root {
 	background-color: var(--neutral-900);
+}
+
+/* The blueprint grid is a dashboard-only surface — it reads as a canvas you
+   arrange widgets on. The other views (tasks, activity, notes) stay on the
+   plain background so they feel like focused workspaces. */
+.atlas-grid-surface {
+	background-image:
+		linear-gradient(var(--neutral-200) 1px, transparent 1px),
+		linear-gradient(90deg, var(--neutral-200) 1px, transparent 1px);
+	background-size: 22px 22px;
+}
+
+.dark .atlas-grid-surface {
 	background-image:
 		linear-gradient(var(--neutral-700) 1px, transparent 1px),
 		linear-gradient(90deg, var(--neutral-700) 1px, transparent 1px);
