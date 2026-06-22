@@ -239,8 +239,8 @@ export function useCalendarFilter(
 		setDisplayedMonth((prev) => new Date(year, prev.getMonth(), 1));
 	};
 
-	const setDisplayedMonthIndex = (monthIndex: number) => {
-		setDisplayedMonth((prev) => new Date(prev.getFullYear(), monthIndex, 1));
+	const setDisplayedMonthIndex = (monthIndex: number, year?: number) => {
+		setDisplayedMonth((prev) => new Date(year ?? prev.getFullYear(), monthIndex, 1));
 	};
 
 	const toggleCalendarCollapsed = () => {
@@ -267,3 +267,7 @@ export function useCalendarFilter(
 		toggleCalendarCollapsed,
 	};
 }
+
+// The shape returned by useCalendarFilter, so consumers (e.g. CalendarPopover)
+// can type the props they spread from it without restating every field.
+export type CalendarFilter = ReturnType<typeof useCalendarFilter>;

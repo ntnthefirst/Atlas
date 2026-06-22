@@ -61,6 +61,20 @@ contextBridge.exposeInMainWorld("atlas", {
 		ipcRenderer.on("dashboard:layout-changed", listener);
 		return () => ipcRenderer.removeListener("dashboard:layout-changed", listener);
 	},
+	getFocusState: () => ipcRenderer.invoke("focus:getState"),
+	startFocus: (goal) => ipcRenderer.invoke("focus:start", goal),
+	pauseFocus: () => ipcRenderer.invoke("focus:pause"),
+	resumeFocus: () => ipcRenderer.invoke("focus:resume"),
+	skipFocusPhase: () => ipcRenderer.invoke("focus:skip"),
+	stopFocus: () => ipcRenderer.invoke("focus:stop"),
+	setFocusGoal: (goal) => ipcRenderer.invoke("focus:setGoal", goal),
+	setFocusConfig: (patch) => ipcRenderer.invoke("focus:setConfig", patch),
+	onFocusStateChanged: (callback) => {
+		const listener = (_event, state) => callback(state);
+		ipcRenderer.on("focus:state-changed", listener);
+		return () => ipcRenderer.removeListener("focus:state-changed", listener);
+	},
+
 	resizeNotch: (width, height) => ipcRenderer.invoke("notch:resize", width, height),
 	onNotchPreferencesChanged: (callback) => {
 		const listener = (_event, preferences) => callback(preferences);

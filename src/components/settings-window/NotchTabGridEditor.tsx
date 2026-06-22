@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
 	ArrowPathIcon,
 	ArrowUpOnSquareStackIcon,
+	BoltIcon,
 	CheckIcon,
 	ClockIcon,
 	Cog6ToothIcon,
@@ -98,6 +99,7 @@ const WIDGET_CATEGORIES: Array<{ label: string; widgets: NotchWidgetId[] }> = [
 		label: "Environment",
 		widgets: ["environmentName", "environmentAccentDot", "environmentSwitcher", "environmentList"],
 	},
+	{ label: "Focus", widgets: ["focusToggle", "focusStatus"] },
 	{
 		label: "Launch / navigate",
 		widgets: [
@@ -108,6 +110,7 @@ const WIDGET_CATEGORIES: Array<{ label: string; widgets: NotchWidgetId[] }> = [
 			"openActivityButton",
 			"openTasksButton",
 			"openNotesButton",
+			"openFocusButton",
 			"openSettingsButton",
 			"openMiniPlayerButton",
 		],
@@ -134,7 +137,7 @@ const WIDGET_CATEGORIES: Array<{ label: string; widgets: NotchWidgetId[] }> = [
 	{ label: "Visual / utility", widgets: ["divider", "label", "spacer", "accentSwatch", "themeToggle"] },
 ];
 
-export const WIDGET_LABELS: Record<NotchWidgetId, string> = {
+const WIDGET_LABELS: Record<NotchWidgetId, string> = {
 	timerStartStop: "Timer start/stop",
 	timerPause: "Timer pause",
 	timerDisplay: "Timer display",
@@ -168,8 +171,11 @@ export const WIDGET_LABELS: Record<NotchWidgetId, string> = {
 	openActivityButton: "Open activity",
 	openTasksButton: "Open tasks",
 	openNotesButton: "Open notes",
+	openFocusButton: "Open focus",
 	openSettingsButton: "Open settings",
 	openMiniPlayerButton: "Open mini player",
+	focusToggle: "Focus start/pause",
+	focusStatus: "Focus status",
 	scene: "Scene",
 	currentTime: "Current time",
 	currentDate: "Current date",
@@ -192,8 +198,6 @@ export const WIDGET_LABELS: Record<NotchWidgetId, string> = {
 	accentSwatch: "Accent swatch",
 	themeToggle: "Theme toggle",
 };
-
-export const NOTCH_WIDGET_IDS = Object.keys(WIDGET_LABELS) as NotchWidgetId[];
 
 // Widgets with a single configurable string (a command, a URL, or text),
 // edited via the inline field shown below the grid when one is selected.
@@ -256,8 +260,11 @@ const WIDGET_DEFAULT_SIZE: Record<NotchWidgetId, { w: number; h: number }> = {
 	openActivityButton: { w: 1, h: 1 },
 	openTasksButton: { w: 1, h: 1 },
 	openNotesButton: { w: 1, h: 1 },
+	openFocusButton: { w: 1, h: 1 },
 	openSettingsButton: { w: 1, h: 1 },
 	openMiniPlayerButton: { w: 1, h: 1 },
+	focusToggle: { w: 1, h: 1 },
+	focusStatus: { w: 3, h: 1 },
 	scene: { w: 2, h: 1 },
 	currentTime: { w: 2, h: 2 },
 	currentDate: { w: 2, h: 1 },
@@ -468,6 +475,8 @@ const ICON_PREVIEWS: Partial<Record<NotchWidgetId, typeof ClockIcon>> = {
 	openActivityButton: ClockIcon,
 	openTasksButton: ListBulletIcon,
 	openNotesButton: NewspaperIcon,
+	openFocusButton: BoltIcon,
+	focusToggle: BoltIcon,
 	openSettingsButton: Cog6ToothIcon,
 	openMiniPlayerButton: ArrowUpOnSquareStackIcon,
 	minimizeButton: MinusIcon,
@@ -494,6 +503,7 @@ const TEXT_PREVIEWS: Partial<Record<NotchWidgetId, string>> = {
 	platformBadge: "win32",
 	appVersionBadge: "v1.0.0",
 	sessionStateLabel: "Running",
+	focusStatus: "Focus 24:30",
 	lastNoteSnippet: "Remember to...",
 	updateAvailableBadge: "Up to date",
 	cpuUsagePercent: "42% CPU",
@@ -506,22 +516,27 @@ const TEXT_PREVIEWS: Partial<Record<NotchWidgetId, string>> = {
 const fileIconCache = new Map<string, string | null>();
 
 function AppIconPreview({ command }: { command: string }) {
-	const [dataUrl, setDataUrl] = useState<string | null>(fileIconCache.get(command) ?? null);
+	// Icons are cached by command; the effect only fetches uncached ones and
+	// bumps a counter when the async result lands, so the next render reads the
+	// fresh icon straight from the cache (no setState in the effect body).
+	const [, bump] = useState(0);
 
 	useEffect(() => {
-		if (fileIconCache.has(command)) {
-			setDataUrl(fileIconCache.get(command) ?? null);
-			return;
-		}
+		if (!command || fileIconCache.has(command)) return;
+		let active = true;
 		window.atlas
 			.getFileIcon(command)
 			.then((icon) => {
 				fileIconCache.set(command, icon);
-				setDataUrl(icon);
+				if (active) bump((n) => n + 1);
 			})
 			.catch(() => fileIconCache.set(command, null));
+		return () => {
+			active = false;
+		};
 	}, [command]);
 
+	const dataUrl = command ? (fileIconCache.get(command) ?? null) : null;
 	if (!dataUrl) return <IconPreview icon={RocketLaunchIcon} />;
 	return (
 		<div className="flex h-full w-full items-center justify-center">

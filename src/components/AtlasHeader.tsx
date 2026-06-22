@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { createElement, useRef } from "react";
 import { ArrowUpOnSquareStackIcon, PauseIcon, PlayCircleIcon, PlayIcon, StopIcon } from "@heroicons/react/24/outline";
 import logo from "../assets/logosmall.png";
 import {
@@ -73,7 +73,6 @@ export function AtlasHeader({
 	onOpenMiniWindow,
 }: AtlasHeaderProps) {
 	const triggerRef = useRef<HTMLButtonElement | null>(null);
-	const SelectedEnvIcon = getEnvironmentIcon(selectedMapIcon);
 
 	return (
 		<header
@@ -103,10 +102,10 @@ export function AtlasHeader({
 					}}
 					aria-haspopup="dialog"
 				>
-					<SelectedEnvIcon
-						className="h-3.5 w-3.5 shrink-0"
-						style={{ color: selectedMapAccent ?? undefined }}
-					/>
+					{createElement(getEnvironmentIcon(selectedMapIcon), {
+						className: "h-3.5 w-3.5 shrink-0",
+						style: { color: selectedMapAccent ?? undefined },
+					})}
 					<span className="truncate text-neutral-800 dark:text-neutral-50">{selectedMapName}</span>
 				</button>
 				<AtlasMapMenu

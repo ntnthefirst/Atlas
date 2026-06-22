@@ -1,4 +1,5 @@
 import {
+	BoltIcon,
 	ChartBarIcon,
 	ClipboardDocumentListIcon,
 	Cog6ToothIcon,
@@ -6,6 +7,7 @@ import {
 	Squares2X2Icon,
 } from "@heroicons/react/24/outline";
 import {
+	BoltIcon as BoltIconSolid,
 	ChartBarIcon as ChartBarIconSolid,
 	ClipboardDocumentListIcon as ClipboardDocumentListIconSolid,
 	Cog6ToothIcon as Cog6ToothIconSolid,
@@ -18,7 +20,6 @@ import type { DashboardOverview, TaskColumn } from "./types";
 export const TASK_ORDER_KEY = "atlas.taskOrderByMap";
 export const TASK_COLUMNS_KEY = "atlas.taskColumnsByMap";
 export const THEME_KEY = "atlas.theme";
-export const QUICK_ACTIONS_KEY = "atlas.quickActions";
 export const SIDEBAR_HIDDEN_KEY = "atlas.sidebarHidden";
 
 export const defaultDashboard: DashboardOverview = {
@@ -30,12 +31,6 @@ export const defaultDashboard: DashboardOverview = {
 		openTasks: 0,
 	},
 };
-
-export const defaultQuickActions = [
-	{ id: "vscode", label: "Open VS Code", command: "code" },
-	{ id: "figma", label: "Open Figma", command: "figma" },
-	{ id: "chrome", label: "Open Chrome", command: "chrome" },
-];
 
 export const defaultTaskColumns: TaskColumn[] = [
 	{ status: "todo", label: "Todo" },
@@ -53,5 +48,6 @@ export const viewItems: AtlasNavItem[] = [
 		solidIcon: ClipboardDocumentListIconSolid,
 	},
 	{ id: "notes", label: "Notes", outlineIcon: DocumentTextIcon, solidIcon: DocumentTextIconSolid },
+	{ id: "focus", label: "Focus", outlineIcon: BoltIcon, solidIcon: BoltIconSolid },
 	{ id: "settings", label: "Settings", outlineIcon: Cog6ToothIcon, solidIcon: Cog6ToothIconSolid },
 ];

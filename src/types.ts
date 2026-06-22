@@ -126,7 +126,72 @@ export type DashboardOverview = {
 	};
 };
 
-export type AtlasView = "dashboard" | "activity" | "tasks" | "notes" | "settings";
+export type AtlasView = "dashboard" | "activity" | "tasks" | "notes" | "focus" | "settings";
+
+// ---------------------------------------------------------------------------
+// Focus mode (Pomodoro-style timer) + wellbeing nudges.
+//
+// The engine lives in the Electron main process so a single source of truth is
+// shared across every window (main + notch) and so phase transitions and break
+// nudges keep firing even when no window is focused. Each renderer computes its
+// own smooth countdown from the absolute `phaseEndsAt` timestamp.
+// ---------------------------------------------------------------------------
+
+export type FocusPhase = "focus" | "shortBreak" | "longBreak";
+
+// Recurring wellbeing reminders shown as native notifications while you work.
+export type FocusNudgeKind = "stand" | "eyes" | "hydrate" | "posture";
+
+export type FocusNudge = {
+	kind: FocusNudgeKind;
+	enabled: boolean;
+	everyMinutes: number;
+};
+
+export type FocusConfig = {
+	focusMinutes: number;
+	shortBreakMinutes: number;
+	longBreakMinutes: number;
+	// How many focus rounds before a long break is offered.
+	roundsBeforeLongBreak: number;
+	// Whether the next phase starts on its own or waits for a manual start.
+	autoStartBreaks: boolean;
+	autoStartFocus: boolean;
+	// When true, nudges only fire during an active (unpaused) focus phase;
+	// otherwise they fire continuously while Atlas is running.
+	nudgesOnlyDuringFocus: boolean;
+	nudges: FocusNudge[];
+};
+
+// The live timer. `null` whenever no focus cycle is running.
+export type FocusRuntime = {
+	phase: FocusPhase;
+	// Completed focus rounds in the current long-break cycle (0-based while the
+	// first round runs).
+	roundIndex: number;
+	// Absolute epoch ms when the current phase ends — renderers derive the
+	// countdown locally so the main process needn't broadcast every second.
+	phaseEndsAt: number;
+	phaseDurationMs: number;
+	isPaused: boolean;
+	// Frozen remaining ms while paused (phaseEndsAt is meaningless then).
+	remainingMs: number;
+	goal: string;
+	startedAt: number;
+};
+
+// Daily counters, reset automatically when the calendar day rolls over.
+export type FocusStats = {
+	day: string; // YYYY-MM-DD the counters below belong to
+	focusRoundsCompleted: number;
+	focusMsCompleted: number;
+};
+
+export type FocusState = {
+	config: FocusConfig;
+	runtime: FocusRuntime | null;
+	stats: FocusStats;
+};
 
 export type UpdateCheckResult = {
 	hasUpdate: boolean;
@@ -199,6 +264,9 @@ export type NotchWidgetId =
 	| "environmentAccentDot"
 	| "environmentSwitcher"
 	| "environmentList"
+	// Focus
+	| "focusToggle"
+	| "focusStatus"
 	// App launcher / navigation
 	| "scene"
 	| "launchAppButton"
@@ -207,6 +275,7 @@ export type NotchWidgetId =
 	| "openActivityButton"
 	| "openTasksButton"
 	| "openNotesButton"
+	| "openFocusButton"
 	| "openSettingsButton"
 	| "openMiniPlayerButton"
 	// Clock/date
@@ -398,8 +467,9 @@ export type DashboardWidgetId =
 	| "clock"
 	| "date"
 	| "greeting"
+	// Focus
+	| "focusToday"
 	// Apps & links
-	| "quickActions"
 	| "launchApp"
 	| "openUrl";
 

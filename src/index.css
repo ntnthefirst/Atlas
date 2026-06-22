@@ -599,12 +599,6 @@ html[data-notch-mode="true"] #root {
 	color: var(--neutral-300);
 }
 
-.quick-actions {
-	display: flex;
-	gap: 8px;
-	flex-wrap: wrap;
-}
-
 .action-btn {
 	display: inline-flex;
 	align-items: center;

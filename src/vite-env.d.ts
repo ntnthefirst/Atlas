@@ -8,6 +8,8 @@ import type {
 	DisplaySummary,
 	DownloadAndInstallResult,
 	DashboardOverview,
+	FocusConfig,
+	FocusState,
 	MapItem,
 	NoteItem,
 	NotchInputPayload,
@@ -88,6 +90,16 @@ declare global {
 			getDashboardLayout: () => Promise<DashboardPreferences>;
 			setDashboardLayout: (preferences: Partial<DashboardPreferences>) => Promise<DashboardPreferences>;
 			onDashboardLayoutChanged: (callback: (preferences: DashboardPreferences) => void) => () => void;
+			getFocusState: () => Promise<FocusState>;
+			startFocus: (goal?: string) => Promise<FocusState>;
+			pauseFocus: () => Promise<FocusState>;
+			resumeFocus: () => Promise<FocusState>;
+			skipFocusPhase: () => Promise<FocusState>;
+			stopFocus: () => Promise<FocusState>;
+			setFocusGoal: (goal: string) => Promise<FocusState>;
+			setFocusConfig: (patch: Partial<FocusConfig>) => Promise<FocusState>;
+			onFocusStateChanged: (callback: (state: FocusState) => void) => () => void;
+
 			resizeNotch: (width: number, height: number) => Promise<boolean>;
 			onNotchPreferencesChanged: (callback: (preferences: NotchPreferences) => void) => () => void;
 			onNotchBlur: (callback: () => void) => () => void;

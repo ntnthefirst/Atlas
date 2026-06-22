@@ -8,6 +8,7 @@ const {
 	dialog,
 	ipcMain,
 	Menu,
+	Notification,
 	Tray,
 	nativeImage,
 	nativeTheme,
@@ -88,7 +89,7 @@ const DASHBOARD_WIDGET_IDS = [
 	"clock",
 	"date",
 	"greeting",
-	"quickActions",
+	"focusToday",
 	"launchApp",
 	"openUrl",
 ];
@@ -100,9 +101,324 @@ const defaultDashboardWidgets = [
 	{ id: "dash-timeline", widget: "activityTimeline", w: 4, h: 1 },
 	{ id: "dash-apps", widget: "timePerApp", w: 2, h: 2 },
 	{ id: "dash-envs", widget: "timePerEnvironment", w: 2, h: 2 },
-	{ id: "dash-actions", widget: "quickActions", w: 2, h: 1 },
 ];
 const defaultDashboardPreferences = { widgets: defaultDashboardWidgets };
+
+// ---------------------------------------------------------------------------
+// Focus mode (Pomodoro) + wellbeing nudges engine.
+//
+// This is the single source of truth shared by every window. Config + daily
+// stats are persisted; the live `runtime` is intentionally not (a focus cycle
+// doesn't survive an app restart). A 1s interval advances phases and fires the
+// recurring nudges as native notifications, broadcasting state to all windows
+// only when something actually changes (renderers tick their own countdowns).
+// Mirrors src/types.ts FocusState.
+// ---------------------------------------------------------------------------
+const FOCUS_PREFS_FILE = "focus-preferences.json";
+const FOCUS_NUDGE_KINDS = ["stand", "eyes", "hydrate", "posture"];
+const defaultFocusConfig = {
+	focusMinutes: 25,
+	shortBreakMinutes: 5,
+	longBreakMinutes: 15,
+	roundsBeforeLongBreak: 4,
+	autoStartBreaks: true,
+	autoStartFocus: false,
+	nudgesOnlyDuringFocus: true,
+	nudges: [
+		{ kind: "stand", enabled: false, everyMinutes: 50 },
+		{ kind: "eyes", enabled: false, everyMinutes: 20 },
+		{ kind: "hydrate", enabled: false, everyMinutes: 90 },
+		{ kind: "posture", enabled: false, everyMinutes: 40 },
+	],
+};
+const NUDGE_COPY = {
+	stand: { title: "Stand up & stretch", body: "You've been sitting a while — take a quick stretch." },
+	eyes: { title: "Rest your eyes", body: "Look ~20 ft away for 20 seconds (20-20-20)." },
+	hydrate: { title: "Hydrate", body: "Time for a sip of water." },
+	posture: { title: "Check your posture", body: "Sit back, shoulders down, screen at eye level." },
+};
+
+let focusState = {
+	config: { ...defaultFocusConfig, nudges: defaultFocusConfig.nudges.map((nudge) => ({ ...nudge })) },
+	runtime: null,
+	stats: { day: todayKey(), focusRoundsCompleted: 0, focusMsCompleted: 0 },
+};
+// Per-nudge timestamp (epoch ms) of the last time it fired, kept in memory so
+// nudges pace from when they were enabled / the engine started, never persisted.
+let nudgeLastFired = {};
+let focusTimer = null;
+
+function todayKey(date = new Date()) {
+	const year = date.getFullYear();
+	const month = String(date.getMonth() + 1).padStart(2, "0");
+	const day = String(date.getDate()).padStart(2, "0");
+	return `${year}-${month}-${day}`;
+}
+
+const clampFocusInt = (value, min, max, fallback) => {
+	const number = Number(value);
+	if (!Number.isFinite(number)) return fallback;
+	return Math.min(Math.max(Math.round(number), min), max);
+};
+
+function normalizeFocusConfig(raw) {
+	const source = raw && typeof raw === "object" ? raw : {};
+	const byKind = new Map();
+	if (Array.isArray(source.nudges)) {
+		for (const entry of source.nudges) {
+			if (entry && typeof entry === "object" && FOCUS_NUDGE_KINDS.includes(entry.kind)) {
+				byKind.set(entry.kind, entry);
+			}
+		}
+	}
+	return {
+		focusMinutes: clampFocusInt(source.focusMinutes, 1, 180, defaultFocusConfig.focusMinutes),
+		shortBreakMinutes: clampFocusInt(source.shortBreakMinutes, 1, 60, defaultFocusConfig.shortBreakMinutes),
+		longBreakMinutes: clampFocusInt(source.longBreakMinutes, 1, 120, defaultFocusConfig.longBreakMinutes),
+		roundsBeforeLongBreak: clampFocusInt(
+			source.roundsBeforeLongBreak,
+			1,
+			12,
+			defaultFocusConfig.roundsBeforeLongBreak,
+		),
+		autoStartBreaks:
+			typeof source.autoStartBreaks === "boolean" ? source.autoStartBreaks : defaultFocusConfig.autoStartBreaks,
+		autoStartFocus:
+			typeof source.autoStartFocus === "boolean" ? source.autoStartFocus : defaultFocusConfig.autoStartFocus,
+		nudgesOnlyDuringFocus:
+			typeof source.nudgesOnlyDuringFocus === "boolean"
+				? source.nudgesOnlyDuringFocus
+				: defaultFocusConfig.nudgesOnlyDuringFocus,
+		nudges: defaultFocusConfig.nudges.map((fallback) => {
+			const found = byKind.get(fallback.kind);
+			return {
+				kind: fallback.kind,
+				enabled: found && typeof found.enabled === "boolean" ? found.enabled : fallback.enabled,
+				everyMinutes: clampFocusInt(found ? found.everyMinutes : undefined, 1, 360, fallback.everyMinutes),
+			};
+		}),
+	};
+}
+
+function normalizeFocusStats(raw) {
+	const source = raw && typeof raw === "object" ? raw : {};
+	const day = typeof source.day === "string" && source.day ? source.day : todayKey();
+	return {
+		day,
+		focusRoundsCompleted: clampFocusInt(source.focusRoundsCompleted, 0, 100000, 0),
+		focusMsCompleted: Math.max(0, Number(source.focusMsCompleted) || 0),
+	};
+}
+
+// Reset the daily counters in place if the calendar day has rolled over.
+function rollFocusStatsIfNeeded() {
+	const today = todayKey();
+	if (focusState.stats.day !== today) {
+		focusState.stats = { day: today, focusRoundsCompleted: 0, focusMsCompleted: 0 };
+	}
+}
+
+function loadFocusPreferences() {
+	try {
+		const raw = fs.readFileSync(path.join(app.getPath("userData"), FOCUS_PREFS_FILE), "utf8");
+		const parsed = JSON.parse(raw);
+		focusState = {
+			config: normalizeFocusConfig(parsed.config),
+			runtime: null,
+			stats: normalizeFocusStats(parsed.stats),
+		};
+	} catch {
+		focusState = {
+			config: normalizeFocusConfig(null),
+			runtime: null,
+			stats: normalizeFocusStats(null),
+		};
+	}
+	rollFocusStatsIfNeeded();
+	return focusState;
+}
+
+function persistFocusPreferences() {
+	try {
+		fs.writeFileSync(
+			path.join(app.getPath("userData"), FOCUS_PREFS_FILE),
+			JSON.stringify({ config: focusState.config, stats: focusState.stats }, null, 2),
+			"utf8",
+		);
+	} catch {
+		// Non-blocking: focus still works from in-memory state this session.
+	}
+}
+
+function broadcastFocusState() {
+	for (const browserWindow of BrowserWindow.getAllWindows()) {
+		if (!browserWindow.isDestroyed()) {
+			browserWindow.webContents.send("focus:state-changed", focusState);
+		}
+	}
+}
+
+function phaseDurationMs(phase) {
+	const config = focusState.config;
+	if (phase === "shortBreak") return config.shortBreakMinutes * 60000;
+	if (phase === "longBreak") return config.longBreakMinutes * 60000;
+	return config.focusMinutes * 60000;
+}
+
+function notify(title, body) {
+	try {
+		if (Notification.isSupported()) {
+			new Notification({ title, body, silent: false }).show();
+		}
+	} catch {
+		// Notifications are best-effort; never let one crash the engine.
+	}
+}
+
+// Build a runtime for a phase, honoring whether it should auto-start or wait
+// paused for a manual start.
+function makePhaseRuntime(phase, roundIndex, goal, startedAt, autoStart) {
+	const duration = phaseDurationMs(phase);
+	const now = Date.now();
+	return {
+		phase,
+		roundIndex,
+		phaseDurationMs: duration,
+		phaseEndsAt: now + duration,
+		isPaused: !autoStart,
+		remainingMs: duration,
+		goal: goal || "",
+		startedAt: startedAt || now,
+	};
+}
+
+// Advance to the next phase when the current one elapses (or is skipped).
+function advanceFocusPhase(skipped) {
+	const runtime = focusState.runtime;
+	if (!runtime) return;
+	const config = focusState.config;
+	const goal = runtime.goal;
+	const startedAt = runtime.startedAt;
+
+	if (runtime.phase === "focus") {
+		// Credit the completed focus round (a skip still ended the work block).
+		rollFocusStatsIfNeeded();
+		focusState.stats.focusRoundsCompleted += 1;
+		focusState.stats.focusMsCompleted += runtime.phaseDurationMs;
+		const completedRounds = runtime.roundIndex + 1;
+		const longBreakDue = completedRounds % config.roundsBeforeLongBreak === 0;
+		const nextPhase = longBreakDue ? "longBreak" : "shortBreak";
+		focusState.runtime = makePhaseRuntime(nextPhase, runtime.roundIndex, goal, startedAt, config.autoStartBreaks);
+		if (!skipped) {
+			notify(
+				longBreakDue ? "Long break time" : "Break time",
+				`Focus round done. ${longBreakDue ? config.longBreakMinutes : config.shortBreakMinutes} min break.`,
+			);
+		}
+	} else {
+		// A break finished → next focus round. After a long break the cycle resets.
+		const wasLong = runtime.phase === "longBreak";
+		const nextRoundIndex = wasLong ? 0 : runtime.roundIndex + 1;
+		focusState.runtime = makePhaseRuntime("focus", nextRoundIndex, goal, startedAt, config.autoStartFocus);
+		if (!skipped) {
+			notify("Back to focus", goal ? `Next up: ${goal}` : "Break over — back to it.");
+		}
+	}
+	persistFocusPreferences();
+	broadcastFocusState();
+}
+
+function maybeFireNudges(now) {
+	const config = focusState.config;
+	const runtime = focusState.runtime;
+	const active = config.nudgesOnlyDuringFocus
+		? Boolean(runtime && runtime.phase === "focus" && !runtime.isPaused)
+		: true;
+	if (!active) return;
+	for (const nudge of config.nudges) {
+		if (!nudge.enabled) continue;
+		const last = nudgeLastFired[nudge.kind] || 0;
+		if (now - last >= nudge.everyMinutes * 60000) {
+			nudgeLastFired[nudge.kind] = now;
+			const copy = NUDGE_COPY[nudge.kind];
+			if (copy) notify(copy.title, copy.body);
+		}
+	}
+}
+
+// Single 1s heartbeat: advances an elapsed phase and paces the nudges. Kept
+// running for the app's lifetime — cheap, and nudges fire without a focus cycle.
+function startFocusEngine() {
+	if (focusTimer) return;
+	// Pace nudges from "now" so enabling one never fires it instantly.
+	const now = Date.now();
+	for (const kind of FOCUS_NUDGE_KINDS) nudgeLastFired[kind] = now;
+	focusTimer = setInterval(() => {
+		const tickNow = Date.now();
+		const runtime = focusState.runtime;
+		if (runtime && !runtime.isPaused && tickNow >= runtime.phaseEndsAt) {
+			advanceFocusPhase(false);
+		}
+		maybeFireNudges(tickNow);
+	}, 1000);
+	if (typeof focusTimer.unref === "function") focusTimer.unref();
+}
+
+function startFocus(goal) {
+	rollFocusStatsIfNeeded();
+	if (focusState.runtime) {
+		// Already mid-cycle: just (re)start the clock and clear any pause.
+		const runtime = focusState.runtime;
+		runtime.isPaused = false;
+		runtime.phaseEndsAt = Date.now() + runtime.remainingMs;
+		if (typeof goal === "string") runtime.goal = goal;
+	} else {
+		focusState.runtime = makePhaseRuntime("focus", 0, typeof goal === "string" ? goal : "", Date.now(), true);
+	}
+	broadcastFocusState();
+	return focusState;
+}
+
+function pauseFocus() {
+	const runtime = focusState.runtime;
+	if (runtime && !runtime.isPaused) {
+		runtime.remainingMs = Math.max(0, runtime.phaseEndsAt - Date.now());
+		runtime.isPaused = true;
+		broadcastFocusState();
+	}
+	return focusState;
+}
+
+function resumeFocus() {
+	const runtime = focusState.runtime;
+	if (runtime && runtime.isPaused) {
+		runtime.isPaused = false;
+		runtime.phaseEndsAt = Date.now() + runtime.remainingMs;
+		broadcastFocusState();
+	}
+	return focusState;
+}
+
+function stopFocus() {
+	focusState.runtime = null;
+	broadcastFocusState();
+	return focusState;
+}
+
+function setFocusGoal(goal) {
+	if (focusState.runtime) {
+		focusState.runtime.goal = typeof goal === "string" ? goal : "";
+		broadcastFocusState();
+	}
+	return focusState;
+}
+
+function updateFocusConfig(patch) {
+	focusState.config = normalizeFocusConfig({ ...focusState.config, ...(patch || {}) });
+	persistFocusPreferences();
+	broadcastFocusState();
+	return focusState;
+}
 
 const NOTCH_PREFS_FILE = "notch-preferences.json";
 const NOTCH_POSITIONS = ["top", "left", "right", "free"];
@@ -144,6 +460,9 @@ const NOTCH_WIDGET_IDS = [
 	"environmentAccentDot",
 	"environmentSwitcher",
 	"environmentList",
+	// Focus
+	"focusToggle",
+	"focusStatus",
 	// App launcher / navigation
 	"scene",
 	"launchAppButton",
@@ -152,6 +471,7 @@ const NOTCH_WIDGET_IDS = [
 	"openActivityButton",
 	"openTasksButton",
 	"openNotesButton",
+	"openFocusButton",
 	"openSettingsButton",
 	"openMiniPlayerButton",
 	// Clock/date
@@ -1773,6 +2093,21 @@ function wireIpc() {
 		saveDashboardPreferences({ ...dashboardPreferences, ...(prefs || {}) }),
 	);
 
+	ipcMain.handle("focus:getState", () => {
+		rollFocusStatsIfNeeded();
+		return focusState;
+	});
+	ipcMain.handle("focus:start", (_event, goal) => startFocus(goal));
+	ipcMain.handle("focus:pause", () => pauseFocus());
+	ipcMain.handle("focus:resume", () => resumeFocus());
+	ipcMain.handle("focus:skip", () => {
+		if (focusState.runtime) advanceFocusPhase(true);
+		return focusState;
+	});
+	ipcMain.handle("focus:stop", () => stopFocus());
+	ipcMain.handle("focus:setGoal", (_event, goal) => setFocusGoal(goal));
+	ipcMain.handle("focus:setConfig", (_event, patch) => updateFocusConfig(patch));
+
 	ipcMain.handle("notch:resize", (event, width, height) => {
 		const notchWindow = BrowserWindow.fromWebContents(event.sender);
 		if (!notchWindow || notchWindow.isDestroyed()) {
@@ -2017,6 +2352,8 @@ app.whenReady().then(async () => {
 	loadUpdatePreferences();
 	loadNotchPreferences();
 	loadDashboardPreferences();
+	loadFocusPreferences();
+	startFocusEngine();
 	autoUpdater.autoDownload = false;
 	autoUpdater.autoInstallOnAppQuit = true;
 

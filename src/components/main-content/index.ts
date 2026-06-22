@@ -5,4 +5,5 @@ export { ActivityView } from "./ActivityView";
 export { LogbookView } from "./LogbookView";
 export { TasksView } from "./TasksView";
 export { NotesView } from "./NotesView";
+export { FocusView } from "./FocusView";
 export { SettingsView } from "./SettingsView";

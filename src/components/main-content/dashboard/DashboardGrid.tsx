@@ -337,7 +337,7 @@ function WidgetGallery({
 	onClose: () => void;
 }) {
 	return (
-		<div className="grid gap-5">
+		<div className="-m-3.5 grid gap-5 bg-neutral-0 p-3.5 dark:bg-neutral-900">
 			<header className="sticky top-0 z-10 -mx-3.5 -mt-3.5 flex items-center justify-between gap-3 border-b border-neutral-200 bg-neutral-0/90 px-3.5 py-3 backdrop-blur dark:border-neutral-600 dark:bg-neutral-900/90">
 				<div className="flex items-center gap-3">
 					<button

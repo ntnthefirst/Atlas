@@ -31,7 +31,7 @@ export const DASHBOARD_WIDGET_LABELS: Record<DashboardWidgetId, string> = {
 	clock: "Clock",
 	date: "Date",
 	greeting: "Greeting",
-	quickActions: "Quick actions",
+	focusToday: "Focus",
 	launchApp: "Launch app",
 	openUrl: "Open link",
 };
@@ -59,7 +59,7 @@ export const DASHBOARD_WIDGET_DESCRIPTIONS: Record<DashboardWidgetId, string> = 
 	clock: "The current time",
 	date: "Today's day and date",
 	greeting: "A friendly, time-aware greeting",
-	quickActions: "Buttons that launch your saved commands",
+	focusToday: "Pomodoro timer with today's focus rounds and time",
 	launchApp: "A button that opens a program you pick",
 	openUrl: "A button that opens a website you pick",
 };
@@ -127,7 +127,7 @@ export const DASHBOARD_WIDGET_SIZES: Record<DashboardWidgetId, DashboardWidgetSi
 		{ label: "Wide", w: 2, h: 1 },
 		{ label: "Large", w: 4, h: 1 },
 	],
-	quickActions: [
+	focusToday: [
 		{ label: "Wide", w: 2, h: 1 },
 		{ label: "Medium", w: 2, h: 2 },
 	],
@@ -148,8 +148,9 @@ export const DASHBOARD_WIDGET_CATEGORIES: Array<{ label: string; widgets: Dashbo
 	},
 	{ label: "Tasks", widgets: ["openTasks", "dueTasks", "taskProgress", "taskColumnsOverview", "upcomingTasks"] },
 	{ label: "Notes", widgets: ["notesCount", "lastNote"] },
+	{ label: "Focus", widgets: ["focusToday"] },
 	{ label: "Clock", widgets: ["clock", "date", "greeting"] },
-	{ label: "Apps & links", widgets: ["quickActions", "launchApp", "openUrl"] },
+	{ label: "Apps & links", widgets: ["launchApp", "openUrl"] },
 ];
 
 // Widgets that carry a per-instance `config` string and need setting up after

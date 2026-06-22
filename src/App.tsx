@@ -19,7 +19,7 @@ import {
 	useDashboardManagement,
 	useActivityManagement,
 	useThemeManagement,
-	useQuickActionsManagement,
+	useFocus,
 	useMapMenuManagement,
 	useErrorManagement,
 	useTimeManagement,
@@ -99,14 +99,6 @@ function MainAtlasApp() {
 	const { activityBlocks, setActivityBlocks } = useActivityManagement();
 	const { theme, setTheme } = useThemeManagement();
 	const {
-		quickActions,
-		setQuickActions,
-		newActionLabel,
-		setNewActionLabel,
-		newActionCommand,
-		setNewActionCommand,
-	} = useQuickActionsManagement();
-	const {
 		showMapMenu,
 		setShowMapMenu,
 		renameMapName,
@@ -118,6 +110,7 @@ function MainAtlasApp() {
 	} = useMapMenuManagement();
 	const { errorMessage, setErrorMessage } = useErrorManagement();
 	const { now, setNow } = useTimeManagement();
+	const focus = useFocus(now);
 	const { platform, setPlatform } = usePlatformManagement();
 	const { hasBootstrapped, setHasBootstrapped } = useBootstrapState();
 	const { currentAppName, setCurrentAppName } = useCurrentAppTracker();
@@ -785,29 +778,6 @@ function MainAtlasApp() {
 		setNotebook(updated);
 	};
 
-	const onLaunchQuickAction = async (command: string) => {
-		try {
-			await window.atlas.launchApp(command);
-			setErrorMessage("");
-		} catch (error) {
-			setErrorMessage(error instanceof Error ? error.message : "Unable to launch app.");
-		}
-	};
-
-	const addQuickAction = () => {
-		if (!newActionLabel.trim() || !newActionCommand.trim()) return;
-		setQuickActions((current) => [
-			...current,
-			{ id: crypto.randomUUID(), label: newActionLabel.trim(), command: newActionCommand.trim() },
-		]);
-		setNewActionLabel("");
-		setNewActionCommand("");
-	};
-
-	const removeQuickAction = (id: string) => {
-		setQuickActions((current) => current.filter((item) => item.id !== id));
-	};
-
 	const openSession = async (sessionId: string) => {
 		setSelectedSessionId(sessionId);
 		await refreshActivity(sessionId);
@@ -1030,8 +1000,6 @@ function MainAtlasApp() {
 								activeElapsed={activeElapsed}
 								currentAppName={currentAppName}
 								selectedMapName={selectedMap?.name ?? "None"}
-								quickActions={quickActions}
-								onLaunchQuickAction={onLaunchQuickAction}
 								sessions={sessions}
 								selectedSession={selectedSession}
 								onOpenSession={openSession}
@@ -1059,12 +1027,7 @@ function MainAtlasApp() {
 								onUpdateNotebookByMap={onUpdateNotebookByMap}
 								theme={theme}
 								onThemeChange={setTheme}
-								newActionLabel={newActionLabel}
-								newActionCommand={newActionCommand}
-								onNewActionLabelChange={setNewActionLabel}
-								onNewActionCommandChange={setNewActionCommand}
-								onAddQuickAction={addQuickAction}
-								onRemoveQuickAction={removeQuickAction}
+								focus={focus}
 							/>
 						</AtlasMainContent>
 					</div>
