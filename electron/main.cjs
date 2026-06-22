@@ -79,6 +79,7 @@ const DASHBOARD_WIDGET_IDS = [
 	"currentApp",
 	"currentEnvironment",
 	"openTasks",
+	"dueTasks",
 	"taskProgress",
 	"taskColumnsOverview",
 	"upcomingTasks",
@@ -134,6 +135,7 @@ const NOTCH_WIDGET_IDS = [
 	"nextTaskOnly",
 	"taskColumnsOverview",
 	"taskProgressBar",
+	"dueTasksCount",
 	// Notes
 	"notesCount",
 	"lastNoteSnippet",

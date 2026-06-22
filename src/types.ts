@@ -190,6 +190,7 @@ export type NotchWidgetId =
 	| "nextTaskOnly"
 	| "taskColumnsOverview"
 	| "taskProgressBar"
+	| "dueTasksCount"
 	// Notes
 	| "notesCount"
 	| "lastNoteSnippet"
@@ -386,6 +387,7 @@ export type DashboardWidgetId =
 	| "currentEnvironment"
 	// Tasks
 	| "openTasks"
+	| "dueTasks"
 	| "taskProgress"
 	| "taskColumnsOverview"
 	| "upcomingTasks"

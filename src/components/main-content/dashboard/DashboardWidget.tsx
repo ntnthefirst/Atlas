@@ -218,6 +218,30 @@ export function DashboardWidget({
 		case "openTasks":
 			return <Stat value={dashboard.quickStats.openTasks} label="Open tasks" />;
 
+		case "dueTasks": {
+			const lastStatus = data.statusColumns[data.statusColumns.length - 1]?.status;
+			const today = new Date(data.now);
+			today.setHours(0, 0, 0, 0);
+			const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+			const open = data.tasks.filter((task) => task.due_date && task.status !== lastStatus);
+			const overdue = open.filter((task) => (task.due_date as string) < todayKey).length;
+			const dueToday = open.filter((task) => task.due_date === todayKey).length;
+			return (
+				<div className="flex h-full w-full min-w-0 flex-col items-start justify-center gap-1">
+					<span
+						className={`block w-full truncate font-data text-[28px] font-semibold leading-none ${
+							overdue > 0 ? "text-red-500" : "text-neutral-800 dark:text-neutral-0"
+						}`}
+					>
+						{overdue + dueToday}
+					</span>
+					<span className="block w-full truncate text-[12px] uppercase tracking-[0.1em] text-neutral-500 dark:text-neutral-300">
+						{overdue > 0 ? `${overdue} overdue` : "Due today"}
+					</span>
+				</div>
+			);
+		}
+
 		case "currentApp":
 			return <Stat value={cleanAppLabel(data.currentAppName)} label="Current app" />;
 

@@ -101,6 +101,7 @@ import {
 } from "../../utils";
 import { TASK_COLUMNS_KEY, TASK_ORDER_KEY, THEME_KEY, defaultTaskColumns } from "../../constants";
 import { parseSceneConfig, type NotchSceneConfig } from "../../scenes";
+import { PRIORITY_META } from "../main-content/taskMeta";
 
 // How often to re-poll for environment/task/dashboard changes made in another
 // window, since there's no IPC broadcast for those.
@@ -943,6 +944,18 @@ export function NotchApp() {
 				return `${systemStats.memoryPercent}% RAM`;
 			case "taskColumnsOverview":
 				return columnCounts.length > 0 ? columnCounts.map((c) => c.count).join(" · ") : "—";
+			case "dueTasksCount": {
+				const lastStatus = columns[columns.length - 1]?.status;
+				const today = new Date(now);
+				today.setHours(0, 0, 0, 0);
+				const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+				const open = tasks.filter((task) => task.due_date && task.status !== lastStatus);
+				const overdue = open.filter((task) => (task.due_date as string) < todayKey).length;
+				const dueToday = open.filter((task) => task.due_date === todayKey).length;
+				if (overdue > 0) return `${overdue} overdue`;
+				if (dueToday > 0) return `${dueToday} due today`;
+				return "Nothing due";
+			}
 			case "notesCount":
 				return `${notes.length} notes`;
 			case "environmentName":
@@ -1231,8 +1244,16 @@ export function NotchApp() {
 						) : (
 							columnTasks.map((task) => (
 								<div key={task.id} className="flex items-center justify-between gap-2">
-									<span className="max-w-28 truncate text-[12px] text-neutral-700 dark:text-neutral-100">
-										{task.title}
+									<span className="flex min-w-0 items-center gap-1.5">
+										{task.priority !== "none" && (
+											<span
+												className={`h-2 w-2 shrink-0 rounded-full ${PRIORITY_META[task.priority].dot}`}
+												title={`${PRIORITY_META[task.priority].label} priority`}
+											/>
+										)}
+										<span className="max-w-28 truncate text-[12px] text-neutral-700 dark:text-neutral-100">
+											{task.title}
+										</span>
 									</span>
 									<button
 										type="button"
@@ -1256,8 +1277,16 @@ export function NotchApp() {
 				const nextColumn = column ? columnAfter(column.status) : null;
 				return (
 					<div key={placement.id} className="flex h-full items-center justify-between gap-2">
-						<span className="max-w-28 truncate text-[12px] text-neutral-700 dark:text-neutral-100">
-							{task?.title ?? "No tasks"}
+						<span className="flex min-w-0 items-center gap-1.5">
+							{task && task.priority !== "none" && (
+								<span
+									className={`h-2 w-2 shrink-0 rounded-full ${PRIORITY_META[task.priority].dot}`}
+									title={`${PRIORITY_META[task.priority].label} priority`}
+								/>
+							)}
+							<span className="max-w-28 truncate text-[12px] text-neutral-700 dark:text-neutral-100">
+								{task?.title ?? "No tasks"}
+							</span>
 						</span>
 						<button
 							type="button"
