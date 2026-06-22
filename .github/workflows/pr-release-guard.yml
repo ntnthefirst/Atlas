@@ -83,7 +83,7 @@ jobs:
 
                       let latestStable = "v0.0.0";
                       try {
-                        const stable = run("git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\\.[0-9]+\\.[0-9]+$' | head -n1");
+                        const stable = run("git -c versionsort.suffix=-beta tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\\.[0-9]+\\.[0-9]+$' | head -n1");
                         if (stable) latestStable = stable;
                       } catch {
                         latestStable = "v0.0.0";
@@ -91,7 +91,7 @@ jobs:
 
                       let latestAny = "v0.0.0";
                       try {
-                        const any = run("git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\\.[0-9]+\\.[0-9]+(-beta\\.[0-9]+)?$' | head -n1");
+                        const any = run("git -c versionsort.suffix=-beta tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\\.[0-9]+\\.[0-9]+(-beta\\.[0-9]+)?$' | head -n1");
                         if (any) latestAny = any;
                       } catch {
                         latestAny = latestStable;
