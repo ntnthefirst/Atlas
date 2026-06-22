@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+import { ArrowTopRightOnSquareIcon, GlobeAltIcon, RocketLaunchIcon } from "@heroicons/react/24/outline";
 import type { DashboardWidgetId, DashboardOverview, NoteItem, Session, TaskColumn, TaskItem } from "../../../types";
 
 // Everything a dashboard card might need, assembled by DashboardView from the
@@ -59,9 +61,108 @@ function CardHeader({ title }: { title: string }) {
 	);
 }
 
+// "C:\\...\\Code.exe" or Code.exe -> "Code". Quotes/paths/extension stripped
+// so a launch button can show a friendly name.
+const appNameFromCommand = (command: string) => {
+	const cleaned = command.trim().replace(/^"+|"+$/g, "");
+	const base = cleaned.split(/[\\/]/).pop() ?? cleaned;
+	return base.replace(/\.(exe|app|lnk|bat|cmd)$/i, "") || "App";
+};
+
+const hostFromUrl = (url: string) => {
+	try {
+		return new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`).hostname.replace(/^www\./, "");
+	} catch {
+		return url;
+	}
+};
+
+const fileIconCache = new Map<string, string | null>();
+
+function LaunchAppCard({ command }: { command: string }) {
+	// Icons are cached by command; the effect only fetches uncached ones and
+	// bumps a counter when the async result lands, so the next render reads the
+	// fresh icon straight from the cache (no setState in the effect body).
+	const [, bump] = useState(0);
+
+	useEffect(() => {
+		if (!command || fileIconCache.has(command)) return;
+		let active = true;
+		window.atlas
+			.getFileIcon(command)
+			.then((value) => {
+				fileIconCache.set(command, value);
+				if (active) bump((n) => n + 1);
+			})
+			.catch(() => fileIconCache.set(command, null));
+		return () => {
+			active = false;
+		};
+	}, [command]);
+
+	const icon = command ? (fileIconCache.get(command) ?? null) : null;
+
+	return (
+		<button
+			type="button"
+			disabled={!command}
+			onClick={() => command && void window.atlas.launchApp(command)}
+			className="flex h-full w-full items-center gap-3 px-1 text-left disabled:cursor-default"
+		>
+			<span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-neutral-100 dark:bg-neutral-700/60">
+				{icon ? (
+					<img src={icon} alt="" className="h-7 w-7" />
+				) : (
+					<RocketLaunchIcon className="h-6 w-6 text-neutral-500 dark:text-neutral-300" />
+				)}
+			</span>
+			<span className="min-w-0">
+				<span className="block truncate text-body-regular font-semibold text-neutral-800 dark:text-neutral-0">
+					{command ? appNameFromCommand(command) : "Launch app"}
+				</span>
+				<span className="block text-[11px] text-neutral-500 dark:text-neutral-300">
+					{command ? "Click to open" : "Set a program in edit mode"}
+				</span>
+			</span>
+		</button>
+	);
+}
+
+function OpenUrlCard({ url }: { url: string }) {
+	return (
+		<button
+			type="button"
+			disabled={!url}
+			onClick={() => url && void window.atlas.launchApp(`start "" "${url}"`)}
+			className="flex h-full w-full items-center gap-3 px-1 text-left disabled:cursor-default"
+		>
+			<span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-sky-400/15 text-sky-500 dark:text-sky-300">
+				<GlobeAltIcon className="h-6 w-6" />
+			</span>
+			<span className="min-w-0">
+				<span className="flex items-center gap-1 truncate text-body-regular font-semibold text-neutral-800 dark:text-neutral-0">
+					{url ? hostFromUrl(url) : "Open link"}
+					{url && <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5 shrink-0 text-neutral-400" />}
+				</span>
+				<span className="block text-[11px] text-neutral-500 dark:text-neutral-300">
+					{url ? "Click to open" : "Set a URL in edit mode"}
+				</span>
+			</span>
+		</button>
+	);
+}
+
 // Renders a single dashboard card's inner content. The surrounding .atlas-card
 // frame (and any edit-mode chrome) is provided by DashboardGrid.
-export function DashboardWidget({ widget, data }: { widget: DashboardWidgetId; data: DashboardWidgetData }) {
+export function DashboardWidget({
+	widget,
+	data,
+	config,
+}: {
+	widget: DashboardWidgetId;
+	data: DashboardWidgetData;
+	config?: string;
+}) {
 	const { dashboard, formatDuration } = data;
 
 	switch (widget) {
@@ -286,6 +387,121 @@ export function DashboardWidget({ widget, data }: { widget: DashboardWidgetId; d
 				</>
 			);
 		}
+
+		case "untrackedToday": {
+			const midnight = new Date(data.now);
+			midnight.setHours(0, 0, 0, 0);
+			const untracked = Math.max(0, data.now - midnight.getTime() - dashboard.totalTodayMs);
+			return <Stat value={formatDuration(untracked)} label="Untracked today" />;
+		}
+
+		case "avgSessionLength": {
+			const count = dashboard.quickStats.sessionsToday;
+			const avg = count > 0 ? dashboard.totalTodayMs / count : 0;
+			return <Stat value={formatDuration(avg)} label="Avg session" />;
+		}
+
+		case "taskColumnsOverview": {
+			const counts = data.statusColumns.map((column) => ({
+				label: column.label,
+				count: data.tasks.filter((task) => task.status === column.status).length,
+			}));
+			return (
+				<>
+					<CardHeader title="Task columns" />
+					<ul className="simple-list">
+						{counts.map((entry) => (
+							<li key={entry.label}>
+								<span className="text-body-small">{entry.label}</span>
+								<strong className="text-body-small font-semibold">{entry.count}</strong>
+							</li>
+						))}
+						{!counts.length && <li className="empty">No columns yet.</li>}
+					</ul>
+				</>
+			);
+		}
+
+		case "upcomingTasks": {
+			const lastColumn = data.statusColumns[data.statusColumns.length - 1];
+			const upcoming = data.tasks
+				.filter((task) => !lastColumn || task.status !== lastColumn.status)
+				.slice(0, 5);
+			return (
+				<>
+					<CardHeader title="Upcoming tasks" />
+					<div className="stack-list">
+						{upcoming.map((task) => (
+							<div key={task.id} className="flex items-center gap-2 text-body-small">
+								<span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
+								<span className="truncate">{task.title}</span>
+							</div>
+						))}
+						{!upcoming.length && <p className="empty">Nothing queued up.</p>}
+					</div>
+				</>
+			);
+		}
+
+		case "lastNote": {
+			const snippet = data.notebook?.content?.trim() ?? "";
+			return (
+				<>
+					<CardHeader title="Latest note" />
+					<p className="m-0 line-clamp-4 text-body-small text-neutral-600 dark:text-neutral-300">
+						{snippet ? snippet.slice(0, 240) : "No notes yet."}
+					</p>
+				</>
+			);
+		}
+
+		case "clock": {
+			const date = new Date(data.now);
+			const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+			return (
+				<div className="grid h-full content-center gap-1">
+					<span className="font-data text-[clamp(26px,3.4vw,40px)] font-semibold leading-none text-neutral-800 dark:text-neutral-0">
+						{time}
+					</span>
+					<span className="text-[12px] uppercase tracking-[0.1em] text-neutral-500 dark:text-neutral-300">
+						{date.toLocaleDateString([], { weekday: "long" })}
+					</span>
+				</div>
+			);
+		}
+
+		case "date": {
+			const date = new Date(data.now);
+			return (
+				<div className="grid h-full content-center gap-1">
+					<span className="font-data text-[28px] font-semibold leading-none text-neutral-800 dark:text-neutral-0">
+						{date.toLocaleDateString([], { day: "numeric", month: "short" })}
+					</span>
+					<span className="text-[12px] uppercase tracking-[0.1em] text-neutral-500 dark:text-neutral-300">
+						{date.toLocaleDateString([], { weekday: "long" })}
+					</span>
+				</div>
+			);
+		}
+
+		case "greeting": {
+			const hour = new Date(data.now).getHours();
+			const part = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+			return (
+				<div className="grid h-full content-center gap-1">
+					<span className="text-[20px] font-semibold text-neutral-800 dark:text-neutral-0">{part}</span>
+					<span className="text-body-small text-neutral-500 dark:text-neutral-300">
+						You're in {data.selectedMapName}
+					</span>
+				</div>
+			);
+		}
+
+		case "launchApp":
+			return <LaunchAppCard command={config ?? ""} />;
+
+		case "openUrl":
+			return <OpenUrlCard url={config ?? ""} />;
 
 		default:
 			return null;

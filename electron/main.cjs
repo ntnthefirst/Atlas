@@ -63,18 +63,28 @@ const DASHBOARD_PREFS_FILE = "dashboard-preferences.json";
 // strings here since main.cjs only validates them, not renders them.
 const DASHBOARD_WIDGET_IDS = [
 	"totalTimeToday",
-	"quickStats",
+	"activityTimeline",
+	"untrackedToday",
+	"avgSessionLength",
 	"sessionsToday",
-	"openTasks",
+	"quickStats",
+	"topApp",
 	"timePerApp",
 	"timePerEnvironment",
-	"quickActions",
-	"activityTimeline",
-	"topApp",
 	"currentApp",
 	"currentEnvironment",
+	"openTasks",
 	"taskProgress",
+	"taskColumnsOverview",
+	"upcomingTasks",
 	"notesCount",
+	"lastNote",
+	"clock",
+	"date",
+	"greeting",
+	"quickActions",
+	"launchApp",
+	"openUrl",
 ];
 const DASHBOARD_MAX_COLS = 4;
 const DASHBOARD_WIDGET_MAX_H = 4;
@@ -1158,12 +1168,16 @@ function normalizeDashboardPreferences(value) {
 		const id = typeof entry.id === "string" && entry.id.trim() ? entry.id.trim() : `dash-${index}`;
 		if (seen.has(id)) return;
 		seen.add(id);
-		widgets.push({
+		const placement = {
 			id,
 			widget: entry.widget,
 			w: clampNumber(entry.w, 1, 1, DASHBOARD_MAX_COLS),
 			h: clampNumber(entry.h, 1, 1, DASHBOARD_WIDGET_MAX_H),
-		});
+		};
+		if (typeof entry.config === "string" && entry.config.trim()) {
+			placement.config = entry.config.trim().slice(0, 500);
+		}
+		widgets.push(placement);
 	});
 	return widgets.length > 0 ? { widgets } : fallback();
 }

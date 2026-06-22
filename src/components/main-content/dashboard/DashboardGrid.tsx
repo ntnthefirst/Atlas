@@ -1,8 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
+	ArrowLeftIcon,
 	ArrowUturnLeftIcon,
 	CheckIcon,
+	Cog6ToothIcon,
+	FolderOpenIcon,
 	PencilSquareIcon,
 	PlusIcon,
 	Squares2X2Icon,
@@ -10,12 +13,13 @@ import {
 } from "@heroicons/react/24/outline";
 import type { DashboardWidgetId, DashboardWidgetPlacement } from "../../../types";
 import {
+	DASHBOARD_CONFIG_WIDGETS,
 	DASHBOARD_GAP_PX,
 	DASHBOARD_MAX_COLS,
 	DASHBOARD_MIN_COL_PX,
 	DASHBOARD_ROW_PX,
+	DASHBOARD_WIDGET_CATEGORIES,
 	DASHBOARD_WIDGET_DESCRIPTIONS,
-	DASHBOARD_WIDGET_IDS,
 	DASHBOARD_WIDGET_LABELS,
 	DASHBOARD_WIDGET_SIZES,
 	type DashboardWidgetSize,
@@ -26,10 +30,11 @@ import { DashboardWidget, type DashboardWidgetData } from "./DashboardWidget";
 const DRAG_MIME = "application/x-atlas-dashboard-card";
 
 // Nominal cell size used only to render faithful, scaled-down previews in the
-// gallery — independent of the live grid's responsive column width.
-const PREVIEW_SCALE = 0.42;
-const PREVIEW_COL_PX = 220;
-const PREVIEW_ROW_PX = 88;
+// gallery — independent of the live grid's responsive column width. Kept small
+// enough that even a 4-wide preview stays well under the content width.
+const PREVIEW_SCALE = 0.44;
+const PREVIEW_COL_PX = 160;
+const PREVIEW_ROW_PX = 84;
 
 // Tracks the live (responsive) column count from the grid's own width, so a
 // card whose width-span exceeds what currently fits collapses to full width
@@ -57,6 +62,7 @@ export function DashboardGrid({ data }: { data: DashboardWidgetData }) {
 	const [history, setHistory] = useState<DashboardWidgetPlacement[][]>([]);
 	const [editing, setEditing] = useState(false);
 	const [galleryOpen, setGalleryOpen] = useState(false);
+	const [configuringId, setConfiguringId] = useState<string | null>(null);
 	const [dragId, setDragId] = useState<string | null>(null);
 	// The order at the moment the drag began, so the whole drag collapses into
 	// a single undo step (and we can tell if anything actually moved).
@@ -91,11 +97,17 @@ export function DashboardGrid({ data }: { data: DashboardWidgetData }) {
 	};
 
 	const addWidget = (widget: DashboardWidgetId, size: DashboardWidgetSize) => {
-		commit([...widgets, { id: createDashboardPlacementId(), widget, w: size.w, h: size.h }]);
+		const id = createDashboardPlacementId();
+		commit([...widgets, { id, widget, w: size.w, h: size.h }]);
 		setGalleryOpen(false);
+		// Drop straight into setup for cards that need a target (app/URL).
+		if (DASHBOARD_CONFIG_WIDGETS.has(widget)) setConfiguringId(id);
 	};
 
 	const removeWidget = (id: string) => commit(widgets.filter((placement) => placement.id !== id));
+
+	const setConfigValue = (id: string, config: string) =>
+		commit(widgets.map((placement) => (placement.id === id ? { ...placement, config } : placement)));
 
 	const startDrag = (id: string) => {
 		dragStartOrderRef.current = widgets;
@@ -129,6 +141,14 @@ export function DashboardGrid({ data }: { data: DashboardWidgetData }) {
 		setHistory((stack) => [...stack, start].slice(-50));
 		void window.atlas.setDashboardLayout({ widgets });
 	};
+
+	const configuring = widgets.find((placement) => placement.id === configuringId) ?? null;
+
+	// The gallery takes over the whole view (rather than a cramped modal) so
+	// there's room to browse every widget at a comfortable size.
+	if (galleryOpen) {
+		return <WidgetGallery data={data} onAdd={addWidget} onClose={() => setGalleryOpen(false)} />;
+	}
 
 	return (
 		<div className="grid gap-3">
@@ -188,6 +208,7 @@ export function DashboardGrid({ data }: { data: DashboardWidgetData }) {
 				<AnimatePresence initial={false}>
 					{widgets.map((placement) => {
 						const isDragged = dragId === placement.id;
+						const isConfigurable = DASHBOARD_CONFIG_WIDGETS.has(placement.widget);
 						return (
 							<motion.div
 								key={placement.id}
@@ -209,7 +230,7 @@ export function DashboardGrid({ data }: { data: DashboardWidgetData }) {
 								}}
 							>
 								<div className={`h-full overflow-auto ${editing ? "pointer-events-none" : ""}`}>
-									<DashboardWidget widget={placement.widget} data={data} />
+									<DashboardWidget widget={placement.widget} data={data} config={placement.config} />
 								</div>
 
 								{/* Native HTML5 drag lives on a transparent overlay rather than the
@@ -239,15 +260,28 @@ export function DashboardGrid({ data }: { data: DashboardWidgetData }) {
 												if (dragId) endDrag();
 											}}
 										/>
-										<button
-											type="button"
-											onClick={() => removeWidget(placement.id)}
-											title="Remove card"
-											aria-label="Remove card"
-											className="absolute left-1.5 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-neutral-300 bg-neutral-0 text-neutral-700 shadow-sm transition-colors hover:bg-red-50 hover:text-red-600 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100 dark:hover:bg-red-950/40 dark:hover:text-red-400"
-										>
-											<XMarkIcon className="h-3.5 w-3.5" />
-										</button>
+										<div className="absolute right-1.5 top-1.5 z-10 flex items-center gap-1">
+											{isConfigurable && (
+												<button
+													type="button"
+													onClick={() => setConfiguringId(placement.id)}
+													title="Configure"
+													aria-label="Configure card"
+													className="flex h-6 w-6 items-center justify-center rounded-full border border-neutral-300 bg-neutral-0 text-neutral-700 shadow-sm transition-colors hover:bg-neutral-100 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100 dark:hover:bg-neutral-700/60"
+												>
+													<Cog6ToothIcon className="h-3.5 w-3.5" />
+												</button>
+											)}
+											<button
+												type="button"
+												onClick={() => removeWidget(placement.id)}
+												title="Remove card"
+												aria-label="Remove card"
+												className="flex h-6 w-6 items-center justify-center rounded-full border border-neutral-300 bg-neutral-0 text-neutral-700 shadow-sm transition-colors hover:bg-red-50 hover:text-red-600 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+											>
+												<XMarkIcon className="h-3.5 w-3.5" />
+											</button>
+										</div>
 									</>
 								)}
 							</motion.div>
@@ -273,16 +307,24 @@ export function DashboardGrid({ data }: { data: DashboardWidgetData }) {
 				)}
 			</div>
 
-			{galleryOpen && (
-				<WidgetGallery data={data} onAdd={addWidget} onClose={() => setGalleryOpen(false)} />
+			{configuring && (
+				<CardConfigDialog
+					widget={configuring.widget}
+					initial={configuring.config ?? ""}
+					onSave={(value) => {
+						setConfigValue(configuring.id, value);
+						setConfiguringId(null);
+					}}
+					onClose={() => setConfiguringId(null)}
+				/>
 			)}
 		</div>
 	);
 }
 
-// The iOS-style "Add Widget" gallery: every widget shown with a live,
-// scaled-down preview of each size it offers. Clicking a size tile drops that
-// card onto the dashboard.
+// The full-view "Add widget" gallery: replaces the dashboard while open so
+// every widget can be shown grouped by category, each with a live, scaled-down
+// preview of the sizes it offers. Clicking a size tile drops that card on.
 function WidgetGallery({
 	data,
 	onAdd,
@@ -293,55 +335,68 @@ function WidgetGallery({
 	onClose: () => void;
 }) {
 	return (
-		<div className="fixed inset-0 z-50 flex items-center justify-center p-6" onClick={onClose}>
-			<div className="absolute inset-0 bg-neutral-900/40 backdrop-blur-sm" />
-			<div
-				className="relative flex max-h-[80vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-neutral-0 shadow-xl dark:border-neutral-600 dark:bg-neutral-800"
-				onClick={(event) => event.stopPropagation()}
-			>
-				<header className="flex items-center justify-between border-b border-neutral-200 px-5 py-3.5 dark:border-neutral-600">
-					<div>
-						<h2 className="m-0 text-subtitle-small">Add widget</h2>
-						<p className="m-0 text-[12px] text-neutral-500 dark:text-neutral-300">
-							Pick a widget and a size. Sizes are fixed once added.
-						</p>
-					</div>
+		<div className="grid gap-5">
+			<header className="sticky top-0 z-10 -mx-3.5 -mt-3.5 flex items-center justify-between gap-3 border-b border-neutral-200 bg-neutral-0/90 px-3.5 py-3 backdrop-blur dark:border-neutral-600 dark:bg-neutral-900/90">
+				<div className="flex items-center gap-3">
 					<button
 						type="button"
 						onClick={onClose}
-						aria-label="Close"
-						className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-500 transition-colors hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-700/60"
+						aria-label="Back to dashboard"
+						className="flex h-9 w-9 items-center justify-center rounded-lg border border-neutral-200 text-neutral-600 transition-colors hover:bg-neutral-100 dark:border-neutral-600 dark:text-neutral-300 dark:hover:bg-neutral-700/60"
 					>
-						<XMarkIcon className="h-5 w-5" />
+						<ArrowLeftIcon className="h-5 w-5" />
 					</button>
-				</header>
-
-				<div className="grid gap-5 overflow-y-auto p-5">
-					{DASHBOARD_WIDGET_IDS.map((widgetId) => (
-						<section key={widgetId} className="grid gap-2">
-							<div>
-								<h3 className="m-0 text-body-regular font-semibold text-neutral-800 dark:text-neutral-100">
-									{DASHBOARD_WIDGET_LABELS[widgetId]}
-								</h3>
-								<p className="m-0 text-[12px] text-neutral-500 dark:text-neutral-300">
-									{DASHBOARD_WIDGET_DESCRIPTIONS[widgetId]}
-								</p>
-							</div>
-							<div className="flex flex-wrap items-end gap-3">
-								{DASHBOARD_WIDGET_SIZES[widgetId].map((size) => (
-									<GalleryTile
-										key={size.label}
-										widget={widgetId}
-										size={size}
-										data={data}
-										onClick={() => onAdd(widgetId, size)}
-									/>
-								))}
-							</div>
-						</section>
-					))}
+					<div>
+						<h2 className="m-0 text-subtitle-small">Add a widget</h2>
+						<p className="m-0 text-[12px] text-neutral-500 dark:text-neutral-300">
+							Pick a widget and a size — sizes are fixed once added.
+						</p>
+					</div>
 				</div>
-			</div>
+				<button
+					type="button"
+					onClick={onClose}
+					className="rounded-lg bg-primary px-4 py-1.5 text-sm font-medium text-neutral-0"
+				>
+					Done
+				</button>
+			</header>
+
+			{DASHBOARD_WIDGET_CATEGORIES.map((category) => (
+				<section key={category.label} className="grid gap-3">
+					<h3 className="m-0 text-[12px] font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
+						{category.label}
+					</h3>
+					{/* flex-wrap (rather than a fixed-track grid) so a wide preview tile
+					    simply wraps to the next line and can never force horizontal
+					    overflow. */}
+					<div className="flex flex-wrap gap-x-6 gap-y-4">
+						{category.widgets.map((widgetId) => (
+							<div key={widgetId} className="grid max-w-full content-start gap-2">
+								<div>
+									<h4 className="m-0 text-body-small font-semibold text-neutral-800 dark:text-neutral-100">
+										{DASHBOARD_WIDGET_LABELS[widgetId]}
+									</h4>
+									<p className="m-0 max-w-[18rem] text-[11px] leading-tight text-neutral-500 dark:text-neutral-300">
+										{DASHBOARD_WIDGET_DESCRIPTIONS[widgetId]}
+									</p>
+								</div>
+								<div className="flex flex-wrap items-end gap-2.5">
+									{DASHBOARD_WIDGET_SIZES[widgetId].map((size) => (
+										<GalleryTile
+											key={size.label}
+											widget={widgetId}
+											size={size}
+											data={data}
+											onClick={() => onAdd(widgetId, size)}
+										/>
+									))}
+								</div>
+							</div>
+						))}
+					</div>
+				</section>
+			))}
 		</div>
 	);
 }
@@ -371,7 +426,7 @@ function GalleryTile({
 				}
 			}}
 			title={`Add ${size.label} (${size.w}×${size.h})`}
-			className="group grid cursor-pointer gap-1.5 outline-none"
+			className="group grid cursor-pointer justify-items-center gap-1.5 outline-none"
 		>
 			<div
 				className="overflow-hidden rounded-xl border border-neutral-200 transition-colors group-hover:border-primary group-focus-visible:border-primary dark:border-neutral-600"
@@ -394,6 +449,120 @@ function GalleryTile({
 			<span className="text-center text-[11px] text-neutral-500 dark:text-neutral-300">
 				{size.label} · {size.w}×{size.h}
 			</span>
+		</div>
+	);
+}
+
+// Small focused dialog to point a launch/link card at its target. Kept compact
+// (a single field plus pickers) rather than a full-view takeover.
+function CardConfigDialog({
+	widget,
+	initial,
+	onSave,
+	onClose,
+}: {
+	widget: DashboardWidgetId;
+	initial: string;
+	onSave: (value: string) => void;
+	onClose: () => void;
+}) {
+	const isApp = widget === "launchApp";
+	const [value, setValue] = useState(initial);
+	const [runningApps, setRunningApps] = useState<Array<{ name: string; path: string | null }> | null>(null);
+
+	const loadApps = () => {
+		if (runningApps) return;
+		window.atlas
+			.listOpenApps()
+			.then(setRunningApps)
+			.catch(() => setRunningApps([]));
+	};
+
+	return (
+		<div className="fixed inset-0 z-50 flex items-center justify-center p-6" onClick={onClose}>
+			<div className="absolute inset-0 bg-neutral-900/40 backdrop-blur-sm" />
+			<div
+				className="relative grid w-full max-w-md gap-3 rounded-2xl border border-neutral-200 bg-neutral-0 p-5 shadow-xl dark:border-neutral-600 dark:bg-neutral-800"
+				onClick={(event) => event.stopPropagation()}
+			>
+				<h2 className="m-0 text-subtitle-small">{isApp ? "Choose a program" : "Enter a link"}</h2>
+
+				<div className="flex items-center gap-2">
+					<input
+						type="text"
+						autoFocus
+						value={value}
+						onChange={(event) => setValue(event.target.value)}
+						onKeyDown={(event) => {
+							if (event.key === "Enter") onSave(value.trim());
+						}}
+						placeholder={isApp ? "Program path or command" : "https://example.com"}
+						className="min-w-0 flex-1 rounded-lg border border-neutral-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-primary dark:border-neutral-600"
+					/>
+					{isApp && (
+						<button
+							type="button"
+							onClick={async () => {
+								const filePath = await window.atlas.pickAppFile();
+								if (filePath) setValue(filePath.includes(" ") ? `"${filePath}"` : filePath);
+							}}
+							className="flex shrink-0 items-center gap-1 rounded-lg border border-neutral-200 px-2.5 py-2 text-xs text-neutral-600 transition-colors hover:bg-neutral-100 dark:border-neutral-600 dark:text-neutral-300 dark:hover:bg-neutral-700/60"
+						>
+							<FolderOpenIcon className="h-4 w-4" />
+							Browse
+						</button>
+					)}
+				</div>
+
+				{isApp && (
+					<div className="grid gap-1">
+						<button
+							type="button"
+							onClick={loadApps}
+							className="justify-self-start text-xs font-medium text-primary"
+						>
+							{runningApps ? "Running apps" : "Pick from running apps…"}
+						</button>
+						{runningApps && (
+							<div className="max-h-40 overflow-y-auto rounded-lg border border-neutral-200 p-1 dark:border-neutral-600">
+								{runningApps.length === 0 && (
+									<p className="m-0 px-2 py-1.5 text-xs text-neutral-400">No running apps found.</p>
+								)}
+								{runningApps.map((app) => (
+									<button
+										key={app.name}
+										type="button"
+										disabled={!app.path}
+										onClick={() =>
+											app.path && setValue(app.path.includes(" ") ? `"${app.path}"` : app.path)
+										}
+										className="flex w-full items-center truncate rounded-md px-2 py-1.5 text-left text-xs text-neutral-700 transition-colors hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-neutral-100 dark:hover:bg-neutral-700/60"
+									>
+										{app.name}
+									</button>
+								))}
+							</div>
+						)}
+					</div>
+				)}
+
+				<div className="mt-1 flex justify-end gap-2">
+					<button
+						type="button"
+						onClick={onClose}
+						className="rounded-lg border border-neutral-200 px-3 py-1.5 text-sm text-neutral-700 transition-colors hover:bg-neutral-100 dark:border-neutral-600 dark:text-neutral-100 dark:hover:bg-neutral-700/60"
+					>
+						Cancel
+					</button>
+					<button
+						type="button"
+						onClick={() => onSave(value.trim())}
+						className="rounded-lg bg-primary px-4 py-1.5 text-sm font-medium text-neutral-0"
+					>
+						Save
+					</button>
+				</div>
+			</div>
 		</div>
 	);
 }

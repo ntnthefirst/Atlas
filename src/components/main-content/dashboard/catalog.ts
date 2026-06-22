@@ -11,60 +11,84 @@ export const DASHBOARD_MIN_COL_PX = 240;
 
 export const DASHBOARD_WIDGET_LABELS: Record<DashboardWidgetId, string> = {
 	totalTimeToday: "Total time today",
-	quickStats: "Quick stats",
+	activityTimeline: "Activity timeline (24h)",
+	untrackedToday: "Untracked time",
+	avgSessionLength: "Average session",
 	sessionsToday: "Sessions today",
-	openTasks: "Open tasks",
+	quickStats: "Quick stats",
+	topApp: "Top app",
 	timePerApp: "Time per app",
 	timePerEnvironment: "Time per environment",
-	quickActions: "Quick actions",
-	activityTimeline: "Activity timeline (24h)",
-	topApp: "Top app",
 	currentApp: "Current app",
 	currentEnvironment: "Current environment",
+	openTasks: "Open tasks",
 	taskProgress: "Task progress",
+	taskColumnsOverview: "Task columns",
+	upcomingTasks: "Upcoming tasks",
 	notesCount: "Notebook",
+	lastNote: "Latest note",
+	clock: "Clock",
+	date: "Date",
+	greeting: "Greeting",
+	quickActions: "Quick actions",
+	launchApp: "Launch app",
+	openUrl: "Open link",
 };
 
-// A short blurb shown under each widget in the "add card" library.
+// A short blurb shown under each widget in the "add card" gallery.
 export const DASHBOARD_WIDGET_DESCRIPTIONS: Record<DashboardWidgetId, string> = {
 	totalTimeToday: "Big read-out of today's tracked time",
-	quickStats: "Sessions, tasks, app and environment at a glance",
+	activityTimeline: "When you were active across the day",
+	untrackedToday: "Time today with no session running",
+	avgSessionLength: "Average length of today's sessions",
 	sessionsToday: "Count of today's sessions",
-	openTasks: "Number of open tasks",
+	quickStats: "Sessions, tasks, app and environment at a glance",
+	topApp: "The app you spent the most time in",
 	timePerApp: "Ranked bar list of time spent per app",
 	timePerEnvironment: "Time totals per environment",
-	quickActions: "Buttons that launch your saved commands",
-	activityTimeline: "When you were active across the day",
-	topApp: "The app you spent the most time in",
 	currentApp: "The app in the foreground right now",
 	currentEnvironment: "The active environment",
+	openTasks: "Number of open tasks",
 	taskProgress: "Completed vs. total tasks",
+	taskColumnsOverview: "Task count in every board column",
+	upcomingTasks: "Your next few open tasks",
 	notesCount: "Words in this environment's notebook",
+	lastNote: "A snippet of your latest note",
+	clock: "The current time",
+	date: "Today's day and date",
+	greeting: "A friendly, time-aware greeting",
+	quickActions: "Buttons that launch your saved commands",
+	launchApp: "A button that opens a program you pick",
+	openUrl: "A button that opens a website you pick",
 };
 
 // The fixed size variants each widget offers in the gallery, iOS-style: you
-// pick one when adding the card and can't resize it afterwards (to change
-// size, remove it and add it again at a different size). The first entry is
-// the default/most-compact option.
+// pick one when adding the card and can't resize it afterwards. The first
+// entry is the default / most-compact option.
 export type DashboardWidgetSize = { label: string; w: number; h: number };
+
+const SMALL_WIDE: DashboardWidgetSize[] = [
+	{ label: "Small", w: 1, h: 1 },
+	{ label: "Wide", w: 2, h: 1 },
+];
 
 export const DASHBOARD_WIDGET_SIZES: Record<DashboardWidgetId, DashboardWidgetSize[]> = {
 	totalTimeToday: [
 		{ label: "Medium", w: 2, h: 1 },
 		{ label: "Large", w: 2, h: 2 },
 	],
+	activityTimeline: [
+		{ label: "Wide", w: 4, h: 1 },
+		{ label: "Large", w: 4, h: 2 },
+	],
+	untrackedToday: SMALL_WIDE,
+	avgSessionLength: SMALL_WIDE,
+	sessionsToday: SMALL_WIDE,
 	quickStats: [
 		{ label: "Medium", w: 2, h: 2 },
 		{ label: "Wide", w: 4, h: 2 },
 	],
-	sessionsToday: [
-		{ label: "Small", w: 1, h: 1 },
-		{ label: "Wide", w: 2, h: 1 },
-	],
-	openTasks: [
-		{ label: "Small", w: 1, h: 1 },
-		{ label: "Wide", w: 2, h: 1 },
-	],
+	topApp: SMALL_WIDE,
 	timePerApp: [
 		{ label: "Medium", w: 2, h: 2 },
 		{ label: "Tall", w: 2, h: 3 },
@@ -74,35 +98,60 @@ export const DASHBOARD_WIDGET_SIZES: Record<DashboardWidgetId, DashboardWidgetSi
 		{ label: "Medium", w: 2, h: 2 },
 		{ label: "Tall", w: 2, h: 3 },
 	],
-	quickActions: [
-		{ label: "Wide", w: 2, h: 1 },
-		{ label: "Medium", w: 2, h: 2 },
-	],
-	activityTimeline: [
-		{ label: "Wide", w: 4, h: 1 },
-		{ label: "Large", w: 4, h: 2 },
-	],
-	topApp: [
-		{ label: "Small", w: 1, h: 1 },
-		{ label: "Wide", w: 2, h: 1 },
-	],
-	currentApp: [
-		{ label: "Small", w: 1, h: 1 },
-		{ label: "Wide", w: 2, h: 1 },
-	],
-	currentEnvironment: [
-		{ label: "Small", w: 1, h: 1 },
-		{ label: "Wide", w: 2, h: 1 },
-	],
+	currentApp: SMALL_WIDE,
+	currentEnvironment: SMALL_WIDE,
+	openTasks: SMALL_WIDE,
 	taskProgress: [
 		{ label: "Wide", w: 2, h: 1 },
 		{ label: "Medium", w: 2, h: 2 },
 	],
-	notesCount: [
-		{ label: "Small", w: 1, h: 1 },
+	taskColumnsOverview: [
 		{ label: "Wide", w: 2, h: 1 },
+		{ label: "Medium", w: 2, h: 2 },
 	],
+	upcomingTasks: [
+		{ label: "Medium", w: 2, h: 2 },
+		{ label: "Tall", w: 2, h: 3 },
+	],
+	notesCount: SMALL_WIDE,
+	lastNote: [
+		{ label: "Medium", w: 2, h: 2 },
+		{ label: "Wide", w: 4, h: 2 },
+	],
+	clock: SMALL_WIDE,
+	date: SMALL_WIDE,
+	greeting: [
+		{ label: "Wide", w: 2, h: 1 },
+		{ label: "Large", w: 4, h: 1 },
+	],
+	quickActions: [
+		{ label: "Wide", w: 2, h: 1 },
+		{ label: "Medium", w: 2, h: 2 },
+	],
+	launchApp: SMALL_WIDE,
+	openUrl: SMALL_WIDE,
 };
+
+// Gallery grouping so the (now full-screen) picker reads as organized sections
+// rather than one long list.
+export const DASHBOARD_WIDGET_CATEGORIES: Array<{ label: string; widgets: DashboardWidgetId[] }> = [
+	{
+		label: "Time",
+		widgets: ["totalTimeToday", "activityTimeline", "untrackedToday", "avgSessionLength", "sessionsToday"],
+	},
+	{
+		label: "Overview",
+		widgets: ["quickStats", "topApp", "timePerApp", "timePerEnvironment", "currentApp", "currentEnvironment"],
+	},
+	{ label: "Tasks", widgets: ["openTasks", "taskProgress", "taskColumnsOverview", "upcomingTasks"] },
+	{ label: "Notes", widgets: ["notesCount", "lastNote"] },
+	{ label: "Clock", widgets: ["clock", "date", "greeting"] },
+	{ label: "Apps & links", widgets: ["quickActions", "launchApp", "openUrl"] },
+];
+
+// Widgets that carry a per-instance `config` string and need setting up after
+// they're added (a program to launch, a URL to open).
+export const DASHBOARD_CONFIG_WIDGETS = new Set<DashboardWidgetId>(["launchApp", "openUrl"]);
 
 export const DASHBOARD_WIDGET_IDS = Object.keys(DASHBOARD_WIDGET_LABELS) as DashboardWidgetId[];
 

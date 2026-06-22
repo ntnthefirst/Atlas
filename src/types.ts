@@ -347,19 +347,35 @@ export type DisplaySummary = {
 // widgets (small, single-purpose), these are full dashboard cards built from
 // the data already loaded for the dashboard view.
 export type DashboardWidgetId =
+	// Time
 	| "totalTimeToday"
-	| "quickStats"
+	| "activityTimeline"
+	| "untrackedToday"
+	| "avgSessionLength"
 	| "sessionsToday"
-	| "openTasks"
+	// Stats / overview
+	| "quickStats"
+	| "topApp"
 	| "timePerApp"
 	| "timePerEnvironment"
-	| "quickActions"
-	| "activityTimeline"
-	| "topApp"
 	| "currentApp"
 	| "currentEnvironment"
+	// Tasks
+	| "openTasks"
 	| "taskProgress"
-	| "notesCount";
+	| "taskColumnsOverview"
+	| "upcomingTasks"
+	// Notes
+	| "notesCount"
+	| "lastNote"
+	// Clock
+	| "clock"
+	| "date"
+	| "greeting"
+	// Apps & links
+	| "quickActions"
+	| "launchApp"
+	| "openUrl";
 
 // One card placed on the dashboard. Order in the array is the layout order;
 // w/h are spans on a responsive column grid (the rendered column count shrinks
@@ -370,6 +386,9 @@ export type DashboardWidgetPlacement = {
 	widget: DashboardWidgetId;
 	w: number;
 	h: number;
+	// Per-instance setting for the few configurable cards: launchApp (a launch
+	// command), openUrl (a URL). Other widgets ignore it.
+	config?: string;
 };
 
 export type DashboardPreferences = {
