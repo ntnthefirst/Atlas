@@ -1,0 +1,88 @@
+name: Release
+
+# Releases are driven by git tags created with `npm version` (see RELEASE.md).
+# Pushing a vX.Y.Z (or vX.Y.Z-beta.N) tag lints, builds, and publishes the
+# GitHub release with Windows + macOS installers. The version comes straight
+# from the tag — no label policy, no tag-sorting, no version math.
+on:
+    push:
+        tags:
+            - "v*"
+
+concurrency:
+    group: release-${{ github.ref }}
+    cancel-in-progress: false
+
+jobs:
+    quality:
+        name: Lint and Build
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 20
+                  cache: npm
+            - run: npm ci
+            - run: npm run lint --if-present
+            - run: npm run build --if-present
+
+    create-release:
+        name: Create GitHub Release
+        needs: quality
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        steps:
+            - name: Create or update the release for this tag
+              uses: softprops/action-gh-release@v2
+              with:
+                  tag_name: ${{ github.ref_name }}
+                  prerelease: ${{ contains(github.ref_name, '-beta') }}
+                  generate_release_notes: true
+
+    installers:
+        name: Build Installers (${{ matrix.name }})
+        needs: [quality, create-release]
+        runs-on: ${{ matrix.os }}
+        permissions:
+            contents: write
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - name: Windows
+                      os: windows-latest
+                      args: "--win"
+                      asset_glob: |
+                          release/Atlas-Setup-Windows-*.exe
+                          release/Atlas-Setup-Windows-*.exe.blockmap
+                          release/latest*.yml
+                    - name: macOS
+                      os: macos-latest
+                      args: "--mac --arm64"
+                      asset_glob: |
+                          release/Atlas-Setup-macOS-*.dmg
+                          release/Atlas-Setup-macOS-*.zip
+                          release/latest*.yml
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 20
+                  cache: npm
+            - run: npm ci
+            - name: Build and package
+              shell: bash
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  CSC_IDENTITY_AUTO_DISCOVERY: false
+              run: |
+                  VERSION="${GITHUB_REF_NAME#v}"
+                  npm run build
+                  npx electron-builder ${{ matrix.args }} --publish never --config.extraMetadata.version="$VERSION"
+            - name: Upload installers to the release
+              uses: softprops/action-gh-release@v2
+              with:
+                  tag_name: ${{ github.ref_name }}
+                  files: ${{ matrix.asset_glob }}
