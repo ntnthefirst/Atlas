@@ -24,6 +24,11 @@ let miniWindow = null;
 let welcomeWindow = null;
 let settingsWindow = null;
 let actionEditorWindow = null;
+let notchInputWindow = null;
+// Payload (what to capture, for which environment) handed to the notch input
+// popup once it loads, since a freshly created window can't receive it on the
+// constructor.
+let pendingNotchInputPayload = null;
 // Keyed by display id, since the notch can be shown on multiple screens at once.
 let notchWindows = new Map();
 let tray = null;
@@ -125,6 +130,7 @@ const NOTCH_WIDGET_IDS = [
 	"firstTodoList",
 	"taskCount",
 	"quickAddTask",
+	"quickAddNote",
 	"nextTaskOnly",
 	"taskColumnsOverview",
 	"taskProgressBar",
@@ -956,6 +962,74 @@ function createActionEditorWindow(parentWindow = null) {
 	return actionEditorWindow;
 }
 
+// A tiny always-on-top popup the notch opens when you tap a "capture" widget
+// (add a task / note). Keeping input in its own focused window beats cramming
+// a field into the notch itself, and it can be positioned wherever.
+function createNotchInputWindow(payload) {
+	pendingNotchInputPayload = payload;
+
+	if (notchInputWindow && !notchInputWindow.isDestroyed()) {
+		notchInputWindow.webContents.send("notchInput:payload", payload);
+		notchInputWindow.show();
+		notchInputWindow.focus();
+		return notchInputWindow;
+	}
+
+	notchInputWindow = new BrowserWindow({
+		width: 440,
+		height: 260,
+		resizable: false,
+		maximizable: false,
+		minimizable: false,
+		fullscreenable: false,
+		alwaysOnTop: true,
+		skipTaskbar: true,
+		show: false,
+		center: true,
+		frame: false,
+		transparent: true,
+		backgroundColor: "#00000000",
+		hasShadow: true,
+		webPreferences: {
+			preload: path.join(__dirname, "preload.cjs"),
+			contextIsolation: true,
+			nodeIntegration: false,
+		},
+	});
+
+	notchInputWindow.setAlwaysOnTop(true, "screen-saver");
+
+	if (isDev) {
+		notchInputWindow.loadURL("http://localhost:5173?mode=notch-input");
+	} else {
+		notchInputWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"), {
+			query: { mode: "notch-input" },
+		});
+	}
+
+	notchInputWindow.once("ready-to-show", () => {
+		if (!notchInputWindow || notchInputWindow.isDestroyed()) {
+			return;
+		}
+		notchInputWindow.show();
+		notchInputWindow.focus();
+	});
+
+	// Capture popups are dismiss-on-blur, like a spotlight field.
+	notchInputWindow.on("blur", () => {
+		if (notchInputWindow && !notchInputWindow.isDestroyed()) {
+			notchInputWindow.close();
+		}
+	});
+
+	notchInputWindow.on("closed", () => {
+		notchInputWindow = null;
+		pendingNotchInputPayload = null;
+	});
+
+	return notchInputWindow;
+}
+
 function hasAnyMaps() {
 	return Boolean(db && db.listMaps().length > 0);
 }
@@ -1740,6 +1814,13 @@ function wireIpc() {
 		createActionEditorWindow(null);
 		return true;
 	});
+
+	ipcMain.handle("window:openNotchInput", (_event, payload) => {
+		createNotchInputWindow(payload && typeof payload === "object" ? payload : {});
+		return true;
+	});
+
+	ipcMain.handle("notchInput:getPayload", () => pendingNotchInputPayload ?? {});
 
 	ipcMain.handle("app:pickFile", async (event) => {
 		const ownerWindow = BrowserWindow.fromWebContents(event.sender) ?? undefined;

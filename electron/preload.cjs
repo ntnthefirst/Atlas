@@ -78,6 +78,13 @@ contextBridge.exposeInMainWorld("atlas", {
 	openMiniWindow: () => ipcRenderer.invoke("window:openMini"),
 	openSettingsWindow: () => ipcRenderer.invoke("window:openSettings"),
 	openActionEditorWindow: () => ipcRenderer.invoke("window:openActionEditor"),
+	openNotchInputWindow: (payload) => ipcRenderer.invoke("window:openNotchInput", payload),
+	getNotchInputPayload: () => ipcRenderer.invoke("notchInput:getPayload"),
+	onNotchInputPayload: (callback) => {
+		const listener = (_event, payload) => callback(payload);
+		ipcRenderer.on("notchInput:payload", listener);
+		return () => ipcRenderer.removeListener("notchInput:payload", listener);
+	},
 	pickAppFile: () => ipcRenderer.invoke("app:pickFile"),
 	getFileIcon: (filePath) => ipcRenderer.invoke("app:getFileIcon", filePath),
 	listOpenApps: () => ipcRenderer.invoke("system:listOpenApps"),

@@ -9,6 +9,7 @@ import { MainContentViews } from "./components/main-content";
 import { SettingsWindowApp } from "./components/settings-window/SettingsWindowApp";
 import { NotchApp } from "./components/notch/NotchApp";
 import { ActionEditorWindowApp } from "./components/action-editor/ActionEditorWindowApp";
+import { NotchInputWindowApp } from "./components/notch-input/NotchInputWindowApp";
 import logo from "./assets/logosmall.png";
 import {
 	useMapManagement,
@@ -1142,6 +1143,7 @@ function App() {
 	if (mode === "settings") return <SettingsWindowApp />;
 	if (mode === "notch") return <NotchApp />;
 	if (mode === "actions") return <ActionEditorWindowApp />;
+	if (mode === "notch-input") return <NotchInputWindowApp />;
 	return <MainAtlasApp />;
 }
 

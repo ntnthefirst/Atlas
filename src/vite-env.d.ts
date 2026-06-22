@@ -10,6 +10,7 @@ import type {
 	DashboardOverview,
 	MapItem,
 	NoteItem,
+	NotchInputPayload,
 	NotchPreferences,
 	Session,
 	TaskItem,
@@ -96,6 +97,9 @@ declare global {
 			openMiniWindow: () => Promise<boolean>;
 			openSettingsWindow: () => Promise<boolean>;
 			openActionEditorWindow: () => Promise<boolean>;
+			openNotchInputWindow: (payload: NotchInputPayload) => Promise<boolean>;
+			getNotchInputPayload: () => Promise<NotchInputPayload>;
+			onNotchInputPayload: (callback: (payload: NotchInputPayload) => void) => () => void;
 			pickAppFile: () => Promise<string | null>;
 			getFileIcon: (filePath: string) => Promise<string | null>;
 			listOpenApps: () => Promise<Array<{ name: string; path: string | null }>>;

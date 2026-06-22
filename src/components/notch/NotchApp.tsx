@@ -377,8 +377,6 @@ export function NotchApp() {
 	const [cardSize, setCardSize] = useState({ width: 0, height: 0 });
 	const [activeTabId, setActiveTabId] = useState<string | null>(null);
 	const [totalSessionCount, setTotalSessionCount] = useState(0);
-	const [addTaskPopupFor, setAddTaskPopupFor] = useState<string | null>(null);
-	const [addTaskTitleDraft, setAddTaskTitleDraft] = useState("");
 	const [notes, setNotes] = useState<NoteItem[]>([]);
 	const [currentAppName, setCurrentAppName] = useState("");
 	const [platform, setPlatform] = useState("");
@@ -845,16 +843,6 @@ export function NotchApp() {
 		);
 	};
 
-	const onAddTask = async (status: string) => {
-		const title = addTaskTitleDraft.trim();
-		if (!environment || !title) return;
-		const task = await window.atlas.createTask(environment.id, title);
-		if (task.status !== status) await window.atlas.updateTaskStatus(task.id, status);
-		setTasks((current) => [...current, { ...task, status }]);
-		setAddTaskTitleDraft("");
-		setAddTaskPopupFor(null);
-	};
-
 	const onSwitchEnvironment = (envId: string) => {
 		try {
 			localStorage.setItem("atlas.lastEnvironmentId", envId);
@@ -1286,64 +1274,53 @@ export function NotchApp() {
 			}
 			case "quickAddTask": {
 				const column = resolveColumn(placement.config);
-				const isOpen = addTaskPopupFor === placement.id;
 				return (
-					<div key={placement.id} className="relative flex h-full items-center justify-center">
+					<div key={placement.id} className="flex h-full items-center justify-center">
 						<button
 							type="button"
 							className={`${ICON_BUTTON_CLASSES} h-8 w-8 disabled:cursor-not-allowed disabled:opacity-40`}
 							title={column ? `Add task to ${column.label}` : "Add task"}
 							aria-label="Add task"
 							disabled={!environment || !column}
-							onClick={() => {
-								setAddTaskTitleDraft("");
-								setAddTaskPopupFor(isOpen ? null : placement.id);
-							}}
+							onClick={() =>
+								environment &&
+								column &&
+								void window.atlas.openNotchInputWindow({
+									kind: "task",
+									environmentId: environment.id,
+									environmentName: environment.name,
+									status: column.status,
+									columnLabel: column.label,
+								})
+							}
 						>
 							<PlusIcon className="h-5 w-5" />
 						</button>
-						{isOpen && column ? (
-							<>
-								<div className="fixed inset-0 z-40" onClick={() => setAddTaskPopupFor(null)} />
-								<div className="notch-no-drag absolute left-1/2 top-full z-50 mt-1 w-52 -translate-x-1/2 rounded-lg border border-neutral-200 bg-neutral-0 p-2 shadow-lg dark:border-neutral-600 dark:bg-neutral-800">
-									<span className="mb-1 block text-[10px] text-neutral-500 dark:text-neutral-300">
-										New task in {column.label}
-									</span>
-									<input
-										type="text"
-										autoFocus
-										value={addTaskTitleDraft}
-										onChange={(event) => setAddTaskTitleDraft(event.target.value)}
-										onKeyDown={(event) => {
-											if (event.key === "Enter") void onAddTask(column.status);
-											if (event.key === "Escape") setAddTaskPopupFor(null);
-										}}
-										placeholder="Task title..."
-										className="w-full rounded-md border border-neutral-200 bg-transparent px-2 py-1 text-[12px] outline-none focus:border-primary dark:border-neutral-600"
-									/>
-									<div className="mt-1.5 flex justify-end gap-1.5">
-										<button
-											type="button"
-											onClick={() => setAddTaskPopupFor(null)}
-											className="rounded-md px-2 py-1 text-[11px] text-neutral-500 transition-colors hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-700/60"
-										>
-											Cancel
-										</button>
-										<button
-											type="button"
-											disabled={!addTaskTitleDraft.trim()}
-											onClick={() => void onAddTask(column.status)}
-											className="rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-neutral-0 transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
-										>
-											Add
-										</button>
-									</div>
-								</div>
-							</>
-						) : null}
 					</div>
 				);
 			}
+			case "quickAddNote":
+				return (
+					<div key={placement.id} className="flex h-full items-center justify-center">
+						<button
+							type="button"
+							className={`${ICON_BUTTON_CLASSES} h-8 w-8 disabled:cursor-not-allowed disabled:opacity-40`}
+							title="Quick note"
+							aria-label="Quick note"
+							disabled={!environment}
+							onClick={() =>
+								environment &&
+								void window.atlas.openNotchInputWindow({
+									kind: "note",
+									environmentId: environment.id,
+									environmentName: environment.name,
+								})
+							}
+						>
+							<PencilSquareIcon className="h-5 w-5" />
+						</button>
+					</div>
+				);
 			case "taskProgressBar": {
 				const column = resolveColumn(placement.config) ?? columns[columns.length - 1] ?? null;
 				const doneCount = column ? (tasksByColumn.get(column.status)?.length ?? 0) : 0;

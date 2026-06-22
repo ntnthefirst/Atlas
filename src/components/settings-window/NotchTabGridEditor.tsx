@@ -13,6 +13,7 @@ import {
 	MinusIcon,
 	NewspaperIcon,
 	PauseIcon,
+	PencilSquareIcon,
 	PlayCircleIcon,
 	PlusIcon,
 	RocketLaunchIcon,
@@ -85,6 +86,7 @@ const WIDGET_CATEGORIES: Array<{ label: string; widgets: NotchWidgetId[] }> = [
 			"firstTodoList",
 			"taskCount",
 			"quickAddTask",
+			"quickAddNote",
 			"nextTaskOnly",
 			"taskColumnsOverview",
 			"taskProgressBar",
@@ -148,6 +150,7 @@ export const WIDGET_LABELS: Record<NotchWidgetId, string> = {
 	firstTodoList: "First to-dos",
 	taskCount: "Task count",
 	quickAddTask: "Add task",
+	quickAddNote: "Quick note",
 	nextTaskOnly: "Next task",
 	taskColumnsOverview: "Task columns overview",
 	taskProgressBar: "Task progress bar",
@@ -234,6 +237,7 @@ const WIDGET_DEFAULT_SIZE: Record<NotchWidgetId, { w: number; h: number }> = {
 	firstTodoList: { w: 3, h: 3 },
 	taskCount: { w: 2, h: 1 },
 	quickAddTask: { w: 1, h: 1 },
+	quickAddNote: { w: 1, h: 1 },
 	nextTaskOnly: { w: 3, h: 1 },
 	taskColumnsOverview: { w: 3, h: 1 },
 	taskProgressBar: { w: 3, h: 1 },
@@ -467,6 +471,7 @@ const ICON_PREVIEWS: Partial<Record<NotchWidgetId, typeof ClockIcon>> = {
 	focusMainButton: HomeIcon,
 	themeToggle: SunIcon,
 	quickAddTask: PlusIcon,
+	quickAddNote: PencilSquareIcon,
 };
 
 const TEXT_PREVIEWS: Partial<Record<NotchWidgetId, string>> = {

@@ -77,6 +77,16 @@ export type NoteItem = {
 	updated_at: string;
 };
 
+// What the notch's separate capture popup should collect, and the context it
+// writes back into.
+export type NotchInputPayload = {
+	kind: "task" | "note";
+	environmentId?: string;
+	environmentName?: string;
+	status?: string;
+	columnLabel?: string;
+};
+
 export type NotebookNodeType = "text" | "media" | "postit";
 
 export type NotebookNode = {
@@ -176,6 +186,7 @@ export type NotchWidgetId =
 	| "firstTodoList"
 	| "taskCount"
 	| "quickAddTask"
+	| "quickAddNote"
 	| "nextTaskOnly"
 	| "taskColumnsOverview"
 	| "taskProgressBar"
