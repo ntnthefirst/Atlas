@@ -27,7 +27,7 @@ Atlas combineert in een app:
 - Logbook met sessietijdlijn en appverdeling.
 - Kanban-achtig task board per map.
 - Vrij notebook-canvas met tekst, post-its en media.
-- Instellingen voor thema en quick actions.
+- Instellingen voor thema.
 - Mini player venster voor actieve sessiecontrole.
 - Systeemtray integratie.
 
@@ -58,7 +58,7 @@ Atlas combineert in een app:
 ### 3.4 Opslag en persistentie
 
 - Structurele data in SQLite bestand (`atlas.db`) in Electron userData map.
-- UI voorkeuren (theme, quick actions, task order/columns) in `localStorage`.
+- UI voorkeuren (theme, task order/columns) in `localStorage`.
 
 ## 4. Domeinmodel (concepten)
 
@@ -179,7 +179,6 @@ Inhoud:
 - Quick stats: sessies vandaag, open tasks, current app, current map.
 - Time per app (toplijst met balken).
 - Time per map.
-- Quick action knoppen (commando launch).
 
 ### 6.4 Logbook
 
@@ -242,11 +241,6 @@ Huidige functies:
 
 - Theme mode: light/dark/system.
 - Simpele UI toggles/selects voor voorkeuren (lokaal component-state).
-- Quick actions beheren:
-    - Label + command toevoegen.
-    - Verwijderen.
-
-Quick actions worden opgeslagen in `localStorage` onder `atlas.quickActions`.
 
 ## 7. Electron venstermodes
 
@@ -384,7 +378,7 @@ Regelt:
 - Centrale appstate en bootstrapping.
 - Polling loops voor sessie/app/dashboard updates.
 - Navigatie tussen views.
-- Actions voor maps, sessies, tasks, notebook, quick actions.
+- Actions voor maps, sessies, tasks, notebook.
 - Rendering voor mini/welcome/main mode.
 
 ## 11. Thema en styling
