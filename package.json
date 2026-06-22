@@ -3,7 +3,7 @@
 	"description": "Activity tracking and time mapping application",
 	"author": "You",
 	"private": true,
-	"version": "0.0.0",
+	"version": "0.8.0",
 	"type": "module",
 	"main": "electron/main.cjs",
 	"scripts": {
@@ -17,7 +17,8 @@
 		"dist:ci:mac": "npm run build && electron-builder --mac --publish always",
 		"dist:portable": "npm run build && electron-builder --win portable --publish never",
 		"lint": "eslint .",
-		"preview": "vite preview"
+		"preview": "vite preview",
+		"release:beta": "npm version prerelease --preid=beta"
 	},
 	"build": {
 		"appId": "com.atlas.app",
