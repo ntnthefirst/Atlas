@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { MinusIcon, XMarkIcon, PauseIcon, PlayIcon, StopIcon } from "@heroicons/react/24/outline";
-import type { AtlasView, TaskStatus, TaskItem, TaskColumn, MapItem } from "./types";
+import type { AtlasView, TaskStatus, TaskItem, TaskColumn, TaskUpdate, MapItem } from "./types";
 import { AtlasHeader } from "./components/AtlasHeader";
 import { AtlasSidebar } from "./components/AtlasSidebar";
 import { AtlasMainContent } from "./components/AtlasMainContent";
@@ -757,6 +757,26 @@ function MainAtlasApp() {
 		setDashboard(await window.atlas.getDashboardOverview(selectedMapId));
 	};
 
+	const onUpdateTask = async (taskId: string, fields: TaskUpdate) => {
+		if (!selectedMapId) return;
+		const updated = await window.atlas.updateTask(taskId, fields);
+		setTasks((current) => current.map((task) => (task.id === taskId ? { ...task, ...updated } : task)));
+		if ("status" in fields) {
+			setDashboard(await window.atlas.getDashboardOverview(selectedMapId));
+		}
+	};
+
+	const onDeleteTask = async (taskId: string) => {
+		if (!selectedMapId) return;
+		await window.atlas.deleteTask(taskId);
+		setTasks((current) => current.filter((task) => task.id !== taskId));
+		setTaskOrderByMap((current) => ({
+			...current,
+			[selectedMapId]: (current[selectedMapId] ?? []).filter((id) => id !== taskId),
+		}));
+		setDashboard(await window.atlas.getDashboardOverview(selectedMapId));
+	};
+
 	// Notebook & actions
 	const onUpdateNotebookByMap = async (content: string) => {
 		if (!selectedMapId) return;
@@ -1028,6 +1048,8 @@ function MainAtlasApp() {
 								onDropOnTask={onDropOnTask}
 								setDraggedTaskId={setDraggedTaskId}
 								onCreateTaskInColumn={onCreateTaskInColumn}
+								onUpdateTask={onUpdateTask}
+								onDeleteTask={onDeleteTask}
 								onRenameTaskColumn={onRenameTaskColumn}
 								onReorderTaskColumns={onReorderTaskColumns}
 								onAddTaskColumn={onAddTaskColumn}
