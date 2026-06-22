@@ -1,7 +1,15 @@
 import { CalendarDaysIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
 import { useRef, useState, useEffect } from "react";
-import type { PresetSelection } from "../../hooks/useCalendarFilter";
+import type { CalendarFilter, PresetSelection } from "../../hooks/useCalendarFilter";
 import { MONTH_OPTIONS, WEEKDAY_LABELS, toMonthStart } from "../../hooks/useCalendarFilter";
+
+// The calendar state (spread from useCalendarFilter) plus the few extras the
+// activity view passes alongside it.
+type CalendarPopoverProps = CalendarFilter & {
+	yearOptions: number[];
+	now: number;
+	formatDuration: (ms: number) => string;
+};
 
 export function CalendarPopover({
 	selectedRange,
@@ -19,7 +27,7 @@ export function CalendarPopover({
 	yearOptions,
 	now,
 	formatDuration,
-}: any) {
+}: CalendarPopoverProps) {
 	const [monthDropdownOpen, setMonthDropdownOpen] = useState(false);
 	const [yearDropdownOpen, setYearDropdownOpen] = useState(false);
 	const monthDropdownRef = useRef<HTMLDivElement | null>(null);
@@ -217,7 +225,7 @@ export function CalendarPopover({
 							))}
 						</div>
 						<div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7">
-							{calendarData.cells.map((cell: any) =>
+							{calendarData.cells.map((cell) =>
 								cell.isEmpty ? (
 									<div
 										key={cell.key}

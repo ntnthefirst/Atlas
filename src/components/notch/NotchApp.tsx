@@ -1,3 +1,10 @@
+/* eslint-disable react-hooks/set-state-in-effect, react-hooks/preserve-manual-memoization --
+   The notch mirrors external sources (the DB via IPC, system stats, localStorage) into
+   local state through polling effects, and intentionally resets that state synchronously
+   when the active environment clears; it also memoizes derived task data keyed on the
+   stable environment id rather than the object identity that changes every poll. These
+   are deliberate external-sync patterns that the React Compiler's advisory rules don't
+   model, so they're disabled for this file only. */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
@@ -378,7 +385,7 @@ export function NotchApp() {
 	const [activeSession, setActiveSession] = useState<Session | null>(null);
 	const [dashboard, setDashboard] = useState<DashboardOverview | null>(null);
 	const [todaySessions, setTodaySessions] = useState<Session[]>([]);
-	const [now, setNow] = useState(Date.now());
+	const [now, setNow] = useState(() => Date.now());
 	const focus = useFocus(now);
 	const [hovered, setHovered] = useState(false);
 	// Card's own size (for the docked retract distance) vs. the wrapper's size
