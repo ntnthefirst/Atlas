@@ -19,7 +19,7 @@ const createTabId = () => `tab-${Date.now()}-${nextTabSuffix++}`;
 // of the notch preferences use, so it can be dropped into the Settings
 // window's Smart Notch tab and into the standalone Action Editor window
 // without either one owning the state.
-export function NotchTabsEditor() {
+export function NotchTabsEditor({ centered = false }: { centered?: boolean } = {}) {
 	const [tabs, setTabs] = useState<NotchTab[]>([]);
 	const [selectedTabId, setSelectedTabId] = useState<string | null>(null);
 	const [tabSelectOpen, setTabSelectOpen] = useState(false);
@@ -72,7 +72,7 @@ export function NotchTabsEditor() {
 
 	return (
 		<>
-			<div>
+			<div className={centered ? "text-center" : ""}>
 				<span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
 					Action buttons
 				</span>
@@ -82,7 +82,7 @@ export function NotchTabsEditor() {
 				</p>
 			</div>
 
-			<div className="flex items-center gap-2">
+			<div className={`flex items-center gap-2 ${centered ? "justify-center" : ""}`}>
 				<div className="relative">
 					<button
 						type="button"

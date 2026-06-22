@@ -68,7 +68,9 @@ export function ActionEditorWindowApp() {
 
 				<main className="atlas-settings-content p-3">
 					<section className="atlas-card atlas-settings-panel">
-						<NotchTabsEditor />
+						<div className="mx-auto grid w-full max-w-3xl gap-4">
+							<NotchTabsEditor centered />
+						</div>
 					</section>
 				</main>
 			</motion.div>

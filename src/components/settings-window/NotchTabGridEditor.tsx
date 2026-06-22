@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
 	ArrowPathIcon,
 	ArrowUpOnSquareStackIcon,
@@ -44,6 +44,11 @@ const lastEnvironmentId = () => {
 // here renders pixel-for-pixel the same on the notch itself.
 const GRID_CELL_PX = 40;
 const GRID_GAP_PX = 6;
+// The editor preview shrinks its cells to fit the available width so a wide
+// grid (up to 20 columns) is always fully visible and centered, never
+// overflowing the window horizontally.
+const MIN_EDITOR_CELL_PX = 18;
+const GRID_PADDING_PX = 16; // p-2 on each side
 
 export const GRID_MIN_COLS = 5;
 export const GRID_MAX_COLS = 20;
@@ -698,6 +703,27 @@ export function NotchTabGridEditor({ tab, onChange }: { tab: NotchTab; onChange:
 	const [dragPreview, setDragPreview] = useState<(Rect & { valid: boolean }) | null>(null);
 	const [selectedPlacementId, setSelectedPlacementId] = useState<string | null>(null);
 	const dragPointerRef = useRef<{ x: number; y: number } | null>(null);
+	// Measure the space the grid has so cells can shrink to fit it.
+	const gridWrapRef = useRef<HTMLDivElement | null>(null);
+	const [availWidth, setAvailWidth] = useState(0);
+
+	useLayoutEffect(() => {
+		const node = gridWrapRef.current;
+		if (!node) return;
+		const measure = () => setAvailWidth(node.clientWidth);
+		measure();
+		const observer = new ResizeObserver(measure);
+		observer.observe(node);
+		return () => observer.disconnect();
+	}, []);
+
+	// Largest square cell (capped at the notch's real 40px) that still lets the
+	// whole grid fit the available width — so the preview never overflows.
+	const cellPx = useMemo(() => {
+		if (!availWidth) return GRID_CELL_PX;
+		const usable = availWidth - GRID_PADDING_PX - (tab.gridCols - 1) * GRID_GAP_PX;
+		return Math.max(MIN_EDITOR_CELL_PX, Math.min(GRID_CELL_PX, Math.floor(usable / tab.gridCols)));
+	}, [availWidth, tab.gridCols]);
 
 	// Auto-scroll whatever's scrollable under the cursor while dragging, since
 	// the browser won't do it on its own — without this, a widget or grid spot
@@ -735,7 +761,7 @@ export function NotchTabGridEditor({ tab, onChange }: { tab: NotchTab; onChange:
 		};
 	}, [draggingInfo]);
 
-	const cellPitch = GRID_CELL_PX + GRID_GAP_PX;
+	const cellPitch = cellPx + GRID_GAP_PX;
 
 	const cellFromPointer = (event: { clientX: number; clientY: number; currentTarget: HTMLDivElement }) => {
 		const rect = event.currentTarget.getBoundingClientRect();
@@ -840,7 +866,7 @@ export function NotchTabGridEditor({ tab, onChange }: { tab: NotchTab; onChange:
 
 	return (
 		<div className="grid gap-3">
-			<div className="flex flex-wrap items-center gap-4">
+			<div className="flex flex-wrap items-center justify-center gap-4">
 				<label className="flex items-center gap-2 text-sm text-neutral-500 dark:text-neutral-300">
 					Columns
 					<NumberStepper
@@ -861,6 +887,7 @@ export function NotchTabGridEditor({ tab, onChange }: { tab: NotchTab; onChange:
 				</label>
 			</div>
 
+			<div ref={gridWrapRef} className="flex justify-center">
 			<div
 				onDragOver={(event) => {
 					event.preventDefault();
@@ -871,8 +898,8 @@ export function NotchTabGridEditor({ tab, onChange }: { tab: NotchTab; onChange:
 				onDrop={handleDrop}
 				className="relative inline-grid rounded-xl border border-dashed border-neutral-300 bg-neutral-50 p-2 dark:border-neutral-600 dark:bg-neutral-800/40"
 				style={{
-					gridTemplateColumns: `repeat(${tab.gridCols}, ${GRID_CELL_PX}px)`,
-					gridTemplateRows: `repeat(${tab.gridRows}, ${GRID_CELL_PX}px)`,
+					gridTemplateColumns: `repeat(${tab.gridCols}, ${cellPx}px)`,
+					gridTemplateRows: `repeat(${tab.gridRows}, ${cellPx}px)`,
 					gap: `${GRID_GAP_PX}px`,
 				}}
 			>
@@ -940,6 +967,7 @@ export function NotchTabGridEditor({ tab, onChange }: { tab: NotchTab; onChange:
 					/>
 				)}
 			</div>
+			</div>
 
 			{selectedPlacement && isScene && (
 				<SceneConfigEditor config={selectedPlacement.config} onChange={setSelectedConfig} />
@@ -1002,16 +1030,21 @@ export function NotchTabGridEditor({ tab, onChange }: { tab: NotchTab; onChange:
 				</div>
 			)}
 
-			<div className="grid gap-3">
-				<span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
-					Drag onto the grid
-				</span>
+			<div className="grid gap-3 border-t border-neutral-200 pt-4 dark:border-neutral-600">
+				<div className="text-center">
+					<span className="text-sm font-semibold text-neutral-700 dark:text-neutral-100">
+						Widget library
+					</span>
+					<p className="m-0 text-xs text-neutral-500 dark:text-neutral-300">
+						Drag any widget onto the grid above.
+					</p>
+				</div>
 				{WIDGET_CATEGORIES.map((category) => (
 					<div key={category.label} className="grid gap-1.5">
-						<span className="text-[10px] font-medium uppercase tracking-wide text-neutral-400 dark:text-neutral-500">
+						<span className="text-center text-[10px] font-medium uppercase tracking-wide text-neutral-400 dark:text-neutral-500">
 							{category.label}
 						</span>
-						<div className="flex flex-wrap gap-2">
+						<div className="flex flex-wrap justify-center gap-2">
 							{category.widgets.map((widgetId) => (
 								<div
 									key={widgetId}
