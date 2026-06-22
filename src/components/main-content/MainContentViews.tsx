@@ -1,6 +1,7 @@
 import { DashboardView } from "./DashboardView";
 import { ActivityView } from "./ActivityView";
 import { NotesView } from "./NotesView";
+import { FocusView } from "./FocusView";
 import { SettingsView } from "./SettingsView";
 import { TasksView } from "./TasksView";
 import type { MainContentViewsProps } from "./types";
@@ -22,6 +23,9 @@ export function MainContentViews(props: MainContentViewsProps) {
 				{...props}
 			/>
 		);
+	}
+	if (props.view === "focus") {
+		return <FocusView {...props} />;
 	}
 	return <SettingsView {...props} />;
 }

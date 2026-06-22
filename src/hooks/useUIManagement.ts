@@ -1,5 +1,5 @@
 import { useState, useEffect, useSyncExternalStore } from "react";
-import { THEME_KEY, QUICK_ACTIONS_KEY } from "../constants";
+import { THEME_KEY } from "../constants";
 import { readStorage } from "../utils/storage";
 
 export const useThemeManagement = () => {
@@ -25,29 +25,4 @@ export const useThemeManagement = () => {
 	}, [theme, resolvedTheme]);
 
 	return { theme, setTheme, resolvedTheme };
-};
-
-export const useQuickActionsManagement = () => {
-	const [quickActions, setQuickActions] = useState<Array<{ id: string; label: string; command: string }>>(() =>
-		readStorage(QUICK_ACTIONS_KEY, [
-			{ id: "vscode", label: "Open VS Code", command: "code" },
-			{ id: "figma", label: "Open Figma", command: "figma" },
-			{ id: "chrome", label: "Open Chrome", command: "chrome" },
-		]),
-	);
-	const [newActionLabel, setNewActionLabel] = useState("");
-	const [newActionCommand, setNewActionCommand] = useState("");
-
-	useEffect(() => {
-		localStorage.setItem(QUICK_ACTIONS_KEY, JSON.stringify(quickActions));
-	}, [quickActions]);
-
-	return {
-		quickActions,
-		setQuickActions,
-		newActionLabel,
-		setNewActionLabel,
-		newActionCommand,
-		setNewActionCommand,
-	};
 };

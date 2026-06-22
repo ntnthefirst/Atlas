@@ -6,7 +6,9 @@ export {
 	useDashboardManagement,
 	useActivityManagement,
 } from "./useDataManagement";
-export { useThemeManagement, useQuickActionsManagement } from "./useUIManagement";
+export { useThemeManagement } from "./useUIManagement";
+export { useFocus, formatCountdown, FOCUS_PHASE_LABELS } from "./useFocus";
+export type { UseFocusReturn } from "./useFocus";
 export { useAccent } from "./useAccent";
 export {
 	useMapMenuManagement,

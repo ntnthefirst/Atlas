@@ -9,6 +9,7 @@ import type {
 	TaskStatus,
 	TaskUpdate,
 } from "../../types";
+import type { UseFocusReturn } from "../../hooks";
 
 export type MainContentViewsProps = {
 	view: AtlasView;
@@ -17,8 +18,6 @@ export type MainContentViewsProps = {
 	activeElapsed: string;
 	currentAppName: string;
 	selectedMapName: string;
-	quickActions: Array<{ id: string; label: string; command: string }>;
-	onLaunchQuickAction: (command: string) => void;
 	sessions: Session[];
 	selectedSession: Session | null;
 	onOpenSession: (sessionId: string) => void;
@@ -47,10 +46,5 @@ export type MainContentViewsProps = {
 	onUpdateNotebookByMap: (content: string) => Promise<void>;
 	theme: "dark" | "light" | "system";
 	onThemeChange: (theme: "dark" | "light" | "system") => void;
-	newActionLabel: string;
-	newActionCommand: string;
-	onNewActionLabelChange: (value: string) => void;
-	onNewActionCommandChange: (value: string) => void;
-	onAddQuickAction: () => void;
-	onRemoveQuickAction: (id: string) => void;
+	focus: UseFocusReturn;
 };

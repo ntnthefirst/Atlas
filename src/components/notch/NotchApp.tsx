@@ -89,7 +89,7 @@ import type {
 	TaskColumn,
 	TaskItem,
 } from "../../types";
-import { useAccent } from "../../hooks";
+import { useAccent, useFocus, FOCUS_PHASE_LABELS } from "../../hooks";
 import {
 	formatClock,
 	formatDuration,
@@ -283,6 +283,14 @@ const NAV_ACTIONS: Partial<
 			void window.atlas.requestNavigate("notes");
 		},
 	},
+	openFocusButton: {
+		icon: BoltIcon,
+		title: "Focus",
+		onClick: () => {
+			void window.atlas.focusMainIfOpen();
+			void window.atlas.requestNavigate("focus");
+		},
+	},
 	openSettingsButton: {
 		icon: Cog6ToothIcon,
 		title: "Settings",
@@ -371,6 +379,7 @@ export function NotchApp() {
 	const [dashboard, setDashboard] = useState<DashboardOverview | null>(null);
 	const [todaySessions, setTodaySessions] = useState<Session[]>([]);
 	const [now, setNow] = useState(Date.now());
+	const focus = useFocus(now);
 	const [hovered, setHovered] = useState(false);
 	// Card's own size (for the docked retract distance) vs. the wrapper's size
 	// (card + open panel + gap, for sizing the OS window) are tracked separately
@@ -983,6 +992,10 @@ export function NotchApp() {
 				return appVersion ? `v${appVersion}` : "—";
 			case "sessionStateLabel":
 				return activeSession ? (activeSession.is_paused ? "Paused" : "Running") : "Idle";
+			case "focusStatus":
+				return focus.runtime
+					? `${FOCUS_PHASE_LABELS[focus.runtime.phase]} ${focus.countdown}`
+					: "Focus idle";
 			case "lastNoteSnippet":
 				return lastNote ? lastNote.content.slice(0, 60) || "(empty note)" : "No notes yet";
 			default:
@@ -1021,6 +1034,22 @@ export function NotchApp() {
 		}
 
 		switch (widgetId) {
+			case "focusToggle": {
+				const running = focus.isRunning;
+				return (
+					<div key={placement.id} className="flex h-full items-center justify-center">
+						<button
+							type="button"
+							className={`${ICON_BUTTON_CLASSES} h-8 w-8`}
+							title={running ? "Pause focus" : focus.runtime ? "Resume focus" : "Start focus"}
+							aria-label={running ? "Pause focus" : "Start focus"}
+							onClick={() => focus.toggle()}
+						>
+							{running ? <PauseIcon className="h-5 w-5" /> : <BoltIcon className="h-5 w-5" />}
+						</button>
+					</div>
+				);
+			}
 			case "timerStartStop":
 				return (
 					<div key={placement.id} className="flex h-full items-center justify-center">

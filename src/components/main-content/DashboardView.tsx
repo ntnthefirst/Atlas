@@ -11,14 +11,13 @@ export function DashboardView(props: MainContentViewsProps) {
 		activeElapsed: props.activeElapsed,
 		currentAppName: props.currentAppName,
 		selectedMapName: props.selectedMapName,
-		quickActions: props.quickActions,
-		onLaunchQuickAction: props.onLaunchQuickAction,
 		sessions: props.sessions,
 		now: props.now,
 		formatDuration: props.formatDuration,
 		tasks: props.tasks,
 		statusColumns: props.statusColumns,
 		notebook: props.notebook,
+		focus: props.focus,
 	};
 
 	return <DashboardGrid data={data} />;

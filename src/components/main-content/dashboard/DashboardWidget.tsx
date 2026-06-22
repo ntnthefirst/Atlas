@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { ArrowTopRightOnSquareIcon, GlobeAltIcon, RocketLaunchIcon } from "@heroicons/react/24/outline";
+import { PauseIcon, PlayIcon } from "@heroicons/react/24/solid";
 import type { DashboardWidgetId, DashboardOverview, NoteItem, Session, TaskColumn, TaskItem } from "../../../types";
+import { FOCUS_PHASE_LABELS, type UseFocusReturn } from "../../../hooks";
 
 // Everything a dashboard card might need, assembled by DashboardView from the
 // data it already loads. Passing one bag keeps DashboardWidget decoupled from
@@ -11,14 +13,13 @@ export type DashboardWidgetData = {
 	activeElapsed: string;
 	currentAppName: string;
 	selectedMapName: string;
-	quickActions: Array<{ id: string; label: string; command: string }>;
-	onLaunchQuickAction: (command: string) => void;
 	sessions: Session[];
 	now: number;
 	formatDuration: (ms: number) => string;
 	tasks: TaskItem[];
 	statusColumns: TaskColumn[];
 	notebook: NoteItem | null;
+	focus: UseFocusReturn;
 };
 
 // Strips the "[tracked-name]" suffix the tracker appends, matching the
@@ -319,25 +320,6 @@ export function DashboardWidget({
 				</>
 			);
 
-		case "quickActions":
-			return (
-				<>
-					<CardHeader title="Quick actions" />
-					<div className="quick-actions">
-						{data.quickActions.map((action) => (
-							<button
-								key={action.id}
-								className="action-btn"
-								onClick={() => data.onLaunchQuickAction(action.command)}
-							>
-								{action.label}
-							</button>
-						))}
-						{!data.quickActions.length && <p className="empty">Add quick actions in Settings.</p>}
-					</div>
-				</>
-			);
-
 		case "taskProgress": {
 			const lastColumn = data.statusColumns[data.statusColumns.length - 1];
 			const total = data.tasks.length;
@@ -524,6 +506,50 @@ export function DashboardWidget({
 						You're in {data.selectedMapName}
 					</span>
 				</div>
+			);
+		}
+
+		case "focusToday": {
+			const { runtime, stats, countdown, isRunning, toggle } = data.focus;
+			const phaseLabel = runtime ? FOCUS_PHASE_LABELS[runtime.phase] : "Idle";
+			return (
+				<>
+					<CardHeader title="Focus" />
+					<div className="grid h-full content-between gap-2">
+						<div className="flex items-center justify-between gap-2">
+							<div className="min-w-0">
+								<p className="m-0 text-[11px] uppercase tracking-[0.12em] text-neutral-500 dark:text-neutral-300">
+									{phaseLabel}
+								</p>
+								<p className="m-0 font-data text-[26px] font-semibold leading-none text-neutral-800 dark:text-neutral-0">
+									{runtime ? countdown : `${data.focus.config.focusMinutes}:00`}
+								</p>
+							</div>
+							<button
+								type="button"
+								onClick={() => toggle()}
+								className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-neutral-0 transition hover:opacity-90"
+								aria-label={isRunning ? "Pause focus" : "Start focus"}
+							>
+								{isRunning ? <PauseIcon className="h-5 w-5" /> : <PlayIcon className="h-5 w-5" />}
+							</button>
+						</div>
+						<div className="flex items-center gap-3 text-[12px] text-neutral-500 dark:text-neutral-300">
+							<span>
+								<strong className="font-semibold text-neutral-700 dark:text-neutral-100">
+									{stats.focusRoundsCompleted}
+								</strong>{" "}
+								rounds
+							</span>
+							<span>
+								<strong className="font-semibold text-neutral-700 dark:text-neutral-100">
+									{formatDuration(stats.focusMsCompleted)}
+								</strong>{" "}
+								today
+							</span>
+						</div>
+					</div>
+				</>
 			);
 		}
 

@@ -1,4 +1,3 @@
-import { PlusIcon } from "@heroicons/react/24/outline";
 import { useEffect, useState } from "react";
 import { Select, ThemeModePicker, Toggle } from "../ui";
 import type { MainContentViewsProps } from "./types";
@@ -11,17 +10,7 @@ type UpdateInfo = {
 	error?: string;
 };
 
-export function SettingsView({
-	theme,
-	onThemeChange,
-	newActionLabel,
-	newActionCommand,
-	onNewActionLabelChange,
-	onNewActionCommandChange,
-	onAddQuickAction,
-	quickActions,
-	onRemoveQuickAction,
-}: MainContentViewsProps) {
+export function SettingsView({ theme, onThemeChange }: MainContentViewsProps) {
 	const [timeFormat, setTimeFormat] = useState("24h");
 	const [startWeekOn, setStartWeekOn] = useState("monday");
 	const [density, setDensity] = useState("comfortable");
@@ -133,48 +122,6 @@ export function SettingsView({
 						checked={pinMapSwitcher}
 						onChange={setPinMapSwitcher}
 					/>
-
-					<div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 dark:border-neutral-600 dark:bg-neutral-700">
-						<p className="m-0 text-[11px] uppercase tracking-[0.14em] text-neutral-500 dark:text-neutral-300">
-							Quick actions
-						</p>
-						<div className="mt-3 grid gap-2">
-							<input
-								value={newActionLabel}
-								onChange={(event) => onNewActionLabelChange(event.target.value)}
-								placeholder="Action label"
-							/>
-							<input
-								value={newActionCommand}
-								onChange={(event) => onNewActionCommandChange(event.target.value)}
-								placeholder="Command, for example code"
-							/>
-							<button
-								className="action-btn"
-								onClick={onAddQuickAction}
-							>
-								<PlusIcon className="h-4 w-4" />
-								Add action
-							</button>
-						</div>
-					</div>
-
-					<ul className="simple-list">
-						{quickActions.map((action) => (
-							<li key={action.id}>
-								<div>
-									<span>{action.label}</span>
-									<small>{action.command}</small>
-								</div>
-								<button
-									className="action-btn"
-									onClick={() => onRemoveQuickAction(action.id)}
-								>
-									Remove
-								</button>
-							</li>
-						))}
-					</ul>
 				</div>
 			</section>
 
