@@ -12,21 +12,21 @@ const cleanAppLabel = (value: string) => {
 	return cleaned || "Unknown";
 };
 
-const dutchTimeFormatter = new Intl.DateTimeFormat("nl-NL", {
+const timeFormatter = new Intl.DateTimeFormat("en-GB", {
 	hour: "2-digit",
 	minute: "2-digit",
 });
 
-const dutchWeekdayFormatter = new Intl.DateTimeFormat("nl-NL", {
+const weekdayFormatter = new Intl.DateTimeFormat("en-US", {
 	weekday: "long",
 });
 
-const dutchDateFormatter = new Intl.DateTimeFormat("nl-NL", {
+const dateFormatter = new Intl.DateTimeFormat("en-US", {
 	day: "numeric",
 	month: "long",
 });
 
-const dutchDateWithYearFormatter = new Intl.DateTimeFormat("nl-NL", {
+const dateWithYearFormatter = new Intl.DateTimeFormat("en-US", {
 	day: "numeric",
 	month: "long",
 	year: "numeric",
@@ -38,34 +38,34 @@ const isSameCalendarDay = (left: Date, right: Date) =>
 	left.getDate() === right.getDate();
 
 const formatSessionDateLabel = (sessionDate: Date, referenceDate: Date) => {
-	const weekday = dutchWeekdayFormatter.format(sessionDate);
+	const weekday = weekdayFormatter.format(sessionDate);
 	const datePart =
 		sessionDate.getFullYear() === referenceDate.getFullYear()
-			? dutchDateFormatter.format(sessionDate)
-			: dutchDateWithYearFormatter.format(sessionDate);
+			? dateFormatter.format(sessionDate)
+			: dateWithYearFormatter.format(sessionDate);
 
 	if (isSameCalendarDay(sessionDate, referenceDate)) {
-		return "Vandaag";
+		return "Today";
 	}
 
 	const yesterday = new Date(referenceDate);
 	yesterday.setDate(referenceDate.getDate() - 1);
 	if (isSameCalendarDay(sessionDate, yesterday)) {
-		return "Gisteren";
+		return "Yesterday";
 	}
 
 	const dayBeforeYesterday = new Date(referenceDate);
 	dayBeforeYesterday.setDate(referenceDate.getDate() - 2);
 	if (isSameCalendarDay(sessionDate, dayBeforeYesterday)) {
-		return "Eergisteren";
+		return "2 days ago";
 	}
 
-	return `${weekday} ${datePart}`;
+	return `${weekday}, ${datePart}`;
 };
 
 const formatSessionTimeRange = (startDate: Date, endDate?: Date) => {
-	const start = dutchTimeFormatter.format(startDate);
-	const end = endDate ? dutchTimeFormatter.format(endDate) : "nu";
+	const start = timeFormatter.format(startDate);
+	const end = endDate ? timeFormatter.format(endDate) : "now";
 	return `${start} -> ${end}`;
 };
 

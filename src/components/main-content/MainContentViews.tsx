@@ -1,6 +1,5 @@
 import { DashboardView } from "./DashboardView";
-import { AnalysisView } from "./AnalysisView";
-import { LogbookView } from "./LogbookView";
+import { ActivityView } from "./ActivityView";
 import { NotesView } from "./NotesView";
 import { SettingsView } from "./SettingsView";
 import { TasksView } from "./TasksView";
@@ -10,14 +9,11 @@ export function MainContentViews(props: MainContentViewsProps) {
 	if (props.view === "dashboard") {
 		return <DashboardView {...props} />;
 	}
-	if (props.view === "logbook") {
-		return <LogbookView {...props} />;
+	if (props.view === "activity") {
+		return <ActivityView {...props} />;
 	}
 	if (props.view === "tasks") {
 		return <TasksView {...props} />;
-	}
-	if (props.view === "analysis") {
-		return <AnalysisView {...props} />;
 	}
 	if (props.view === "notes") {
 		return (

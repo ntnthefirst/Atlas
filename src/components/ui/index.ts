@@ -1,3 +1,4 @@
+export { AccentPicker } from "./AccentPicker";
 export { Select } from "./Select";
 export { ThemeModePicker } from "./ThemeModePicker";
 export { Tooltip } from "./Tooltip";

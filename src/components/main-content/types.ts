@@ -7,6 +7,7 @@ import type {
 	TaskColumn,
 	TaskItem,
 	TaskStatus,
+	TaskUpdate,
 } from "../../types";
 
 export type MainContentViewsProps = {
@@ -22,6 +23,7 @@ export type MainContentViewsProps = {
 	selectedSession: Session | null;
 	onOpenSession: (sessionId: string) => void;
 	onDeleteSession: (sessionId: string) => Promise<void>;
+	filteredSessionStats?: { session: Session; clockMs: number; focusMs: number }[];
 	activityBlocks: ActivityBlock[];
 	now: number;
 	formatDuration: (ms: number) => string;
@@ -35,6 +37,8 @@ export type MainContentViewsProps = {
 	onDropOnTask: (task: TaskItem, position?: "before" | "after") => Promise<void>;
 	setDraggedTaskId: (taskId: string) => void;
 	onCreateTaskInColumn: (status: TaskStatus, title: string) => Promise<void>;
+	onUpdateTask: (taskId: string, fields: TaskUpdate) => Promise<void>;
+	onDeleteTask: (taskId: string) => Promise<void>;
 	onRenameTaskColumn: (status: TaskStatus, label: string) => void;
 	onReorderTaskColumns: (draggedStatus: TaskStatus, targetStatus: TaskStatus, position?: "before" | "after") => void;
 	onAddTaskColumn: () => void;

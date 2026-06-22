@@ -1,6 +1,19 @@
+export type EnvironmentPreset =
+	| "work"
+	| "coding"
+	| "gaming"
+	| "montage"
+	| "study"
+	| "design"
+	| "writing"
+	| "custom";
+
 export type MapItem = {
 	id: string;
 	name: string;
+	icon?: string | null;
+	accent?: string | null;
+	preset?: string | null;
 	created_at: string;
 };
 
@@ -33,15 +46,28 @@ export type TaskColumn = {
 	label: string;
 };
 
+export type TaskPriority = "none" | "low" | "medium" | "high" | "urgent";
+
+export const TASK_PRIORITIES: TaskPriority[] = ["none", "low", "medium", "high", "urgent"];
+
 export type TaskItem = {
 	id: string;
 	map_id: string;
 	title: string;
 	description: string;
 	status: TaskStatus;
+	priority: TaskPriority;
+	tags: string[];
+	due_date: string | null;
 	created_at: string;
 	updated_at: string;
 };
+
+// Fields the task detail panel can edit. All optional — only what's passed is
+// written.
+export type TaskUpdate = Partial<
+	Pick<TaskItem, "title" | "description" | "status" | "priority" | "tags" | "due_date">
+>;
 
 export type NoteItem = {
 	id: string;
@@ -49,6 +75,16 @@ export type NoteItem = {
 	content: string;
 	created_at: string;
 	updated_at: string;
+};
+
+// What the notch's separate capture popup should collect, and the context it
+// writes back into.
+export type NotchInputPayload = {
+	kind: "task" | "note";
+	environmentId?: string;
+	environmentName?: string;
+	status?: string;
+	columnLabel?: string;
 };
 
 export type NotebookNodeType = "text" | "media" | "postit";
@@ -90,7 +126,7 @@ export type DashboardOverview = {
 	};
 };
 
-export type AtlasView = "dashboard" | "logbook" | "tasks" | "analysis" | "notes" | "settings";
+export type AtlasView = "dashboard" | "activity" | "tasks" | "notes" | "settings";
 
 export type UpdateCheckResult = {
 	hasUpdate: boolean;
@@ -121,4 +157,266 @@ export type UpdatePreferences = {
 export type DownloadAndInstallResult = {
 	started: boolean;
 	error?: string;
+};
+
+export type NotchPosition = "top" | "left" | "right" | "free";
+
+export type NotchIdleOpacity = "subtle" | "balanced" | "solid";
+
+export type NotchActivation = "always" | "withMain";
+
+// What a tab can show in its expand panel below/beside the notch.
+export type NotchWidgetId =
+	// Timer/session
+	| "timerStartStop"
+	| "timerPause"
+	| "timerDisplay"
+	| "timerStatusDot"
+	| "sessionStateLabel"
+	| "lockToggle"
+	// Time/stats
+	| "timeSpentToday"
+	| "activityTimeline"
+	| "topApp"
+	| "topAppCompact"
+	| "sessionsTodayCount"
+	| "openTasksCount"
+	| "untrackedToday"
+	// Tasks
+	| "firstTodoList"
+	| "taskCount"
+	| "quickAddTask"
+	| "quickAddNote"
+	| "nextTaskOnly"
+	| "taskColumnsOverview"
+	| "taskProgressBar"
+	| "dueTasksCount"
+	// Notes
+	| "notesCount"
+	| "lastNoteSnippet"
+	// Environment
+	| "environmentName"
+	| "environmentAccentDot"
+	| "environmentSwitcher"
+	| "environmentList"
+	// App launcher / navigation
+	| "scene"
+	| "launchAppButton"
+	| "openUrlButton"
+	| "openDashboardButton"
+	| "openActivityButton"
+	| "openTasksButton"
+	| "openNotesButton"
+	| "openSettingsButton"
+	| "openMiniPlayerButton"
+	// Clock/date
+	| "currentTime"
+	| "currentDate"
+	| "dayOfWeek"
+	| "clockWithSeconds"
+	| "timeUntilMidnight"
+	// System/app
+	| "currentAppName"
+	| "platformBadge"
+	| "appVersionBadge"
+	| "updateAvailableBadge"
+	| "minimizeButton"
+	| "focusMainButton"
+	| "cpuUsagePercent"
+	| "cpuUsageGraph"
+	| "memoryUsagePercent"
+	| "memoryUsageGraph"
+	// Visual/utility
+	| "divider"
+	| "label"
+	| "spacer"
+	| "accentSwatch"
+	| "themeToggle";
+
+// Curated icon choices for custom tabs, picked from the grid icon-picker in
+// settings. These are exactly the heroicons/24/outline export names, so a
+// consuming component can build its icon map with plain object shorthand
+// (e.g. `{ AcademicCapIcon, BoltIcon, ... }`) instead of a separate lookup.
+export const NOTCH_TAB_ICONS = [
+	"AcademicCapIcon",
+	"AdjustmentsHorizontalIcon",
+	"ArchiveBoxIcon",
+	"ArrowPathIcon",
+	"BeakerIcon",
+	"BellIcon",
+	"BoltIcon",
+	"BookOpenIcon",
+	"BriefcaseIcon",
+	"CalendarIcon",
+	"CameraIcon",
+	"ChartBarIcon",
+	"ChatBubbleLeftIcon",
+	"CheckCircleIcon",
+	"ClipboardIcon",
+	"ClockIcon",
+	"CloudIcon",
+	"CodeBracketIcon",
+	"Cog6ToothIcon",
+	"CommandLineIcon",
+	"CpuChipIcon",
+	"CreditCardIcon",
+	"CubeIcon",
+	"DocumentTextIcon",
+	"EnvelopeIcon",
+	"FaceSmileIcon",
+	"FilmIcon",
+	"FireIcon",
+	"FlagIcon",
+	"FolderIcon",
+	"GiftIcon",
+	"GlobeAltIcon",
+	"HeartIcon",
+	"HomeIcon",
+	"InboxIcon",
+	"KeyIcon",
+	"LightBulbIcon",
+	"ListBulletIcon",
+	"MapIcon",
+	"MegaphoneIcon",
+	"MoonIcon",
+	"MusicalNoteIcon",
+	"NewspaperIcon",
+	"PaintBrushIcon",
+	"PaperAirplaneIcon",
+	"PencilIcon",
+	"PhotoIcon",
+	"PlayIcon",
+	"PuzzlePieceIcon",
+	"RocketLaunchIcon",
+	"ShieldCheckIcon",
+	"ShoppingCartIcon",
+	"SparklesIcon",
+	"Squares2X2Icon",
+	"StarIcon",
+	"SunIcon",
+	"TagIcon",
+	"TrashIcon",
+	"TrophyIcon",
+	"UserIcon",
+	"VideoCameraIcon",
+	"WifiIcon",
+	"WrenchIcon",
+] as const;
+
+export type NotchTabIcon = (typeof NOTCH_TAB_ICONS)[number];
+
+// One widget dropped onto a tab's grid. x/y/w/h are in grid cells (0-indexed
+// position, 1-indexed size), each cell being a fixed size (tailwind w-10/h-10)
+// with a gap-1.5 gutter between cells — set in the settings grid editor and
+// rendered identically on the notch itself.
+export type NotchWidgetPlacement = {
+	id: string;
+	widget: NotchWidgetId;
+	x: number;
+	y: number;
+	w: number;
+	h: number;
+	// Per-instance setting for the handful of widgets that need one:
+	// launchAppButton (a command), openUrlButton (a URL), label (custom text),
+	// quickAddTask/firstTodoList/nextTaskOnly/taskCount/taskProgressBar (a
+	// task column's status — defaults to the first column when unset).
+	config?: string;
+};
+
+// A user-defined action button. Clicking one toggles an expand panel below
+// (horizontal notch) or beside (vertical/docked notch) the bar, laid out as a
+// grid of widgets — it no longer navigates to the main window. There's no
+// separate enabled flag: a tab either exists (and shows) or is deleted.
+export type NotchTab = {
+	id: string;
+	label: string;
+	icon: NotchTabIcon;
+	gridCols: number;
+	gridRows: number;
+	placements: NotchWidgetPlacement[];
+};
+
+export type NotchInfoItemId = "timer" | "todo";
+
+// Order is priority: the first enabled item that has something to show wins the
+// single information slot.
+export type NotchInfoItemConfig = {
+	id: NotchInfoItemId;
+	enabled: boolean;
+};
+
+export type NotchPreferences = {
+	enabled: boolean;
+	position: NotchPosition;
+	x: number | null;
+	y: number | null;
+	idleOpacity: NotchIdleOpacity;
+	locked: boolean;
+	activation: NotchActivation;
+	// Which displays show the notch. Empty means "primary display only", and
+	// any id no longer connected falls back to the primary display.
+	displayIds: number[];
+	tabs: NotchTab[];
+	infoItems: NotchInfoItemConfig[];
+};
+
+export type DisplaySummary = {
+	id: number;
+	label: string;
+	isPrimary: boolean;
+	width: number;
+	height: number;
+};
+
+// What a card on the customizable main dashboard can show. Unlike the notch
+// widgets (small, single-purpose), these are full dashboard cards built from
+// the data already loaded for the dashboard view.
+export type DashboardWidgetId =
+	// Time
+	| "totalTimeToday"
+	| "activityTimeline"
+	| "untrackedToday"
+	| "avgSessionLength"
+	| "sessionsToday"
+	// Stats / overview
+	| "quickStats"
+	| "topApp"
+	| "timePerApp"
+	| "timePerEnvironment"
+	| "currentApp"
+	| "currentEnvironment"
+	// Tasks
+	| "openTasks"
+	| "dueTasks"
+	| "taskProgress"
+	| "taskColumnsOverview"
+	| "upcomingTasks"
+	// Notes
+	| "notesCount"
+	| "lastNote"
+	// Clock
+	| "clock"
+	| "date"
+	| "greeting"
+	// Apps & links
+	| "quickActions"
+	| "launchApp"
+	| "openUrl";
+
+// One card placed on the dashboard. Order in the array is the layout order;
+// w/h are spans on a responsive column grid (the rendered column count shrinks
+// as the window narrows, and a card's width is clamped to whatever columns are
+// available), so there are no absolute x/y coordinates to keep valid.
+export type DashboardWidgetPlacement = {
+	id: string;
+	widget: DashboardWidgetId;
+	w: number;
+	h: number;
+	// Per-instance setting for the few configurable cards: launchApp (a launch
+	// command), openUrl (a URL). Other widgets ignore it.
+	config?: string;
+};
+
+export type DashboardPreferences = {
+	widgets: DashboardWidgetPlacement[];
 };

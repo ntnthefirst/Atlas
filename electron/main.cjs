@@ -2,16 +2,35 @@ const path = require("node:path");
 const https = require("node:https");
 const fs = require("node:fs");
 const { spawn } = require("node:child_process");
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, nativeTheme } = require("electron");
+const {
+	app,
+	BrowserWindow,
+	dialog,
+	ipcMain,
+	Menu,
+	Tray,
+	nativeImage,
+	nativeTheme,
+	screen,
+} = require("electron");
 const { autoUpdater } = require("electron-updater");
 
 const { AtlasDatabase } = require("./db.cjs");
 const { ActivityTracker } = require("./activity-tracker.cjs");
+const { getSystemStats, listOpenApps } = require("./system-info.cjs");
 
 let mainWindow = null;
 let miniWindow = null;
 let welcomeWindow = null;
 let settingsWindow = null;
+let actionEditorWindow = null;
+let notchInputWindow = null;
+// Payload (what to capture, for which environment) handed to the notch input
+// popup once it loads, since a freshly created window can't receive it on the
+// constructor.
+let pendingNotchInputPayload = null;
+// Keyed by display id, since the notch can be shown on multiple screens at once.
+let notchWindows = new Map();
 let tray = null;
 let isQuitting = false;
 let db = null;
@@ -20,6 +39,19 @@ let tracker = null;
 const isDev = !app.isPackaged;
 const isMac = process.platform === "darwin";
 const isWindows = process.platform === "win32";
+
+// Windows draws its own minimize/maximize/close glyphs into our frameless
+// window via titleBarOverlay, so unlike the rest of the UI those buttons
+// can't pick up dark: classes - they need their colors pushed from here,
+// in sync with whatever theme is currently active.
+function getTitleBarOverlay() {
+	if (!isWindows) {
+		return false;
+	}
+	return nativeTheme.shouldUseDarkColors
+		? { color: "#2a2a2a", symbolColor: "#e2e2e2", height: 49 }
+		: { color: "#f7f7f7", symbolColor: "#4a4a4a", height: 49 };
+}
 const APP_USER_MODEL_ID = isDev ? "com.atlas.app.dev" : "com.atlas.app";
 const GITHUB_OWNER = "ntnthefirst";
 const GITHUB_REPO = "Atlas";
@@ -30,6 +62,368 @@ const defaultUpdatePreferences = {
 };
 
 let updatePreferences = { ...defaultUpdatePreferences };
+
+const DASHBOARD_PREFS_FILE = "dashboard-preferences.json";
+// Mirrors src/components/main-content/dashboard/catalog.ts — kept as plain
+// strings here since main.cjs only validates them, not renders them.
+const DASHBOARD_WIDGET_IDS = [
+	"totalTimeToday",
+	"activityTimeline",
+	"untrackedToday",
+	"avgSessionLength",
+	"sessionsToday",
+	"quickStats",
+	"topApp",
+	"timePerApp",
+	"timePerEnvironment",
+	"currentApp",
+	"currentEnvironment",
+	"openTasks",
+	"dueTasks",
+	"taskProgress",
+	"taskColumnsOverview",
+	"upcomingTasks",
+	"notesCount",
+	"lastNote",
+	"clock",
+	"date",
+	"greeting",
+	"quickActions",
+	"launchApp",
+	"openUrl",
+];
+const DASHBOARD_MAX_COLS = 4;
+const DASHBOARD_WIDGET_MAX_H = 4;
+const defaultDashboardWidgets = [
+	{ id: "dash-total", widget: "totalTimeToday", w: 2, h: 1 },
+	{ id: "dash-stats", widget: "quickStats", w: 2, h: 2 },
+	{ id: "dash-timeline", widget: "activityTimeline", w: 4, h: 1 },
+	{ id: "dash-apps", widget: "timePerApp", w: 2, h: 2 },
+	{ id: "dash-envs", widget: "timePerEnvironment", w: 2, h: 2 },
+	{ id: "dash-actions", widget: "quickActions", w: 2, h: 1 },
+];
+const defaultDashboardPreferences = { widgets: defaultDashboardWidgets };
+
+const NOTCH_PREFS_FILE = "notch-preferences.json";
+const NOTCH_POSITIONS = ["top", "left", "right", "free"];
+const NOTCH_IDLE_OPACITIES = ["subtle", "balanced", "solid"];
+const NOTCH_ACTIVATIONS = ["always", "withMain"];
+const NOTCH_INFO_ITEM_IDS = ["timer", "todo"];
+const defaultNotchInfoItems = NOTCH_INFO_ITEM_IDS.map((id) => ({ id, enabled: true }));
+
+const NOTCH_WIDGET_IDS = [
+	// Timer/session
+	"timerStartStop",
+	"timerPause",
+	"timerDisplay",
+	"timerStatusDot",
+	"sessionStateLabel",
+	"lockToggle",
+	// Time/stats
+	"timeSpentToday",
+	"activityTimeline",
+	"topApp",
+	"topAppCompact",
+	"sessionsTodayCount",
+	"openTasksCount",
+	"untrackedToday",
+	// Tasks
+	"firstTodoList",
+	"taskCount",
+	"quickAddTask",
+	"quickAddNote",
+	"nextTaskOnly",
+	"taskColumnsOverview",
+	"taskProgressBar",
+	"dueTasksCount",
+	// Notes
+	"notesCount",
+	"lastNoteSnippet",
+	// Environment
+	"environmentName",
+	"environmentAccentDot",
+	"environmentSwitcher",
+	"environmentList",
+	// App launcher / navigation
+	"scene",
+	"launchAppButton",
+	"openUrlButton",
+	"openDashboardButton",
+	"openActivityButton",
+	"openTasksButton",
+	"openNotesButton",
+	"openSettingsButton",
+	"openMiniPlayerButton",
+	// Clock/date
+	"currentTime",
+	"currentDate",
+	"dayOfWeek",
+	"clockWithSeconds",
+	"timeUntilMidnight",
+	// System/app
+	"currentAppName",
+	"platformBadge",
+	"appVersionBadge",
+	"updateAvailableBadge",
+	"minimizeButton",
+	"focusMainButton",
+	"cpuUsagePercent",
+	"cpuUsageGraph",
+	"memoryUsagePercent",
+	"memoryUsageGraph",
+	// Visual/utility
+	"divider",
+	"label",
+	"spacer",
+	"accentSwatch",
+	"themeToggle",
+];
+// Mirrors src/types.ts's NOTCH_TAB_ICONS — kept as plain strings here since
+// main.cjs only needs to validate them, not render them.
+const NOTCH_TAB_ICONS = [
+	"AcademicCapIcon",
+	"AdjustmentsHorizontalIcon",
+	"ArchiveBoxIcon",
+	"ArrowPathIcon",
+	"BeakerIcon",
+	"BellIcon",
+	"BoltIcon",
+	"BookOpenIcon",
+	"BriefcaseIcon",
+	"CalendarIcon",
+	"CameraIcon",
+	"ChartBarIcon",
+	"ChatBubbleLeftIcon",
+	"CheckCircleIcon",
+	"ClipboardIcon",
+	"ClockIcon",
+	"CloudIcon",
+	"CodeBracketIcon",
+	"Cog6ToothIcon",
+	"CommandLineIcon",
+	"CpuChipIcon",
+	"CreditCardIcon",
+	"CubeIcon",
+	"DocumentTextIcon",
+	"EnvelopeIcon",
+	"FaceSmileIcon",
+	"FilmIcon",
+	"FireIcon",
+	"FlagIcon",
+	"FolderIcon",
+	"GiftIcon",
+	"GlobeAltIcon",
+	"HeartIcon",
+	"HomeIcon",
+	"InboxIcon",
+	"KeyIcon",
+	"LightBulbIcon",
+	"ListBulletIcon",
+	"MapIcon",
+	"MegaphoneIcon",
+	"MoonIcon",
+	"MusicalNoteIcon",
+	"NewspaperIcon",
+	"PaintBrushIcon",
+	"PaperAirplaneIcon",
+	"PencilIcon",
+	"PhotoIcon",
+	"PlayIcon",
+	"PuzzlePieceIcon",
+	"RocketLaunchIcon",
+	"ShieldCheckIcon",
+	"ShoppingCartIcon",
+	"SparklesIcon",
+	"Squares2X2Icon",
+	"StarIcon",
+	"SunIcon",
+	"TagIcon",
+	"TrashIcon",
+	"TrophyIcon",
+	"UserIcon",
+	"VideoCameraIcon",
+	"WifiIcon",
+	"WrenchIcon",
+];
+// The settings grid editor and the notch itself both lay tabs out on a grid
+// of fixed-size (tailwind w-10/h-10) cells with a gap-1.5 gutter; 5x1 is both
+// the default and the floor for a freshly added tab.
+const NOTCH_GRID_MIN_COLS = 5;
+const NOTCH_GRID_MAX_COLS = 20;
+const NOTCH_GRID_MIN_ROWS = 1;
+const NOTCH_GRID_MAX_ROWS = 20;
+const defaultNotchTabs = [
+	{
+		id: "timer",
+		label: "Timer",
+		icon: "ClockIcon",
+		gridCols: 5,
+		gridRows: 1,
+		placements: [
+			{ id: "start-stop", widget: "timerStartStop", x: 0, y: 0, w: 1, h: 1 },
+			{ id: "display", widget: "timerDisplay", x: 1, y: 0, w: 2, h: 1 },
+		],
+	},
+	{
+		id: "time",
+		label: "Time",
+		icon: "ChartBarIcon",
+		gridCols: 5,
+		gridRows: 4,
+		placements: [
+			{ id: "time-spent", widget: "timeSpentToday", x: 0, y: 0, w: 5, h: 2 },
+			{ id: "top-app", widget: "topApp", x: 0, y: 2, w: 3, h: 2 },
+		],
+	},
+	{
+		id: "tasks",
+		label: "Tasks",
+		icon: "ListBulletIcon",
+		gridCols: 5,
+		gridRows: 3,
+		placements: [{ id: "first-todos", widget: "firstTodoList", x: 0, y: 0, w: 3, h: 3 }],
+	},
+	{
+		id: "notes",
+		label: "Notes",
+		icon: "NewspaperIcon",
+		gridCols: 5,
+		gridRows: 2,
+		placements: [{ id: "notes-count", widget: "notesCount", x: 0, y: 0, w: 3, h: 1 }],
+	},
+];
+const defaultNotchPreferences = {
+	enabled: true,
+	position: "top",
+	x: null,
+	y: null,
+	idleOpacity: "balanced",
+	locked: false,
+	activation: "always",
+	displayIds: [],
+	tabs: defaultNotchTabs,
+	infoItems: defaultNotchInfoItems,
+};
+
+// Normalizes a reorderable {id, enabled}[] list: drops invalid/duplicate ids,
+// keeps the user's order, and appends any missing ids (e.g. a newly added
+// feature) at the end so old saved preferences stay forward-compatible.
+function normalizeIdEnabledList(value, validIds, defaults) {
+	if (!Array.isArray(value)) {
+		return defaults.map((entry) => ({ ...entry }));
+	}
+	const seen = new Set();
+	const result = [];
+	for (const entry of value) {
+		if (!entry || typeof entry !== "object" || !validIds.includes(entry.id) || seen.has(entry.id)) {
+			continue;
+		}
+		seen.add(entry.id);
+		result.push({ id: entry.id, enabled: typeof entry.enabled === "boolean" ? entry.enabled : true });
+	}
+	for (const id of validIds) {
+		if (!seen.has(id)) {
+			result.push({ id, enabled: true });
+		}
+	}
+	return result;
+}
+
+function clampNumber(value, fallback, min, max) {
+	const n = Number.isFinite(value) ? Math.round(value) : fallback;
+	return Math.min(Math.max(n, min), max);
+}
+
+// Normalizes a single tab's placements against its (already-clamped) grid
+// size: drops entries with an unknown widget or duplicate id, clamps each
+// placement's w/h to fit inside the grid and its x/y to fit alongside that
+// size, so a placement can never end up partially or fully off-grid (e.g.
+// after the user shrinks the grid from settings).
+// Two placements overlap if their cell rectangles intersect.
+function placementsOverlap(a, b) {
+	return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function normalizeNotchPlacements(value, gridCols, gridRows) {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+	const seen = new Set();
+	const result = [];
+	value.forEach((entry, index) => {
+		if (!entry || typeof entry !== "object" || !NOTCH_WIDGET_IDS.includes(entry.widget)) {
+			return;
+		}
+		const id = typeof entry.id === "string" && entry.id.trim() ? entry.id.trim() : `placement-${index}`;
+		if (seen.has(id)) {
+			return;
+		}
+		const w = clampNumber(entry.w, 1, 1, gridCols);
+		const h = clampNumber(entry.h, 1, 1, gridRows);
+		const x = clampNumber(entry.x, 0, 0, gridCols - w);
+		const y = clampNumber(entry.y, 0, 0, gridRows - h);
+		const placement = { id, widget: entry.widget, x, y, w, h };
+		// Never let a hand-edited or corrupted preferences file produce two
+		// placements stacked on the same cells — keep whichever came first and
+		// drop the rest, same as the settings grid editor does live.
+		if (result.some((existing) => placementsOverlap(placement, existing))) {
+			return;
+		}
+		seen.add(id);
+		// Widgets that use it (launchAppButton, openUrlButton, label, task-column
+		// widgets) carry a config string; the "scene" widget stores a JSON blob
+		// here, so the cap is generous enough to hold a handful of apps/urls/tasks
+		// while still bounding a corrupted file defensively.
+		if (typeof entry.config === "string" && entry.config.trim()) {
+			placement.config = entry.config.trim().slice(0, 4000);
+		}
+		result.push(placement);
+	});
+	return result;
+}
+
+// Normalizes a user-editable tab list: each tab needs a unique string id, a
+// label, a valid icon, a grid size clamped to the allowed range, and a
+// placements[] that fits inside that grid. A tab has no separate enabled
+// flag — it either exists (and shows) or is removed. Falls back to the
+// defaults wholesale if the saved value is missing/empty/malformed, since a
+// half-broken custom list isn't recoverable item-by-item the way the old
+// fixed-id lists were.
+function normalizeNotchTabs(value, defaults) {
+	const fallback = () =>
+		defaults.map((tab) => ({ ...tab, placements: tab.placements.map((p) => ({ ...p })) }));
+	if (!Array.isArray(value) || value.length === 0) {
+		return fallback();
+	}
+	const seen = new Set();
+	const result = [];
+	for (const entry of value) {
+		if (!entry || typeof entry !== "object") continue;
+		const id = typeof entry.id === "string" && entry.id.trim() ? entry.id.trim() : null;
+		if (!id || seen.has(id)) continue;
+		seen.add(id);
+		const label = typeof entry.label === "string" && entry.label.trim() ? entry.label.trim() : "Tab";
+		const icon = NOTCH_TAB_ICONS.includes(entry.icon) ? entry.icon : "Squares2X2Icon";
+		const gridCols = clampNumber(
+			entry.gridCols,
+			NOTCH_GRID_MIN_COLS,
+			NOTCH_GRID_MIN_COLS,
+			NOTCH_GRID_MAX_COLS,
+		);
+		const gridRows = clampNumber(
+			entry.gridRows,
+			NOTCH_GRID_MIN_ROWS,
+			NOTCH_GRID_MIN_ROWS,
+			NOTCH_GRID_MAX_ROWS,
+		);
+		const placements = normalizeNotchPlacements(entry.placements, gridCols, gridRows);
+		result.push({ id, label, icon, gridCols, gridRows, placements });
+	}
+	return result.length > 0 ? result : fallback();
+}
+
+let notchPreferences = { ...defaultNotchPreferences };
+let dashboardPreferences = { ...defaultDashboardPreferences };
 
 if (isDev) {
 	// Keep development state fully isolated from the installed production app.
@@ -85,7 +479,8 @@ function normalizeUpdatePreferences(rawValue) {
 	}
 
 	return {
-		autoCheck: typeof rawValue.autoCheck === "boolean" ? rawValue.autoCheck : defaultUpdatePreferences.autoCheck,
+		autoCheck:
+			typeof rawValue.autoCheck === "boolean" ? rawValue.autoCheck : defaultUpdatePreferences.autoCheck,
 		includeBeta:
 			typeof rawValue.includeBeta === "boolean" ? rawValue.includeBeta : defaultUpdatePreferences.includeBeta,
 	};
@@ -337,6 +732,7 @@ function createMainWindow() {
 	if (mainWindow && !mainWindow.isDestroyed()) {
 		mainWindow.show();
 		mainWindow.focus();
+		syncNotchWindows();
 		return mainWindow;
 	}
 
@@ -353,13 +749,7 @@ function createMainWindow() {
 		icon: iconPath,
 		frame: isMac,
 		titleBarStyle: isMac ? "hiddenInset" : "hidden",
-		titleBarOverlay: isWindows
-			? {
-					color: "#2a2a2a",
-					symbolColor: "#e2e2e2",
-					height: 49,
-				}
-			: false,
+		titleBarOverlay: getTitleBarOverlay(),
 		webPreferences: {
 			preload: path.join(__dirname, "preload.cjs"),
 			contextIsolation: true,
@@ -390,6 +780,7 @@ function createMainWindow() {
 
 	mainWindow.on("closed", () => {
 		mainWindow = null;
+		syncNotchWindows();
 	});
 
 	applyNativeTheme(
@@ -400,6 +791,7 @@ function createMainWindow() {
 		welcomeWindow.close();
 	}
 
+	syncNotchWindows();
 	return mainWindow;
 }
 
@@ -411,27 +803,21 @@ function createWelcomeWindow() {
 	}
 
 	welcomeWindow = new BrowserWindow({
-		width: 700,
-		height: 540,
+		width: 720,
+		height: 660,
 		minWidth: 620,
-		minHeight: 500,
+		minHeight: 560,
 		resizable: false,
 		maximizable: false,
 		fullscreenable: false,
-		title: "Atlas - Welkom",
+		title: "Atlas - Welcome",
 		backgroundColor: "#070707",
 		icon: isDev
 			? path.join(__dirname, "..", "src", "assets", "logosmall.png")
 			: path.join(__dirname, "..", "dist", "assets", "logosmall.png"),
 		frame: isMac,
 		titleBarStyle: isMac ? "hiddenInset" : "hidden",
-		titleBarOverlay: isWindows
-			? {
-					color: "#2a2a2a",
-					symbolColor: "#e2e2e2",
-					height: 49,
-				}
-			: false,
+		titleBarOverlay: getTitleBarOverlay(),
 		autoHideMenuBar: true,
 		webPreferences: {
 			preload: path.join(__dirname, "preload.cjs"),
@@ -488,13 +874,7 @@ function createSettingsWindow(parentWindow = null) {
 			: path.join(__dirname, "..", "dist", "assets", "logosmall.png"),
 		frame: isMac,
 		titleBarStyle: isMac ? "hiddenInset" : "hidden",
-		titleBarOverlay: isWindows
-			? {
-					color: "#2a2a2a",
-					symbolColor: "#e2e2e2",
-					height: 49,
-				}
-			: false,
+		titleBarOverlay: getTitleBarOverlay(),
 		parent: parentWindow && !parentWindow.isDestroyed() ? parentWindow : undefined,
 		modal: Boolean(parentWindow && !parentWindow.isDestroyed()),
 		resizable: false,
@@ -528,6 +908,130 @@ function createSettingsWindow(parentWindow = null) {
 	return settingsWindow;
 }
 
+// A standalone window for editing the notch's action-button tabs/grids —
+// the same editor embedded in Settings, but reachable directly from a button
+// on the notch itself without going through the full Settings window.
+function createActionEditorWindow(parentWindow = null) {
+	if (actionEditorWindow && !actionEditorWindow.isDestroyed()) {
+		actionEditorWindow.show();
+		actionEditorWindow.focus();
+		return actionEditorWindow;
+	}
+
+	actionEditorWindow = new BrowserWindow({
+		width: 900,
+		height: 720,
+		minWidth: 640,
+		minHeight: 480,
+		autoHideMenuBar: true,
+		show: false,
+		center: true,
+		backgroundColor: "#070707",
+		icon: isDev
+			? path.join(__dirname, "..", "src", "assets", "logosmall.png")
+			: path.join(__dirname, "..", "dist", "assets", "logosmall.png"),
+		frame: isMac,
+		titleBarStyle: isMac ? "hiddenInset" : "hidden",
+		titleBarOverlay: getTitleBarOverlay(),
+		parent: parentWindow && !parentWindow.isDestroyed() ? parentWindow : undefined,
+		webPreferences: {
+			preload: path.join(__dirname, "preload.cjs"),
+			contextIsolation: true,
+			nodeIntegration: false,
+		},
+	});
+
+	if (isDev) {
+		actionEditorWindow.loadURL("http://localhost:5173?mode=actions");
+	} else {
+		actionEditorWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"), {
+			query: { mode: "actions" },
+		});
+	}
+
+	actionEditorWindow.once("ready-to-show", () => {
+		if (!actionEditorWindow || actionEditorWindow.isDestroyed()) {
+			return;
+		}
+		actionEditorWindow.show();
+		actionEditorWindow.focus();
+	});
+
+	actionEditorWindow.on("closed", () => {
+		actionEditorWindow = null;
+	});
+
+	return actionEditorWindow;
+}
+
+// A tiny always-on-top popup the notch opens when you tap a "capture" widget
+// (add a task / note). Keeping input in its own focused window beats cramming
+// a field into the notch itself, and it can be positioned wherever.
+function createNotchInputWindow(payload) {
+	pendingNotchInputPayload = payload;
+
+	if (notchInputWindow && !notchInputWindow.isDestroyed()) {
+		notchInputWindow.webContents.send("notchInput:payload", payload);
+		notchInputWindow.show();
+		notchInputWindow.focus();
+		return notchInputWindow;
+	}
+
+	notchInputWindow = new BrowserWindow({
+		width: 440,
+		height: 260,
+		resizable: false,
+		maximizable: false,
+		minimizable: false,
+		fullscreenable: false,
+		alwaysOnTop: true,
+		skipTaskbar: true,
+		show: false,
+		center: true,
+		frame: false,
+		transparent: true,
+		backgroundColor: "#00000000",
+		hasShadow: true,
+		webPreferences: {
+			preload: path.join(__dirname, "preload.cjs"),
+			contextIsolation: true,
+			nodeIntegration: false,
+		},
+	});
+
+	notchInputWindow.setAlwaysOnTop(true, "screen-saver");
+
+	if (isDev) {
+		notchInputWindow.loadURL("http://localhost:5173?mode=notch-input");
+	} else {
+		notchInputWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"), {
+			query: { mode: "notch-input" },
+		});
+	}
+
+	notchInputWindow.once("ready-to-show", () => {
+		if (!notchInputWindow || notchInputWindow.isDestroyed()) {
+			return;
+		}
+		notchInputWindow.show();
+		notchInputWindow.focus();
+	});
+
+	// Capture popups are dismiss-on-blur, like a spotlight field.
+	notchInputWindow.on("blur", () => {
+		if (notchInputWindow && !notchInputWindow.isDestroyed()) {
+			notchInputWindow.close();
+		}
+	});
+
+	notchInputWindow.on("closed", () => {
+		notchInputWindow = null;
+		pendingNotchInputPayload = null;
+	});
+
+	return notchInputWindow;
+}
+
 function hasAnyMaps() {
 	return Boolean(db && db.listMaps().length > 0);
 }
@@ -535,9 +1039,10 @@ function hasAnyMaps() {
 function openPrimaryWindowByMapState() {
 	if (hasAnyMaps()) {
 		createMainWindow();
-		return;
+	} else {
+		createWelcomeWindow();
 	}
-	createWelcomeWindow();
+	syncNotchWindows();
 }
 
 function applyNativeTheme(theme) {
@@ -553,18 +1058,7 @@ function applyNativeTheme(theme) {
 	}
 
 	nativeTheme.themeSource = theme;
-	const overlay =
-		theme === "light"
-			? {
-					color: "#f7f7f7",
-					symbolColor: "#4a4a4a",
-					height: 49,
-				}
-			: {
-					color: "#2a2a2a",
-					symbolColor: "#e2e2e2",
-					height: 49,
-				};
+	const overlay = getTitleBarOverlay();
 
 	if (mainWindow && !mainWindow.isDestroyed()) {
 		mainWindow.setTitleBarOverlay(overlay);
@@ -576,6 +1070,10 @@ function applyNativeTheme(theme) {
 
 	if (welcomeWindow && !welcomeWindow.isDestroyed()) {
 		welcomeWindow.setTitleBarOverlay(overlay);
+	}
+
+	if (actionEditorWindow && !actionEditorWindow.isDestroyed()) {
+		actionEditorWindow.setTitleBarOverlay(overlay);
 	}
 }
 
@@ -680,6 +1178,308 @@ function createMiniWindow() {
 	return miniWindow;
 }
 
+function normalizeNotchPreferences(value) {
+	if (!value || typeof value !== "object") {
+		return { ...defaultNotchPreferences };
+	}
+	return {
+		enabled: typeof value.enabled === "boolean" ? value.enabled : defaultNotchPreferences.enabled,
+		position: NOTCH_POSITIONS.includes(value.position) ? value.position : defaultNotchPreferences.position,
+		x: typeof value.x === "number" ? value.x : null,
+		y: typeof value.y === "number" ? value.y : null,
+		idleOpacity: NOTCH_IDLE_OPACITIES.includes(value.idleOpacity)
+			? value.idleOpacity
+			: defaultNotchPreferences.idleOpacity,
+		locked: typeof value.locked === "boolean" ? value.locked : defaultNotchPreferences.locked,
+		activation: NOTCH_ACTIVATIONS.includes(value.activation)
+			? value.activation
+			: defaultNotchPreferences.activation,
+		displayIds: Array.isArray(value.displayIds)
+			? [...new Set(value.displayIds.filter((id) => typeof id === "number" && Number.isFinite(id)))]
+			: defaultNotchPreferences.displayIds,
+		tabs: normalizeNotchTabs(value.tabs, defaultNotchTabs),
+		infoItems: normalizeIdEnabledList(value.infoItems, NOTCH_INFO_ITEM_IDS, defaultNotchInfoItems),
+	};
+}
+
+function loadNotchPreferences() {
+	try {
+		const raw = fs.readFileSync(path.join(app.getPath("userData"), NOTCH_PREFS_FILE), "utf8");
+		notchPreferences = normalizeNotchPreferences(JSON.parse(raw));
+	} catch {
+		notchPreferences = { ...defaultNotchPreferences };
+	}
+	return notchPreferences;
+}
+
+function saveNotchPreferences(value) {
+	notchPreferences = normalizeNotchPreferences(value);
+	try {
+		fs.writeFileSync(
+			path.join(app.getPath("userData"), NOTCH_PREFS_FILE),
+			JSON.stringify(notchPreferences, null, 2),
+			"utf8",
+		);
+	} catch {
+		// Non-blocking: notch still works with in-memory preferences.
+	}
+	return notchPreferences;
+}
+
+// Normalizes the dashboard layout: keeps only known widgets with unique ids,
+// clamps each card's span to the grid bounds, and falls back to the default
+// layout wholesale when the saved value is missing or empty (a blank
+// dashboard isn't recoverable card-by-card).
+function normalizeDashboardPreferences(value) {
+	const fallback = () => ({ widgets: defaultDashboardWidgets.map((w) => ({ ...w })) });
+	if (!value || typeof value !== "object" || !Array.isArray(value.widgets)) {
+		return fallback();
+	}
+	const seen = new Set();
+	const widgets = [];
+	value.widgets.forEach((entry, index) => {
+		if (!entry || typeof entry !== "object" || !DASHBOARD_WIDGET_IDS.includes(entry.widget)) {
+			return;
+		}
+		const id = typeof entry.id === "string" && entry.id.trim() ? entry.id.trim() : `dash-${index}`;
+		if (seen.has(id)) return;
+		seen.add(id);
+		const placement = {
+			id,
+			widget: entry.widget,
+			w: clampNumber(entry.w, 1, 1, DASHBOARD_MAX_COLS),
+			h: clampNumber(entry.h, 1, 1, DASHBOARD_WIDGET_MAX_H),
+		};
+		if (typeof entry.config === "string" && entry.config.trim()) {
+			placement.config = entry.config.trim().slice(0, 500);
+		}
+		widgets.push(placement);
+	});
+	return widgets.length > 0 ? { widgets } : fallback();
+}
+
+function loadDashboardPreferences() {
+	try {
+		const raw = fs.readFileSync(path.join(app.getPath("userData"), DASHBOARD_PREFS_FILE), "utf8");
+		dashboardPreferences = normalizeDashboardPreferences(JSON.parse(raw));
+	} catch {
+		dashboardPreferences = normalizeDashboardPreferences(null);
+	}
+	return dashboardPreferences;
+}
+
+function saveDashboardPreferences(value) {
+	dashboardPreferences = normalizeDashboardPreferences(value);
+	try {
+		fs.writeFileSync(
+			path.join(app.getPath("userData"), DASHBOARD_PREFS_FILE),
+			JSON.stringify(dashboardPreferences, null, 2),
+			"utf8",
+		);
+	} catch {
+		// Non-blocking: dashboard still works with in-memory preferences.
+	}
+	// Broadcast so a layout edited in one window (e.g. the main window's own
+	// edit mode) reflects anywhere else the dashboard might be shown.
+	for (const browserWindow of BrowserWindow.getAllWindows()) {
+		if (!browserWindow.isDestroyed()) {
+			browserWindow.webContents.send("dashboard:layout-changed", dashboardPreferences);
+		}
+	}
+	return dashboardPreferences;
+}
+
+// Resolves which displays should currently show a notch. Falls back to the
+// primary display whenever the saved selection is empty or none of the saved
+// ids are connected, so there's always at least one.
+function getTargetDisplays() {
+	const displays = screen.getAllDisplays();
+	const primary = screen.getPrimaryDisplay();
+	const selectedIds = notchPreferences.displayIds.length > 0 ? notchPreferences.displayIds : [primary.id];
+	const matched = displays.filter((display) => selectedIds.includes(display.id));
+	return matched.length > 0 ? matched : [primary];
+}
+
+function positionNotchWindow(notchWindow, display, width, height) {
+	if (!notchWindow || notchWindow.isDestroyed()) {
+		return;
+	}
+	const area = display.workArea;
+	const margin = 10;
+	const isPrimary = display.id === screen.getPrimaryDisplay().id;
+	let x;
+	let y;
+
+	if (
+		isPrimary &&
+		notchPreferences.position === "free" &&
+		typeof notchPreferences.x === "number" &&
+		typeof notchPreferences.y === "number"
+	) {
+		x = notchPreferences.x;
+		y = notchPreferences.y;
+	} else if (notchPreferences.position === "left") {
+		// Docked flush against the left edge, vertically centered.
+		x = area.x;
+		y = area.y + Math.round((area.height - height) / 2);
+	} else if (notchPreferences.position === "right") {
+		// Docked flush against the right edge, vertically centered.
+		x = area.x + area.width - width;
+		y = area.y + Math.round((area.height - height) / 2);
+	} else if (notchPreferences.position === "top") {
+		// Docked flush against the top edge, horizontally centered.
+		x = area.x + Math.round((area.width - width) / 2);
+		y = area.y;
+	} else {
+		// "free" without saved coordinates: centered near the top with a margin.
+		x = area.x + Math.round((area.width - width) / 2);
+		y = area.y + margin;
+	}
+
+	notchWindow.setBounds({ x: Math.round(x), y: Math.round(y), width, height });
+}
+
+function createNotchWindowForDisplay(display) {
+	const existing = notchWindows.get(display.id);
+	if (existing && !existing.isDestroyed()) {
+		existing.show();
+		return existing;
+	}
+
+	const notchWindow = new BrowserWindow({
+		width: 300,
+		height: 70,
+		frame: false,
+		transparent: true,
+		backgroundColor: "#00000000",
+		hasShadow: false,
+		alwaysOnTop: true,
+		skipTaskbar: true,
+		resizable: false,
+		maximizable: false,
+		minimizable: false,
+		fullscreenable: false,
+		movable: notchPreferences.position === "free" && !notchPreferences.locked,
+		focusable: true,
+		webPreferences: {
+			preload: path.join(__dirname, "preload.cjs"),
+			contextIsolation: true,
+			nodeIntegration: false,
+		},
+	});
+
+	notchWindow.notchDisplayId = display.id;
+	notchWindow.setAlwaysOnTop(true, "screen-saver");
+
+	if (isDev) {
+		notchWindow.loadURL("http://localhost:5173?mode=notch");
+	} else {
+		notchWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"), {
+			query: { mode: "notch" },
+		});
+	}
+
+	notchWindow.on("moved", () => {
+		if (notchWindow.isDestroyed()) {
+			return;
+		}
+		// Only the primary display's free position is persisted; other displays
+		// keep their own default placement.
+		if (notchPreferences.position === "free" && display.id === screen.getPrimaryDisplay().id) {
+			const [x, y] = notchWindow.getPosition();
+			notchPreferences.x = x;
+			notchPreferences.y = y;
+			saveNotchPreferences(notchPreferences);
+		}
+	});
+
+	notchWindow.on("closed", () => {
+		if (notchWindows.get(display.id) === notchWindow) {
+			notchWindows.delete(display.id);
+		}
+	});
+
+	// Lets the renderer close an open tab panel when the user clicks anywhere
+	// outside the notch window (another app, the desktop, the main window).
+	notchWindow.on("blur", () => {
+		if (!notchWindow.isDestroyed()) {
+			notchWindow.webContents.send("notch:blur");
+		}
+	});
+
+	notchWindows.set(display.id, notchWindow);
+	positionNotchWindow(notchWindow, display, 300, 70);
+	ensureTray();
+	return notchWindow;
+}
+
+function shouldNotchBeActive() {
+	if (!notchPreferences.enabled) {
+		return false;
+	}
+	if (notchPreferences.activation === "withMain") {
+		return Boolean(mainWindow && !mainWindow.isDestroyed());
+	}
+	return true;
+}
+
+// Creates/destroys notch windows to match shouldNotchBeActive() and the
+// selected displays. Call this whenever notch preferences change, the main
+// window's lifecycle changes, or the connected displays change.
+function syncNotchWindows() {
+	if (!shouldNotchBeActive()) {
+		for (const notchWindow of notchWindows.values()) {
+			if (!notchWindow.isDestroyed()) {
+				notchWindow.destroy();
+			}
+		}
+		notchWindows.clear();
+		return;
+	}
+
+	const targets = getTargetDisplays();
+	const targetIds = new Set(targets.map((display) => display.id));
+
+	for (const [displayId, notchWindow] of [...notchWindows]) {
+		if (!targetIds.has(displayId)) {
+			if (!notchWindow.isDestroyed()) {
+				notchWindow.destroy();
+			}
+			notchWindows.delete(displayId);
+		}
+	}
+
+	for (const display of targets) {
+		const existing = notchWindows.get(display.id);
+		if (!existing || existing.isDestroyed()) {
+			createNotchWindowForDisplay(display);
+		}
+	}
+}
+
+function applyNotchPreferences(next) {
+	notchPreferences = saveNotchPreferences(next);
+
+	syncNotchWindows();
+	for (const [displayId, notchWindow] of notchWindows) {
+		if (notchWindow.isDestroyed()) {
+			continue;
+		}
+		notchWindow.setMovable(notchPreferences.position === "free" && !notchPreferences.locked);
+		const display =
+			screen.getAllDisplays().find((item) => item.id === displayId) ?? screen.getPrimaryDisplay();
+		const [width, height] = notchWindow.getContentSize();
+		positionNotchWindow(notchWindow, display, width, height);
+	}
+
+	for (const browserWindow of BrowserWindow.getAllWindows()) {
+		if (!browserWindow.isDestroyed()) {
+			browserWindow.webContents.send("notch:preferences-changed", notchPreferences);
+		}
+	}
+	return notchPreferences;
+}
+
 function ensureTray() {
 	if (tray) {
 		return tray;
@@ -694,6 +1494,10 @@ function ensureTray() {
 	const contextMenu = Menu.buildFromTemplate([
 		{ label: "Show Atlas", click: () => showMainWindow() },
 		{ label: "Open Mini Window", click: () => createMiniWindow() },
+		{
+			label: "Toggle Smart Notch",
+			click: () => applyNotchPreferences({ ...notchPreferences, enabled: !notchPreferences.enabled }),
+		},
 		{ type: "separator" },
 		{
 			label: "Quit",
@@ -710,23 +1514,39 @@ function ensureTray() {
 function wireIpc() {
 	ipcMain.handle("map:list", () => db.listMaps());
 
-	ipcMain.handle("map:create", (_event, name) => {
+	ipcMain.handle("map:create", (_event, name, options = {}) => {
 		if (!name || !name.trim()) {
-			throw new Error("Map name is required.");
+			throw new Error("Environment name is required.");
 		}
-		const createdMap = db.createMap(name.trim());
+		const createdMap = db.createMap(name.trim(), {
+			icon: options?.icon ?? null,
+			accent: options?.accent ?? null,
+			preset: options?.preset ?? null,
+		});
 		openPrimaryWindowByMapState();
 		return createdMap;
 	});
 
 	ipcMain.handle("map:rename", (_event, mapId, name) => {
 		if (!mapId) {
-			throw new Error("Map id missing.");
+			throw new Error("Environment id missing.");
 		}
 		if (!name || !name.trim()) {
-			throw new Error("Map name is required.");
+			throw new Error("Environment name is required.");
 		}
 		return db.renameMap(mapId, name.trim());
+	});
+
+	ipcMain.handle("map:update", (_event, mapId, fields = {}) => {
+		if (!mapId) {
+			throw new Error("Environment id missing.");
+		}
+		const sanitized = {};
+		if (typeof fields?.name === "string" && fields.name.trim()) sanitized.name = fields.name.trim();
+		if (typeof fields?.icon === "string" || fields?.icon === null) sanitized.icon = fields.icon;
+		if (typeof fields?.accent === "string" || fields?.accent === null) sanitized.accent = fields.accent;
+		if (typeof fields?.preset === "string" || fields?.preset === null) sanitized.preset = fields.preset;
+		return db.updateMap(mapId, sanitized);
 	});
 
 	ipcMain.handle("map:delete", (_event, mapId) => {
@@ -809,11 +1629,11 @@ function wireIpc() {
 		return db.listTasksByMap(mapId);
 	});
 
-	ipcMain.handle("task:create", (_event, mapId, title, description) => {
+	ipcMain.handle("task:create", (_event, mapId, title, description, fields) => {
 		if (!mapId || !title || !title.trim()) {
 			throw new Error("Task map and title are required.");
 		}
-		return db.createTask(mapId, title.trim(), (description || "").trim());
+		return db.createTask(mapId, title.trim(), (description || "").trim(), fields || {});
 	});
 
 	ipcMain.handle("task:updateStatus", (_event, taskId, status) => {
@@ -821,6 +1641,20 @@ function wireIpc() {
 			throw new Error("Task id and status are required.");
 		}
 		return db.updateTaskStatus(taskId, status);
+	});
+
+	ipcMain.handle("task:update", (_event, taskId, fields) => {
+		if (!taskId || !fields || typeof fields !== "object") {
+			throw new Error("Task id and fields are required.");
+		}
+		return db.updateTask(taskId, fields);
+	});
+
+	ipcMain.handle("task:delete", (_event, taskId) => {
+		if (!taskId) {
+			throw new Error("Task id is required.");
+		}
+		return db.deleteTask(taskId);
 	});
 
 	ipcMain.handle("note:listByMap", (_event, mapId) => {
@@ -917,6 +1751,53 @@ function wireIpc() {
 		return true;
 	});
 
+	ipcMain.handle("app:setAccent", (_event, value) => {
+		// Relay the accent change to every window so the whole app updates live.
+		for (const browserWindow of BrowserWindow.getAllWindows()) {
+			if (!browserWindow.isDestroyed()) {
+				browserWindow.webContents.send("accent:changed", value);
+			}
+		}
+		return true;
+	});
+
+	ipcMain.handle("notch:getPreferences", () => notchPreferences);
+
+	ipcMain.handle("notch:setPreferences", (_event, prefs) =>
+		applyNotchPreferences({ ...notchPreferences, ...(prefs || {}) }),
+	);
+
+	ipcMain.handle("dashboard:getLayout", () => dashboardPreferences);
+
+	ipcMain.handle("dashboard:setLayout", (_event, prefs) =>
+		saveDashboardPreferences({ ...dashboardPreferences, ...(prefs || {}) }),
+	);
+
+	ipcMain.handle("notch:resize", (event, width, height) => {
+		const notchWindow = BrowserWindow.fromWebContents(event.sender);
+		if (!notchWindow || notchWindow.isDestroyed()) {
+			return false;
+		}
+		const display =
+			screen.getAllDisplays().find((item) => item.id === notchWindow.notchDisplayId) ??
+			screen.getPrimaryDisplay();
+		const safeWidth = Math.max(120, Math.min(900, Math.ceil(Number(width) || 0)));
+		const safeHeight = Math.max(44, Math.min(600, Math.ceil(Number(height) || 0)));
+		positionNotchWindow(notchWindow, display, safeWidth, safeHeight);
+		return true;
+	});
+
+	ipcMain.handle("screen:listDisplays", () => {
+		const primaryId = screen.getPrimaryDisplay().id;
+		return screen.getAllDisplays().map((display, index) => ({
+			id: display.id,
+			label: `Display ${index + 1} (${display.size.width}x${display.size.height})${display.id === primaryId ? " — Primary" : ""}`,
+			isPrimary: display.id === primaryId,
+			width: display.size.width,
+			height: display.size.height,
+		}));
+	});
+
 	ipcMain.handle("window:openMini", () => {
 		createMiniWindow();
 		return true;
@@ -927,6 +1808,59 @@ function wireIpc() {
 		createSettingsWindow(parentWindow);
 		return true;
 	});
+
+	ipcMain.handle("window:openActionEditor", () => {
+		// No parent window: this is opened from the notch as often as from
+		// Settings, and should stay open/independent either way rather than
+		// being tied to (and modal-blocked behind) whichever window asked.
+		createActionEditorWindow(null);
+		return true;
+	});
+
+	ipcMain.handle("window:openNotchInput", (_event, payload) => {
+		createNotchInputWindow(payload && typeof payload === "object" ? payload : {});
+		return true;
+	});
+
+	ipcMain.handle("notchInput:getPayload", () => pendingNotchInputPayload ?? {});
+
+	ipcMain.handle("app:pickFile", async (event) => {
+		const ownerWindow = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+		const result = await dialog.showOpenDialog(ownerWindow, {
+			properties: ["openFile"],
+			filters: isWindows
+				? [
+						{ name: "Programs", extensions: ["exe", "bat", "cmd"] },
+						{ name: "All files", extensions: ["*"] },
+					]
+				: [{ name: "All files", extensions: ["*"] }],
+		});
+		if (result.canceled || result.filePaths.length === 0) {
+			return null;
+		}
+		return result.filePaths[0];
+	});
+
+	ipcMain.handle("app:getFileIcon", async (_event, filePath) => {
+		if (!filePath) return null;
+		// A quoted path (the common case — paths with spaces, e.g. under
+		// "Program Files", get auto-quoted when picked) keeps everything
+		// between the quotes intact. An unquoted command may have trailing
+		// arguments after the first space, which get dropped.
+		const trimmed = filePath.trim();
+		const quotedMatch = trimmed.match(/^"([^"]+)"/);
+		const target = quotedMatch ? quotedMatch[1] : trimmed.split(" ")[0];
+		try {
+			const icon = await app.getFileIcon(target, { size: "normal" });
+			return icon.isEmpty() ? null : icon.toDataURL();
+		} catch {
+			return null;
+		}
+	});
+
+	ipcMain.handle("system:listOpenApps", () => listOpenApps());
+
+	ipcMain.handle("system:getStats", () => getSystemStats());
 
 	ipcMain.handle("window:resizeMini", (_event, width, height) => {
 		if (!miniWindow || miniWindow.isDestroyed()) {
@@ -941,6 +1875,28 @@ function wireIpc() {
 
 	ipcMain.handle("window:showMain", () => {
 		showMainWindow();
+		return true;
+	});
+
+	// Brings the main window forward only if it already exists, without launching
+	// it — the notch can run fully standalone, so this never force-opens the app.
+	ipcMain.handle("window:focusMainIfOpen", () => {
+		if (!mainWindow || mainWindow.isDestroyed()) {
+			return false;
+		}
+		if (mainWindow.isMinimized()) {
+			mainWindow.restore();
+		}
+		mainWindow.show();
+		mainWindow.focus();
+		return true;
+	});
+
+	ipcMain.handle("window:navigate", (_event, view) => {
+		showMainWindow();
+		if (mainWindow && !mainWindow.isDestroyed()) {
+			mainWindow.webContents.send("window:navigate-changed", view);
+		}
 		return true;
 	});
 
@@ -993,7 +1949,9 @@ function wireIpc() {
 
 	ipcMain.handle("app:checkUpdates", async (_event, options = {}) => {
 		const includePrerelease =
-			typeof options?.includePrerelease === "boolean" ? options.includePrerelease : updatePreferences.includeBeta;
+			typeof options?.includePrerelease === "boolean"
+				? options.includePrerelease
+				: updatePreferences.includeBeta;
 		const localVersion = app.getVersion();
 
 		try {
@@ -1030,7 +1988,9 @@ function wireIpc() {
 
 	ipcMain.handle("app:releaseHistory", async (_event, options = {}) => {
 		const includePrerelease =
-			typeof options?.includePrerelease === "boolean" ? options.includePrerelease : updatePreferences.includeBeta;
+			typeof options?.includePrerelease === "boolean"
+				? options.includePrerelease
+				: updatePreferences.includeBeta;
 
 		try {
 			const releases = await fetchReleases(includePrerelease);
@@ -1046,13 +2006,17 @@ function wireIpc() {
 
 	ipcMain.handle("app:downloadAndInstallUpdate", async (_event, options = {}) => {
 		const includePrerelease =
-			typeof options?.includePrerelease === "boolean" ? options.includePrerelease : updatePreferences.includeBeta;
+			typeof options?.includePrerelease === "boolean"
+				? options.includePrerelease
+				: updatePreferences.includeBeta;
 		return performInAppUpdate(includePrerelease);
 	});
 }
 
 app.whenReady().then(async () => {
 	loadUpdatePreferences();
+	loadNotchPreferences();
+	loadDashboardPreferences();
 	autoUpdater.autoDownload = false;
 	autoUpdater.autoInstallOnAppQuit = true;
 
@@ -1090,6 +2054,11 @@ app.whenReady().then(async () => {
 	if (updatePreferences.autoCheck) {
 		void checkLatestGitHubVersion(updatePreferences.includeBeta);
 	}
+
+	// Re-sync notch windows whenever a monitor is connected/disconnected so the
+	// selection (and the "always at least one" fallback) stays accurate.
+	screen.on("display-added", () => syncNotchWindows());
+	screen.on("display-removed", () => syncNotchWindows());
 
 	app.on("activate", () => {
 		if (BrowserWindow.getAllWindows().length === 0) {

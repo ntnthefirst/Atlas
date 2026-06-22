@@ -11,12 +11,17 @@ import {
 import type { MapItem, Session } from "../types";
 import { AtlasMapMenu } from "./AtlasMapMenu";
 import { Tooltip } from "./ui";
+import { getEnvironmentIcon, type EnvironmentPresetTemplate } from "../environments";
 
 type AtlasHeaderProps = {
 	isMacPlatform: boolean;
 	selectedMapId: string;
 	selectedMapName: string;
+	selectedMapIcon?: string | null;
+	selectedMapAccent?: string | null;
 	maps: MapItem[];
+	onCreatePresetEnvironment: (preset: EnvironmentPresetTemplate) => void;
+	onUpdateEnvironment: (fields: Partial<Pick<MapItem, "name" | "icon" | "accent" | "preset">>) => void;
 	showMapMenu: boolean;
 	renameMapName: string;
 	newMapName: string;
@@ -42,7 +47,11 @@ export function AtlasHeader({
 	isMacPlatform,
 	selectedMapId,
 	selectedMapName,
+	selectedMapIcon,
+	selectedMapAccent,
 	maps,
+	onCreatePresetEnvironment,
+	onUpdateEnvironment,
 	showMapMenu,
 	renameMapName,
 	newMapName,
@@ -64,6 +73,7 @@ export function AtlasHeader({
 	onOpenMiniWindow,
 }: AtlasHeaderProps) {
 	const triggerRef = useRef<HTMLButtonElement | null>(null);
+	const SelectedEnvIcon = getEnvironmentIcon(selectedMapIcon);
 
 	return (
 		<header
@@ -74,10 +84,9 @@ export function AtlasHeader({
 			<div className="titlebar-left text-hero-small text-base flex min-w-0 items-center gap-2">
 				<img
 					src={logo}
-					alt="Atlas Logo"
+					alt="Atlas"
 					className="h-7 w-7 shrink-0"
 				/>
-				<span>Atlas</span>
 			</div>
 
 			<div className="titlebar-center left-1/2 absolute -translate-x-1/2 w-2/5 max-w-2xl min-w-96">
@@ -94,6 +103,10 @@ export function AtlasHeader({
 					}}
 					aria-haspopup="dialog"
 				>
+					<SelectedEnvIcon
+						className="h-3.5 w-3.5 shrink-0"
+						style={{ color: selectedMapAccent ?? undefined }}
+					/>
 					<span className="truncate text-neutral-800 dark:text-neutral-50">{selectedMapName}</span>
 				</button>
 				<AtlasMapMenu
@@ -111,6 +124,8 @@ export function AtlasHeader({
 					onCreateMap={onCreateMap}
 					onRenameMap={onRenameMap}
 					onDeleteMap={onDeleteMap}
+					onCreatePresetEnvironment={onCreatePresetEnvironment}
+					onUpdateEnvironment={onUpdateEnvironment}
 				/>
 			</div>
 

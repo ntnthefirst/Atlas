@@ -2,8 +2,9 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("atlas", {
 	listMaps: () => ipcRenderer.invoke("map:list"),
-	createMap: (name) => ipcRenderer.invoke("map:create", name),
+	createMap: (name, options) => ipcRenderer.invoke("map:create", name, options),
 	renameMap: (mapId, name) => ipcRenderer.invoke("map:rename", mapId, name),
+	updateMap: (mapId, fields) => ipcRenderer.invoke("map:update", mapId, fields),
 	deleteMap: (mapId) => ipcRenderer.invoke("map:delete", mapId),
 
 	getActiveSession: () => ipcRenderer.invoke("session:active"),
@@ -18,8 +19,11 @@ contextBridge.exposeInMainWorld("atlas", {
 	getCurrentApp: () => ipcRenderer.invoke("activity:current-app"),
 
 	listTasksByMap: (mapId) => ipcRenderer.invoke("task:listByMap", mapId),
-	createTask: (mapId, title, description) => ipcRenderer.invoke("task:create", mapId, title, description),
+	createTask: (mapId, title, description, fields) =>
+		ipcRenderer.invoke("task:create", mapId, title, description, fields),
 	updateTaskStatus: (taskId, status) => ipcRenderer.invoke("task:updateStatus", taskId, status),
+	updateTask: (taskId, fields) => ipcRenderer.invoke("task:update", taskId, fields),
+	deleteTask: (taskId) => ipcRenderer.invoke("task:delete", taskId),
 
 	listNotesByMap: (mapId) => ipcRenderer.invoke("note:listByMap", mapId),
 	createNote: (mapId, content) => ipcRenderer.invoke("note:create", mapId, content),
@@ -34,6 +38,12 @@ contextBridge.exposeInMainWorld("atlas", {
 	launchApp: (command) => ipcRenderer.invoke("app:launch", command),
 	getPlatform: () => ipcRenderer.invoke("app:platform"),
 	setNativeTheme: (theme) => ipcRenderer.invoke("window:setTheme", theme),
+	setAccent: (value) => ipcRenderer.invoke("app:setAccent", value),
+	onAccentChanged: (callback) => {
+		const listener = (_event, value) => callback(value);
+		ipcRenderer.on("accent:changed", listener);
+		return () => ipcRenderer.removeListener("accent:changed", listener);
+	},
 	getAppVersion: () => ipcRenderer.invoke("app:version"),
 	checkForUpdates: (options) => ipcRenderer.invoke("app:checkUpdates", options),
 	listReleaseHistory: (options) => ipcRenderer.invoke("app:releaseHistory", options),
@@ -41,11 +51,53 @@ contextBridge.exposeInMainWorld("atlas", {
 	setUpdatePreferences: (preferences) => ipcRenderer.invoke("app:setUpdatePreferences", preferences),
 	downloadAndInstallUpdate: (options) => ipcRenderer.invoke("app:downloadAndInstallUpdate", options),
 
+	getNotchPreferences: () => ipcRenderer.invoke("notch:getPreferences"),
+	setNotchPreferences: (preferences) => ipcRenderer.invoke("notch:setPreferences", preferences),
+
+	getDashboardLayout: () => ipcRenderer.invoke("dashboard:getLayout"),
+	setDashboardLayout: (preferences) => ipcRenderer.invoke("dashboard:setLayout", preferences),
+	onDashboardLayoutChanged: (callback) => {
+		const listener = (_event, preferences) => callback(preferences);
+		ipcRenderer.on("dashboard:layout-changed", listener);
+		return () => ipcRenderer.removeListener("dashboard:layout-changed", listener);
+	},
+	resizeNotch: (width, height) => ipcRenderer.invoke("notch:resize", width, height),
+	onNotchPreferencesChanged: (callback) => {
+		const listener = (_event, preferences) => callback(preferences);
+		ipcRenderer.on("notch:preferences-changed", listener);
+		return () => ipcRenderer.removeListener("notch:preferences-changed", listener);
+	},
+	onNotchBlur: (callback) => {
+		const listener = () => callback();
+		ipcRenderer.on("notch:blur", listener);
+		return () => ipcRenderer.removeListener("notch:blur", listener);
+	},
+	listDisplays: () => ipcRenderer.invoke("screen:listDisplays"),
+
 	windowMinimize: () => ipcRenderer.invoke("window:minimize"),
 	openMiniWindow: () => ipcRenderer.invoke("window:openMini"),
 	openSettingsWindow: () => ipcRenderer.invoke("window:openSettings"),
+	openActionEditorWindow: () => ipcRenderer.invoke("window:openActionEditor"),
+	openNotchInputWindow: (payload) => ipcRenderer.invoke("window:openNotchInput", payload),
+	getNotchInputPayload: () => ipcRenderer.invoke("notchInput:getPayload"),
+	onNotchInputPayload: (callback) => {
+		const listener = (_event, payload) => callback(payload);
+		ipcRenderer.on("notchInput:payload", listener);
+		return () => ipcRenderer.removeListener("notchInput:payload", listener);
+	},
+	pickAppFile: () => ipcRenderer.invoke("app:pickFile"),
+	getFileIcon: (filePath) => ipcRenderer.invoke("app:getFileIcon", filePath),
+	listOpenApps: () => ipcRenderer.invoke("system:listOpenApps"),
+	getSystemStats: () => ipcRenderer.invoke("system:getStats"),
 	resizeMiniWindow: (width, height) => ipcRenderer.invoke("window:resizeMini", width, height),
 	showMainWindow: () => ipcRenderer.invoke("window:showMain"),
+	focusMainIfOpen: () => ipcRenderer.invoke("window:focusMainIfOpen"),
+	requestNavigate: (view) => ipcRenderer.invoke("window:navigate", view),
+	onNavigate: (callback) => {
+		const listener = (_event, view) => callback(view);
+		ipcRenderer.on("window:navigate-changed", listener);
+		return () => ipcRenderer.removeListener("window:navigate-changed", listener);
+	},
 	closeMiniWindow: () => ipcRenderer.invoke("window:closeMini"),
 	windowToggleMaximize: () => ipcRenderer.invoke("window:toggleMaximize"),
 	windowClose: () => ipcRenderer.invoke("window:close"),

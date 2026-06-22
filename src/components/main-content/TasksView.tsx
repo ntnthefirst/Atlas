@@ -1,8 +1,21 @@
-import { MinusIcon, PlusIcon } from "@heroicons/react/24/outline";
+import { CalendarIcon, MinusIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { useRef, useState } from "react";
 import type { MainContentViewsProps } from "./types";
+import { TaskDetailPanel } from "./TaskDetailPanel";
+import { PRIORITY_META } from "./taskMeta";
 
 type DropPosition = "before" | "after";
+
+// "2026-06-25" -> "25 Jun", and flags whether it's already past.
+const formatDue = (iso: string) => {
+	const date = new Date(`${iso}T00:00:00`);
+	const today = new Date();
+	today.setHours(0, 0, 0, 0);
+	return {
+		label: date.toLocaleDateString([], { day: "numeric", month: "short" }),
+		overdue: date.getTime() < today.getTime(),
+	};
+};
 
 export function TasksView({
 	statusColumns,
@@ -13,11 +26,15 @@ export function TasksView({
 	onDropOnTask,
 	setDraggedTaskId,
 	onCreateTaskInColumn,
+	onUpdateTask,
+	onDeleteTask,
 	onRenameTaskColumn,
 	onReorderTaskColumns,
 	onAddTaskColumn,
 	onRemoveTaskColumn,
 }: MainContentViewsProps) {
+	const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
+	const detailTask = tasks.find((task) => task.id === detailTaskId) ?? null;
 	const [composerStatus, setComposerStatus] = useState<string>(statusColumns[0]?.status ?? "");
 	const [composerTitle, setComposerTitle] = useState("");
 	const [isComposerOpen, setIsComposerOpen] = useState(false);
@@ -254,10 +271,11 @@ export function TasksView({
 													<div className="mx-0.5 h-1.5 rounded-full bg-blue-500 shadow-[0_0_0_2px_rgba(59,130,246,0.25)]" />
 												) : null}
 												<div
-													className={`grid cursor-grab gap-2 rounded-xl border border-neutral-200 bg-neutral-50 p-[10px] active:cursor-grabbing dark:border-neutral-600 dark:bg-neutral-700 ${
+													className={`group/task grid cursor-grab gap-2 rounded-xl border border-neutral-200 bg-neutral-50 p-[10px] transition-shadow hover:shadow-sm active:cursor-grabbing dark:border-neutral-600 dark:bg-neutral-700 ${
 														draggedTaskLocalId === task.id ? "opacity-35" : ""
 													}`}
 													draggable
+													onClick={() => setDetailTaskId(task.id)}
 													onDragStart={(event) => {
 														draggedColumnStatusRef.current = null;
 														setDraggedColumnStatus(null);
@@ -308,12 +326,50 @@ export function TasksView({
 														}
 													}}
 												>
-													<strong className="text-body-small text-[14px] font-semibold">
-														{task.title}
-													</strong>
-													<p className="text-data-small m-0 text-[12px] text-neutral-500 dark:text-neutral-300">
-														{task.description || "No details"}
-													</p>
+													<div className="flex items-start justify-between gap-2">
+														<strong className="text-body-small text-[14px] font-semibold">
+															{task.title}
+														</strong>
+														{task.priority !== "none" && (
+															<span
+																className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${PRIORITY_META[task.priority].dot}`}
+																title={`${PRIORITY_META[task.priority].label} priority`}
+															/>
+														)}
+													</div>
+													{task.description && (
+														<p className="m-0 line-clamp-2 text-[12px] text-neutral-500 dark:text-neutral-300">
+															{task.description}
+														</p>
+													)}
+													{(task.due_date || task.tags.length > 0) && (
+														<div className="flex flex-wrap items-center gap-1">
+															{task.due_date &&
+																(() => {
+																	const due = formatDue(task.due_date);
+																	return (
+																		<span
+																			className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] ${
+																				due.overdue
+																					? "bg-red-100 text-red-600 dark:bg-red-950/40 dark:text-red-400"
+																					: "bg-neutral-200/70 text-neutral-600 dark:bg-neutral-600/60 dark:text-neutral-200"
+																			}`}
+																		>
+																			<CalendarIcon className="h-3 w-3" />
+																			{due.label}
+																		</span>
+																	);
+																})()}
+															{task.tags.map((tag) => (
+																<span
+																	key={tag}
+																	className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary"
+																>
+																	{tag}
+																</span>
+															))}
+														</div>
+													)}
 												</div>
 												{taskDropTarget?.columnStatus === column.status &&
 												taskDropTarget.taskId === task.id &&
@@ -361,6 +417,22 @@ export function TasksView({
 					/>
 				</div>
 			) : null}
+
+			{detailTask && (
+				<TaskDetailPanel
+					key={detailTask.id}
+					task={detailTask}
+					columns={statusColumns}
+					onUpdate={(fields) => {
+						void onUpdateTask(detailTask.id, fields);
+					}}
+					onDelete={() => {
+						void onDeleteTask(detailTask.id);
+						setDetailTaskId(null);
+					}}
+					onClose={() => setDetailTaskId(null)}
+				/>
+			)}
 		</div>
 	);
 }
