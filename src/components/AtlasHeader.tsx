@@ -1,5 +1,12 @@
 import { createElement, useRef } from "react";
-import { ArrowUpOnSquareStackIcon, PauseIcon, PlayCircleIcon, PlayIcon, StopIcon } from "@heroicons/react/24/outline";
+import {
+	ArrowUpOnSquareStackIcon,
+	PauseIcon,
+	PlayCircleIcon,
+	PlayIcon,
+	SparklesIcon,
+	StopIcon,
+} from "@heroicons/react/24/outline";
 import logo from "../assets/logosmall.png";
 import {
 	ArrowUpOnSquareStackIcon as ArrowUpOnSquareStackIconSolid,
@@ -41,6 +48,7 @@ type AtlasHeaderProps = {
 	onPauseResume: () => void;
 	onStopSession: () => void;
 	onOpenMiniWindow: () => void;
+	onQuickCapture: () => void;
 };
 
 export function AtlasHeader({
@@ -71,6 +79,7 @@ export function AtlasHeader({
 	onPauseResume,
 	onStopSession,
 	onOpenMiniWindow,
+	onQuickCapture,
 }: AtlasHeaderProps) {
 	const triggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -86,6 +95,20 @@ export function AtlasHeader({
 					alt="Atlas"
 					className="h-7 w-7 shrink-0"
 				/>
+				<Tooltip content="Capture a task or note — Atlas files it for you">
+					<button
+						type="button"
+						className="no-drag inline-flex h-7 items-center gap-1.5 rounded-lg border border-neutral-300 bg-neutral-0 px-2 text-body-small text-neutral-600 transition hover:border-neutral-400 hover:text-neutral-800 dark:border-neutral-600 dark:bg-neutral-700/60 dark:text-neutral-300 dark:hover:border-neutral-500 dark:hover:text-neutral-50"
+						onClick={onQuickCapture}
+						aria-label="Quick capture"
+					>
+						<SparklesIcon className="h-4 w-4 shrink-0" />
+						<span className="hidden truncate md:inline">Quick add</span>
+						<kbd className="rounded border border-neutral-200 bg-neutral-50 px-1 font-data text-[10px] leading-4 text-neutral-500 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-400">
+							{isMacPlatform ? "⌘K" : "Ctrl K"}
+						</kbd>
+					</button>
+				</Tooltip>
 			</div>
 
 			<div className="titlebar-center left-1/2 absolute -translate-x-1/2 w-2/5 max-w-2xl min-w-96">
