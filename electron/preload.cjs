@@ -76,6 +76,7 @@ contextBridge.exposeInMainWorld("atlas", {
 	},
 
 	resizeNotch: (width, height) => ipcRenderer.invoke("notch:resize", width, height),
+	setNotchIgnoreMouse: (ignore) => ipcRenderer.invoke("notch:setIgnoreMouse", ignore),
 	onNotchPreferencesChanged: (callback) => {
 		const listener = (_event, preferences) => callback(preferences);
 		ipcRenderer.on("notch:preferences-changed", listener);
