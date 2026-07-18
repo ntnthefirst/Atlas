@@ -1745,3 +1745,237 @@ textarea {
 		display: none;
 	}
 }
+
+/* ---------------------------------------------------------------------------
+   Smart Quick Capture — the ⌘/Ctrl-K command bar. One surface that reads the
+   typed line on-device and shows exactly where it will land before you commit.
+--------------------------------------------------------------------------- */
+.smart-capture-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 120;
+	display: flex;
+	align-items: flex-start;
+	justify-content: center;
+	padding-top: 14vh;
+	background: color-mix(in srgb, var(--neutral-900) 42%, transparent);
+	backdrop-filter: blur(3px);
+}
+
+.smart-capture-panel {
+	width: min(640px, calc(100vw - 32px));
+	border-radius: 16px;
+	border: 1px solid var(--neutral-200);
+	background: var(--neutral-0);
+	color: var(--neutral-700);
+	box-shadow: 0 24px 60px -20px rgba(13, 13, 13, 0.35);
+	overflow: hidden;
+}
+
+.dark .smart-capture-panel {
+	border-color: var(--neutral-600);
+	background: var(--neutral-800);
+	color: var(--neutral-50);
+	box-shadow: 0 24px 70px -18px rgba(0, 0, 0, 0.65);
+}
+
+.smart-capture-input-row {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 16px 18px;
+}
+
+.smart-capture-input {
+	flex: 1;
+	min-width: 0;
+	border: none;
+	outline: none;
+	background: transparent;
+	color: inherit;
+	font-family: var(--font-body);
+	font-size: 17px;
+}
+
+.smart-capture-input::placeholder {
+	color: var(--neutral-400);
+}
+
+.smart-capture-kbd,
+.smart-capture-footer-keys kbd {
+	font-family: var(--font-data);
+	font-size: 11px;
+	padding: 2px 7px;
+	border-radius: 6px;
+	border: 1px solid var(--neutral-200);
+	background: var(--neutral-50);
+	color: var(--neutral-500);
+}
+
+.dark .smart-capture-kbd,
+.dark .smart-capture-footer-keys kbd {
+	border-color: var(--neutral-600);
+	background: var(--neutral-700);
+	color: var(--neutral-300);
+}
+
+.smart-capture-preview,
+.smart-capture-hints {
+	padding: 14px 18px;
+	border-top: 1px solid var(--neutral-200);
+}
+
+.dark .smart-capture-preview,
+.dark .smart-capture-hints {
+	border-color: var(--neutral-700);
+}
+
+.smart-capture-title-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 10px;
+}
+
+.smart-capture-title {
+	font-size: 15px;
+	font-weight: 500;
+	color: var(--neutral-800);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.dark .smart-capture-title {
+	color: var(--neutral-0);
+}
+
+.smart-capture-kind {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	flex-shrink: 0;
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	padding: 3px 8px;
+	border-radius: 999px;
+}
+
+.smart-capture-kind.is-task {
+	background: var(--primary-subtle);
+	color: var(--primary-active);
+}
+
+.smart-capture-kind.is-note {
+	background: var(--secondary-subtle);
+	color: var(--neutral-700);
+}
+
+.dark .smart-capture-kind.is-task {
+	background: color-mix(in srgb, var(--primary) 26%, transparent);
+	color: var(--primary-soft);
+}
+
+.dark .smart-capture-kind.is-note {
+	background: color-mix(in srgb, var(--secondary) 20%, transparent);
+	color: var(--secondary-soft);
+}
+
+.smart-capture-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.smart-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	font-size: 12px;
+	padding: 3px 9px;
+	border-radius: 999px;
+	border: 1px solid var(--neutral-200);
+	background: var(--neutral-50);
+	color: var(--neutral-600);
+}
+
+.dark .smart-chip {
+	border-color: var(--neutral-600);
+	background: var(--neutral-700);
+	color: var(--neutral-200);
+}
+
+.smart-chip.is-due {
+	border-color: color-mix(in srgb, #f59e0b 40%, var(--neutral-200));
+	color: #b45309;
+}
+
+.dark .smart-chip.is-due {
+	color: #fbbf24;
+}
+
+.smart-chip.is-tag {
+	font-family: var(--font-data);
+	font-size: 11px;
+}
+
+.smart-chip-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 999px;
+	flex-shrink: 0;
+}
+
+.smart-capture-hints {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 14px;
+}
+
+.smart-capture-hint {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+	color: var(--neutral-500);
+}
+
+.smart-capture-hint code {
+	font-family: var(--font-data);
+	font-size: 11px;
+	padding: 2px 6px;
+	border-radius: 6px;
+	background: var(--neutral-100);
+	color: var(--neutral-600);
+}
+
+.dark .smart-capture-hint code {
+	background: var(--neutral-700);
+	color: var(--neutral-200);
+}
+
+.smart-capture-footer {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	padding: 10px 18px;
+	border-top: 1px solid var(--neutral-200);
+	background: var(--neutral-50);
+	font-size: 12px;
+	color: var(--neutral-500);
+}
+
+.dark .smart-capture-footer {
+	border-color: var(--neutral-700);
+	background: color-mix(in srgb, var(--neutral-900) 40%, var(--neutral-800));
+	color: var(--neutral-400);
+}
+
+.smart-capture-footer-keys {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+}
