@@ -101,6 +101,7 @@ declare global {
 			onFocusStateChanged: (callback: (state: FocusState) => void) => () => void;
 
 			resizeNotch: (width: number, height: number) => Promise<boolean>;
+			setNotchIgnoreMouse: (ignore: boolean) => Promise<boolean>;
 			onNotchPreferencesChanged: (callback: (preferences: NotchPreferences) => void) => () => void;
 			onNotchBlur: (callback: () => void) => () => void;
 			listDisplays: () => Promise<DisplaySummary[]>;
