@@ -2,6 +2,10 @@
 
 import type {
 	ActivityBlock,
+	AiCompleteArgs,
+	AiCompleteResult,
+	AiConfigPatch,
+	AiPublicConfig,
 	AppRelease,
 	AtlasView,
 	DashboardPreferences,
@@ -112,6 +116,10 @@ declare global {
 			openNotchInputWindow: (payload: NotchInputPayload) => Promise<boolean>;
 			getNotchInputPayload: () => Promise<NotchInputPayload>;
 			onNotchInputPayload: (callback: (payload: NotchInputPayload) => void) => () => void;
+			getAiConfig: () => Promise<AiPublicConfig>;
+			setAiConfig: (patch: AiConfigPatch) => Promise<AiPublicConfig>;
+			aiComplete: (args: AiCompleteArgs) => Promise<AiCompleteResult>;
+
 			pickAppFile: () => Promise<string | null>;
 			getFileIcon: (filePath: string) => Promise<string | null>;
 			listOpenApps: () => Promise<Array<{ name: string; path: string | null }>>;
