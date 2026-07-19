@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { MinusIcon, XMarkIcon, PauseIcon, PlayIcon, StopIcon } from "@heroicons/react/24/outline";
 import type { AtlasView, TaskStatus, TaskItem, TaskColumn, TaskUpdate, MapItem } from "./types";
@@ -10,6 +10,8 @@ import { SettingsWindowApp } from "./components/settings-window/SettingsWindowAp
 import { NotchApp } from "./components/notch/NotchApp";
 import { ActionEditorWindowApp } from "./components/action-editor/ActionEditorWindowApp";
 import { NotchInputWindowApp } from "./components/notch-input/NotchInputWindowApp";
+import { SmartCapture } from "./components/SmartCapture";
+import type { ParsedCapture } from "./utils/smartParse";
 import logo from "./assets/logosmall.png";
 import {
 	useMapManagement,
@@ -61,6 +63,7 @@ function MainAtlasApp() {
 		[],
 	);
 	const [view, setView] = useState<AtlasView>("dashboard");
+	const [captureOpen, setCaptureOpen] = useState(false);
 	const [hiddenSidebarViews, setHiddenSidebarViews] = useState<string[]>(() =>
 		readStorage(SIDEBAR_HIDDEN_KEY, [] as string[]),
 	);
@@ -70,6 +73,20 @@ function MainAtlasApp() {
 		const unsubscribe = window.atlas.onNavigate?.(setView);
 		return () => unsubscribe?.();
 	}, []);
+
+	// ⌘/Ctrl-K anywhere opens Smart Quick Capture — the one place you drop a
+	// thought and let Atlas file it. Toggles so the same chord dismisses it.
+	useEffect(() => {
+		if (isMiniMode || isWelcomeMode) return;
+		const onKeyDown = (event: KeyboardEvent) => {
+			if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "k") {
+				event.preventDefault();
+				setCaptureOpen((current) => !current);
+			}
+		};
+		window.addEventListener("keydown", onKeyDown);
+		return () => window.removeEventListener("keydown", onKeyDown);
+	}, [isMiniMode, isWelcomeMode]);
 
 	const { maps, setMaps, selectedMapId, setSelectedMapId, selectedMap } = useMapManagement();
 	const {
@@ -624,6 +641,50 @@ function MainAtlasApp() {
 		}
 	};
 
+	// Resolves a given environment's columns for Smart Capture routing, so a
+	// captured line can land in the right column of whichever environment it
+	// targets (not only the one that's currently open).
+	const columnsFor = useCallback(
+		(mapId: string) => normalizeColumns(taskColumnsByMap[mapId] ?? defaultTaskColumns, defaultTaskColumns),
+		[taskColumnsByMap],
+	);
+
+	// Files a parsed Smart Capture result: creates the task (fully routed with
+	// priority/due/tags/column) or the note, then surfaces it — switching to the
+	// target environment if the capture named a different one.
+	const onSmartCapture = async (result: ParsedCapture) => {
+		const envId = result.environmentId ?? selectedMapId;
+		const title = result.title.trim();
+		if (!envId || !title) {
+			setCaptureOpen(false);
+			return;
+		}
+		try {
+			if (result.kind === "note") {
+				await window.atlas.createNote(envId, title);
+			} else {
+				await window.atlas.createTask(envId, title, "", {
+					status: result.columnStatus ?? undefined,
+					priority: result.priority,
+					tags: result.tags,
+					due_date: result.dueDate,
+				});
+			}
+			setErrorMessage("");
+			if (envId !== selectedMapId) {
+				await onSelectMap(envId);
+			} else {
+				await syncTasksForMap(envId);
+				setDashboard(await window.atlas.getDashboardOverview(envId));
+			}
+			if (result.kind === "task") setView("tasks");
+		} catch (error) {
+			setErrorMessage(error instanceof Error ? error.message : "Could not capture that.");
+		} finally {
+			setCaptureOpen(false);
+		}
+	};
+
 	// Task operations
 	const onCreateTaskInColumn = async (status: TaskStatus, title: string) => {
 		if (!selectedMapId || !title.trim()) return;
@@ -977,6 +1038,7 @@ function MainAtlasApp() {
 							onPauseResume={onPauseResume}
 							onStopSession={onStopSession}
 							onOpenMiniWindow={() => void window.atlas.openMiniWindow()}
+							onQuickCapture={() => setCaptureOpen(true)}
 						/>
 					</div>
 
@@ -1097,6 +1159,18 @@ function MainAtlasApp() {
 					</motion.div>
 				)}
 			</AnimatePresence>
+
+			{hasBootstrapped && !showFirstLaunch && (
+				<SmartCapture
+					open={captureOpen}
+					onClose={() => setCaptureOpen(false)}
+					environments={maps}
+					currentEnvironmentId={selectedMapId || null}
+					columnsFor={columnsFor}
+					onSubmit={onSmartCapture}
+					accent={selectedMap?.accent || globalAccent}
+				/>
+			)}
 		</div>
 	);
 }
