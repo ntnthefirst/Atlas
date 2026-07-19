@@ -1,13 +1,34 @@
 # Releasing Atlas
 
-Versions are driven by `package.json` using `npm version`, which bumps the
-version, makes a commit, and creates the matching `vX.Y.Z` git tag in one step.
-**Pushing the tag** triggers [`.github/workflows/release.yml`](.github/workflows/release.yml),
-which lints, builds, and publishes the GitHub release with Windows + macOS
-installers. Tags containing `-beta` are published as pre-releases.
+Versions are driven by `package.json`. There is no release label and no version
+math — the version in `package.json` is the source of truth, and the `vX.Y.Z`
+tag always matches it.
 
-There is no release label or version math — the tag is the source of truth, and
-`package.json` always stays in sync with it.
+There are two ways to release, and both end up in
+[`release.yml`](.github/workflows/release.yml), which lints, builds, and
+publishes the GitHub release with Windows + macOS installers.
+
+## 1. Automatic: bump the version in a PR
+
+[`auto-tag-release.yml`](.github/workflows/auto-tag-release.yml) watches pushes
+to `main`. When a merge lands a version that has **no tag yet**, it creates and
+pushes `v<version>` and publishes the release automatically.
+
+So to ship a change, bump the version in the PR itself:
+
+```bash
+npm version minor --no-git-tag-version   # edits package.json only
+git commit -am "chore: 1.2.0"
+```
+
+Merge the PR and the release builds and publishes on its own. If the merge does
+**not** change the version, the workflow is a no-op — ordinary merges never
+publish.
+
+## 2. Manual: tag from `main`
+
+`npm version` bumps the version, commits, and creates the tag in one step;
+pushing the tag publishes.
 
 ## Stable release
 
@@ -19,6 +40,11 @@ git push --follow-tags
 ```
 
 ## Beta release
+
+A release is published as a **pre-release** when either the version contains
+`-beta` (e.g. `1.2.0-beta.0`) or `package.json` has `"beta": true`. The flag is
+useful with the automatic path when you want a plain version number shipped as a
+pre-release; remove it to go stable again.
 
 Start a beta for the next version:
 

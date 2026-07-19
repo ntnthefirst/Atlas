@@ -4,13 +4,29 @@ name: Release
 # Pushing a vX.Y.Z (or vX.Y.Z-beta.N) tag lints, builds, and publishes the
 # GitHub release with Windows + macOS installers. The version comes straight
 # from the tag — no label policy, no tag-sorting, no version math.
+#
+# `auto-tag-release.yml` also calls this workflow directly after it creates a
+# tag for a version bump that landed on main. That call is deliberate: a tag
+# pushed with GITHUB_TOKEN cannot trigger `on: push`, so the automatic path
+# would silently do nothing if it relied on the tag trigger alone.
 on:
     push:
         tags:
             - "v*"
+    workflow_call:
+        inputs:
+            tag:
+                description: The tag to release, e.g. v1.2.0
+                required: true
+                type: string
+            prerelease:
+                description: Publish the release as a pre-release
+                required: false
+                default: false
+                type: boolean
 
 concurrency:
-    group: release-${{ github.ref }}
+    group: release-${{ inputs.tag || github.ref_name }}
     cancel-in-progress: false
 
 jobs:
@@ -19,6 +35,8 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
+              with:
+                  ref: ${{ inputs.tag || github.ref_name }}
             - uses: actions/setup-node@v4
               with:
                   node-version: 20
@@ -37,8 +55,8 @@ jobs:
             - name: Create or update the release for this tag
               uses: softprops/action-gh-release@v2
               with:
-                  tag_name: ${{ github.ref_name }}
-                  prerelease: ${{ contains(github.ref_name, '-beta') }}
+                  tag_name: ${{ inputs.tag || github.ref_name }}
+                  prerelease: ${{ inputs.prerelease || contains(inputs.tag || github.ref_name, '-beta') }}
                   generate_release_notes: true
 
     installers:
@@ -67,6 +85,8 @@ jobs:
                           release/latest*.yml
         steps:
             - uses: actions/checkout@v4
+              with:
+                  ref: ${{ inputs.tag || github.ref_name }}
             - uses: actions/setup-node@v4
               with:
                   node-version: 20
@@ -77,12 +97,13 @@ jobs:
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                   CSC_IDENTITY_AUTO_DISCOVERY: false
+                  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
               run: |
-                  VERSION="${GITHUB_REF_NAME#v}"
+                  VERSION="${RELEASE_TAG#v}"
                   npm run build
                   npx electron-builder ${{ matrix.args }} --publish never --config.extraMetadata.version="$VERSION"
             - name: Upload installers to the release
               uses: softprops/action-gh-release@v2
               with:
-                  tag_name: ${{ github.ref_name }}
+                  tag_name: ${{ inputs.tag || github.ref_name }}
                   files: ${{ matrix.asset_glob }}
