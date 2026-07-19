@@ -324,6 +324,10 @@ export function NotchApp() {
 	const { accent: globalAccent } = useAccent();
 	const cardRef = useRef<HTMLDivElement | null>(null);
 	const wrapperRef = useRef<HTMLDivElement | null>(null);
+	const panelRef = useRef<HTMLDivElement | null>(null);
+	// Last click-through state pushed to the main process, so we only send an IPC
+	// message when it actually flips rather than on every pointer move.
+	const ignoreMouseRef = useRef(false);
 
 	const [preferences, setPreferences] = useState<NotchPreferences>({
 		enabled: true,
@@ -676,6 +680,49 @@ export function NotchApp() {
 		return () => unsubscribe?.();
 	}, []);
 
+	// Click-through hitbox: the notch window is always sized to the card's full
+	// (expanded) footprint, so when the card retracts or the pointer sits over the
+	// transparent margins the empty window would otherwise swallow clicks and
+	// obscure the view. We forward pointer moves from the main process and toggle
+	// mouse-transparency based on whether the pointer is genuinely over the painted
+	// card/panel — so a hidden notch is fully click-through, yet re-hovering its
+	// visible peek instantly makes it interactive again. A free-floating notch is
+	// always kept interactive so it stays grabbable.
+	const positionForHitbox = preferences.position;
+	useEffect(() => {
+		const setIgnore = (ignore: boolean) => {
+			if (ignoreMouseRef.current === ignore) return;
+			ignoreMouseRef.current = ignore;
+			void window.atlas.setNotchIgnoreMouse?.(ignore);
+		};
+
+		if (positionForHitbox === "free") {
+			setIgnore(false);
+			return;
+		}
+
+		// Default to pass-through until the pointer is shown to be over the card.
+		setIgnore(true);
+
+		const overSolid = (x: number, y: number) => {
+			const el = document.elementFromPoint(x, y);
+			return Boolean(el && (cardRef.current?.contains(el) || panelRef.current?.contains(el)));
+		};
+		// `mousemove` is what Electron forwards to the renderer while the window is
+		// click-through (forward: true), so it fires even over the pass-through
+		// zones — letting us flip interactivity back on the instant the pointer
+		// reaches the visible card/panel.
+		const onMove = (event: MouseEvent) => setIgnore(!overSolid(event.clientX, event.clientY));
+		const onLeave = () => setIgnore(true);
+
+		window.addEventListener("mousemove", onMove);
+		document.addEventListener("mouseleave", onLeave);
+		return () => {
+			window.removeEventListener("mousemove", onMove);
+			document.removeEventListener("mouseleave", onLeave);
+		};
+	}, [positionForHitbox]);
+
 	const isFree = preferences.position === "free";
 	const isVertical = preferences.position === "left" || preferences.position === "right";
 
@@ -834,15 +881,37 @@ export function NotchApp() {
 	};
 
 	const onStopTimer = async () => {
-		if (!activeSession) return;
-		await window.atlas.stopSession(activeSession.id);
-		setActiveSession(null);
+		// Reconcile against the real DB session instead of trusting the polled
+		// snapshot: stop whatever is genuinely active, then re-read the truth so a
+		// stale id can't leave a phantom timer ticking or the session running on.
+		const live = (await window.atlas.getActiveSession().catch(() => null)) ?? activeSession;
+		if (!live) {
+			setActiveSession(null);
+			return;
+		}
+		try {
+			await window.atlas.stopSession(live.id);
+		} catch {
+			// Already stopped elsewhere — fall through and adopt the DB truth.
+		}
+		setActiveSession(await window.atlas.getActiveSession().catch(() => null));
 	};
 
 	const onStartTimer = async () => {
-		if (!environment || activeSession) return;
-		const session = await window.atlas.startSession(environment.id);
-		setActiveSession(session);
+		if (!environment) return;
+		// Never start a second session: if one is already active (possibly started
+		// from another window since the last poll), adopt it rather than duplicate.
+		const live = await window.atlas.getActiveSession().catch(() => null);
+		if (live) {
+			setActiveSession(live);
+			return;
+		}
+		try {
+			const session = await window.atlas.startSession(environment.id);
+			setActiveSession(session);
+		} catch {
+			setActiveSession(await window.atlas.getActiveSession().catch(() => null));
+		}
 	};
 
 	const onTogglePause = async () => {
@@ -887,19 +956,28 @@ export function NotchApp() {
 			targetEnvId = scene.environmentId;
 		}
 
-		if (scene.timer === "start" && !activeSession && targetEnvId) {
-			try {
-				const session = await window.atlas.startSession(targetEnvId);
-				setActiveSession(session);
-			} catch {
-				// Ignore: scene continues with its remaining actions.
+		if (scene.timer === "start" && targetEnvId) {
+			const live = await window.atlas.getActiveSession().catch(() => null);
+			if (live) {
+				setActiveSession(live);
+			} else {
+				try {
+					const session = await window.atlas.startSession(targetEnvId);
+					setActiveSession(session);
+				} catch {
+					// Ignore: scene continues; adopt whatever the DB reports.
+					setActiveSession(await window.atlas.getActiveSession().catch(() => null));
+				}
 			}
-		} else if (scene.timer === "stop" && activeSession) {
-			try {
-				await window.atlas.stopSession(activeSession.id);
-				setActiveSession(null);
-			} catch {
-				// Ignore.
+		} else if (scene.timer === "stop") {
+			const live = (await window.atlas.getActiveSession().catch(() => null)) ?? activeSession;
+			if (live) {
+				try {
+					await window.atlas.stopSession(live.id);
+				} catch {
+					// Ignore.
+				}
+				setActiveSession(await window.atlas.getActiveSession().catch(() => null));
 			}
 		}
 
@@ -1712,6 +1790,7 @@ export function NotchApp() {
 
 				{activeTab && activeTab.placements.length > 0 ? (
 					<div
+						ref={panelRef}
 						className="notch-no-drag rounded-[20px] border border-neutral-200 bg-neutral-0 p-3 text-neutral-700 dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-50"
 						style={{
 							display: "grid",

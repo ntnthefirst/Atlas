@@ -1063,8 +1063,8 @@ function createMainWindow() {
 	mainWindow = new BrowserWindow({
 		width: 1320,
 		height: 860,
-		minWidth: 1080,
-		minHeight: 700,
+		minWidth: 760,
+		minHeight: 600,
 		backgroundColor: "#070707",
 		icon: iconPath,
 		frame: isMac,
@@ -2119,6 +2119,26 @@ function wireIpc() {
 		const safeWidth = Math.max(120, Math.min(900, Math.ceil(Number(width) || 0)));
 		const safeHeight = Math.max(44, Math.min(600, Math.ceil(Number(height) || 0)));
 		positionNotchWindow(notchWindow, display, safeWidth, safeHeight);
+		return true;
+	});
+
+	// Toggles the notch window's click-through state. When the card is retracted
+	// (or the pointer is over the transparent margins), the renderer flips this on
+	// so clicks pass straight to whatever is behind the notch instead of the
+	// invisible window swallowing them. `forward: true` keeps mouse-move events
+	// flowing to the renderer so it can detect the pointer re-entering the peek
+	// and flip interactivity back on. Never made click-through while free-floating
+	// (it must stay grabbable) — the renderer enforces that too.
+	ipcMain.handle("notch:setIgnoreMouse", (event, ignore) => {
+		const notchWindow = BrowserWindow.fromWebContents(event.sender);
+		if (!notchWindow || notchWindow.isDestroyed()) {
+			return false;
+		}
+		if (ignore) {
+			notchWindow.setIgnoreMouseEvents(true, { forward: true });
+		} else {
+			notchWindow.setIgnoreMouseEvents(false);
+		}
 		return true;
 	});
 
