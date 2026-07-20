@@ -1719,7 +1719,56 @@ app.whenReady().then(async () => {
 			openPrimaryWindowByMapState();
 		}
 	});
+
+	if (process.env.ATLAS_WINDOW_SELFCHECK === "1") {
+		runWindowSelfCheck();
+	}
 });
+
+// Opens every window type once and reports whether each was actually created,
+// then exits. Gated behind an env var and invoked by `npm run smoke:windows`.
+//
+// This exists because nothing else can verify the window layer: a vitest suite
+// cannot construct a BrowserWindow, and a plain boot only proves the first
+// window opened. Moving window code between modules (WP-0.2) can easily break
+// a window that is only created on demand, and without this the breakage would
+// not surface until a user clicked the thing.
+function runWindowSelfCheck() {
+	const results = [];
+	const record = (label, ok) => results.push({ label, ok: Boolean(ok) });
+
+	const alive = (win) => win && !win.isDestroyed();
+
+	record("primary (main or welcome)", alive(mainWindow) || alive(welcomeWindow));
+
+	createMiniWindow();
+	record("mini", alive(miniWindow));
+
+	createSettingsWindow();
+	record("settings", alive(settingsWindow));
+
+	createActionEditorWindow();
+	record("action editor", alive(actionEditorWindow));
+
+	createNotchInputWindow({ kind: "task" });
+	record("notch input", alive(notchInputWindow));
+
+	// The notch is only expected to exist when preferences say it should be
+	// active, so an inactive notch is a pass, not a missing window.
+	syncNotchWindows();
+	record("notch", shouldNotchBeActive() ? notchWindows.size > 0 : true);
+
+	let failed = 0;
+	for (const result of results) {
+		if (!result.ok) {
+			failed += 1;
+		}
+		console.log(`  ${result.ok ? "PASS" : "FAIL"}  window: ${result.label}`);
+	}
+
+	console.log(failed === 0 ? "ALL WINDOWS OPENED" : `${failed} WINDOW(S) FAILED`);
+	app.exit(failed === 0 ? 0 : 1);
+}
 
 app.on("window-all-closed", () => {
 	if (process.platform !== "darwin") {
