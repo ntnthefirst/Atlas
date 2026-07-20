@@ -77,6 +77,38 @@ export type NoteItem = {
 	updated_at: string;
 };
 
+// AI provider integrations (Claude / Gemini / OpenAI). Keys live in the main
+// process; the renderer only ever receives whether a key is set.
+export type AiProvider = "anthropic" | "google" | "openai";
+
+export type AiProviderPublic = {
+	hasKey: boolean;
+	model: string;
+	label: string;
+};
+
+export type AiPublicConfig = {
+	defaultProvider: AiProvider;
+	providers: Record<AiProvider, AiProviderPublic>;
+};
+
+export type AiConfigPatch = {
+	defaultProvider?: AiProvider;
+	providers?: Partial<Record<AiProvider, { apiKey?: string; model?: string }>>;
+};
+
+export type AiCompleteArgs = {
+	provider?: AiProvider;
+	model?: string;
+	system?: string;
+	prompt: string;
+	maxTokens?: number;
+};
+
+export type AiCompleteResult =
+	| { ok: true; text: string; provider: AiProvider; model: string }
+	| { ok: false; error: string };
+
 // What the notch's separate capture popup should collect, and the context it
 // writes back into.
 export type NotchInputPayload = {

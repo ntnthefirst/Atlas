@@ -100,6 +100,10 @@ contextBridge.exposeInMainWorld("atlas", {
 		ipcRenderer.on("notchInput:payload", listener);
 		return () => ipcRenderer.removeListener("notchInput:payload", listener);
 	},
+	getAiConfig: () => ipcRenderer.invoke("ai:getConfig"),
+	setAiConfig: (patch) => ipcRenderer.invoke("ai:setConfig", patch),
+	aiComplete: (args) => ipcRenderer.invoke("ai:complete", args),
+
 	pickAppFile: () => ipcRenderer.invoke("app:pickFile"),
 	getFileIcon: (filePath) => ipcRenderer.invoke("app:getFileIcon", filePath),
 	listOpenApps: () => ipcRenderer.invoke("system:listOpenApps"),

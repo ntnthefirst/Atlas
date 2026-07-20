@@ -6,12 +6,15 @@ import {
 	CommandLineIcon,
 	PaintBrushIcon,
 	RectangleGroupIcon,
+	SparklesIcon,
 	WrenchScrewdriverIcon,
 } from "@heroicons/react/24/solid";
 import { AccentPicker, Select, ThemeModePicker, Toggle } from "../ui";
 import { useAccent } from "../../hooks";
 import { NotchTabsEditor } from "./NotchTabsEditor";
 import type {
+	AiProvider,
+	AiPublicConfig,
 	AppRelease,
 	DisplaySummary,
 	NotchActivation,
@@ -23,7 +26,7 @@ import type {
 } from "../../types";
 import logo from "../../assets/logosmall.png";
 
-type SettingsTab = "general" | "appearance" | "notch" | "keybindings" | "updates";
+type SettingsTab = "general" | "appearance" | "notch" | "integrations" | "keybindings" | "updates";
 
 type ThemeOption = "dark" | "light" | "system";
 
@@ -35,9 +38,20 @@ const settingsTabs: Array<{
 	{ id: "general", label: "General", icon: WrenchScrewdriverIcon },
 	{ id: "appearance", label: "Appearance", icon: PaintBrushIcon },
 	{ id: "notch", label: "Smart Notch", icon: RectangleGroupIcon },
+	{ id: "integrations", label: "Integrations", icon: SparklesIcon },
 	{ id: "keybindings", label: "Keybindings", icon: CommandLineIcon },
 	{ id: "updates", label: "Updates", icon: ArrowPathIcon },
 ];
+
+const AI_PROVIDER_ORDER: AiProvider[] = ["anthropic", "google", "openai"];
+
+const AI_PROVIDER_HINTS: Record<AiProvider, { keyPlaceholder: string; help: string }> = {
+	anthropic: { keyPlaceholder: "sk-ant-...", help: "console.anthropic.com → API Keys" },
+	google: { keyPlaceholder: "AIza...", help: "aistudio.google.com → Get API key" },
+	openai: { keyPlaceholder: "sk-...", help: "platform.openai.com → API keys" },
+};
+
+type AiStatusState = { state: "idle" | "saving" | "testing" | "ok" | "error"; message?: string };
 
 const INFO_ITEM_LABELS: Record<NotchInfoItemConfig["id"], string> = {
 	timer: "Active timer",
@@ -126,6 +140,22 @@ export function SettingsWindowApp() {
 		],
 	});
 	const [displays, setDisplays] = useState<DisplaySummary[]>([]);
+	const [aiConfig, setAiConfig] = useState<AiPublicConfig | null>(null);
+	const [aiKeyDrafts, setAiKeyDrafts] = useState<Record<AiProvider, string>>({
+		anthropic: "",
+		google: "",
+		openai: "",
+	});
+	const [aiModelDrafts, setAiModelDrafts] = useState<Record<AiProvider, string>>({
+		anthropic: "",
+		google: "",
+		openai: "",
+	});
+	const [aiStatus, setAiStatus] = useState<Record<AiProvider, AiStatusState>>({
+		anthropic: { state: "idle" },
+		google: { state: "idle" },
+		openai: { state: "idle" },
+	});
 	const [timeFormat, setTimeFormat] = useState(() => readStorage("atlas.settings.timeFormat", "24h"));
 	const [startWeekOn, setStartWeekOn] = useState(() => readStorage("atlas.settings.startWeekOn", "monday"));
 	const [density, setDensity] = useState(() => readStorage("atlas.settings.density", "comfortable"));
@@ -208,6 +238,92 @@ export function SettingsWindowApp() {
 			.then(setDisplays)
 			.catch(() => undefined);
 	}, []);
+
+	useEffect(() => {
+		window.atlas
+			.getAiConfig?.()
+			.then((config) => {
+				setAiConfig(config);
+				setAiModelDrafts({
+					anthropic: config.providers.anthropic.model,
+					google: config.providers.google.model,
+					openai: config.providers.openai.model,
+				});
+			})
+			.catch(() => undefined);
+	}, []);
+
+	const saveAiProvider = async (provider: AiProvider) => {
+		setAiStatus((current) => ({ ...current, [provider]: { state: "saving" } }));
+		try {
+			const key = aiKeyDrafts[provider].trim();
+			const config = await window.atlas.setAiConfig({
+				providers: {
+					[provider]: {
+						model: aiModelDrafts[provider].trim() || undefined,
+						...(key ? { apiKey: key } : {}),
+					},
+				},
+			});
+			setAiConfig(config);
+			setAiKeyDrafts((current) => ({ ...current, [provider]: "" }));
+			setAiStatus((current) => ({ ...current, [provider]: { state: "ok", message: "Saved" } }));
+		} catch {
+			setAiStatus((current) => ({
+				...current,
+				[provider]: { state: "error", message: "Could not save." },
+			}));
+		}
+	};
+
+	const clearAiProvider = async (provider: AiProvider) => {
+		setAiStatus((current) => ({ ...current, [provider]: { state: "saving" } }));
+		try {
+			const config = await window.atlas.setAiConfig({ providers: { [provider]: { apiKey: "" } } });
+			setAiConfig(config);
+			setAiKeyDrafts((current) => ({ ...current, [provider]: "" }));
+			setAiStatus((current) => ({ ...current, [provider]: { state: "idle", message: "Key removed" } }));
+		} catch {
+			setAiStatus((current) => ({
+				...current,
+				[provider]: { state: "error", message: "Could not clear." },
+			}));
+		}
+	};
+
+	const testAiProvider = async (provider: AiProvider) => {
+		setAiStatus((current) => ({ ...current, [provider]: { state: "testing" } }));
+		try {
+			const result = await window.atlas.aiComplete({
+				provider,
+				prompt: "Reply with the single word: ok",
+				maxTokens: 8,
+			});
+			if (result.ok) {
+				const preview = result.text.trim().replace(/\s+/g, " ").slice(0, 40) || "ok";
+				setAiStatus((current) => ({
+					...current,
+					[provider]: { state: "ok", message: `Connected · ${preview}` },
+				}));
+			} else {
+				setAiStatus((current) => ({ ...current, [provider]: { state: "error", message: result.error } }));
+			}
+		} catch {
+			setAiStatus((current) => ({
+				...current,
+				[provider]: { state: "error", message: "Request failed." },
+			}));
+		}
+	};
+
+	const setDefaultAiProvider = async (provider: AiProvider) => {
+		try {
+			const config = await window.atlas.setAiConfig({ defaultProvider: provider });
+			setAiConfig(config);
+		} catch {
+			// Keep the current default if persistence fails.
+		}
+	};
 
 	const updateNotch = (patch: Partial<NotchPreferences>) => {
 		setNotchPrefs((current) => ({ ...current, ...patch }));
@@ -503,6 +619,8 @@ export function SettingsWindowApp() {
 										>
 											{isCheckingUpdates ? "Scanning..." : "Scan for updates"}
 										</button>
+									) : activeTab === "integrations" ? (
+										<span>Stored on this device</span>
 									) : (
 										<span>Applies instantly</span>
 									)}
@@ -779,6 +897,138 @@ export function SettingsWindowApp() {
 													<NotchTabsEditor />
 												</div>
 											</>
+										)}
+									</div>
+								)}
+
+								{activeTab === "integrations" && (
+									<div className="flex flex-col gap-4">
+										<p className="m-0 text-xs text-neutral-500 dark:text-neutral-300">
+											Connect your own AI provider keys to power Atlas' smart features. Keys are stored
+											locally on this device and are only ever sent to the provider you choose.
+										</p>
+
+										{aiConfig ? (
+											<>
+												<Select
+													label="Default provider"
+													value={aiConfig.defaultProvider}
+													onChange={(value) => void setDefaultAiProvider(value as AiProvider)}
+													options={AI_PROVIDER_ORDER.map((provider) => ({
+														value: provider,
+														label: aiConfig.providers[provider].label,
+														description: aiConfig.providers[provider].hasKey
+															? "Key connected"
+															: "No key yet",
+													}))}
+												/>
+
+												{AI_PROVIDER_ORDER.map((provider) => {
+													const info = aiConfig.providers[provider];
+													const hint = AI_PROVIDER_HINTS[provider];
+													const status = aiStatus[provider];
+													return (
+														<div key={provider} className="atlas-settings-card-stack grid gap-2">
+															<div className="flex items-center justify-between">
+																<span className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">
+																	{info.label}
+																</span>
+																<span
+																	className={`inline-flex items-center gap-1.5 text-xs ${
+																		info.hasKey
+																			? "text-emerald-600 dark:text-emerald-400"
+																			: "text-neutral-500 dark:text-neutral-400"
+																	}`}
+																>
+																	<span
+																		className={`h-2 w-2 rounded-full ${
+																			info.hasKey ? "bg-emerald-500" : "bg-neutral-300 dark:bg-neutral-500"
+																		}`}
+																	/>
+																	{info.hasKey ? "Key connected" : "Not connected"}
+																</span>
+															</div>
+
+															<label className="grid gap-1 text-xs text-neutral-500 dark:text-neutral-300">
+																API key
+																<input
+																	type="password"
+																	value={aiKeyDrafts[provider]}
+																	onChange={(event) =>
+																		setAiKeyDrafts((current) => ({ ...current, [provider]: event.target.value }))
+																	}
+																	placeholder={
+																		info.hasKey ? "•••••••• stored — type to replace" : hint.keyPlaceholder
+																	}
+																	autoComplete="off"
+																	className="rounded-lg border border-neutral-200 bg-neutral-0 px-3 py-2 text-sm text-neutral-800 outline-none focus:border-primary dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100"
+																/>
+																<span className="text-[11px] text-neutral-400">{hint.help}</span>
+															</label>
+
+															<label className="grid gap-1 text-xs text-neutral-500 dark:text-neutral-300">
+																Model
+																<input
+																	type="text"
+																	value={aiModelDrafts[provider]}
+																	onChange={(event) =>
+																		setAiModelDrafts((current) => ({ ...current, [provider]: event.target.value }))
+																	}
+																	placeholder="model id"
+																	autoComplete="off"
+																	spellCheck={false}
+																	className="rounded-lg border border-neutral-200 bg-neutral-0 px-3 py-2 font-data text-sm text-neutral-800 outline-none focus:border-primary dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100"
+																/>
+															</label>
+
+															<div className="flex flex-wrap items-center gap-2">
+																<button
+																	type="button"
+																	className="action-btn"
+																	onClick={() => void saveAiProvider(provider)}
+																	disabled={status.state === "saving"}
+																>
+																	{status.state === "saving" ? "Saving..." : "Save"}
+																</button>
+																<button
+																	type="button"
+																	className="action-btn"
+																	onClick={() => void testAiProvider(provider)}
+																	disabled={!info.hasKey || status.state === "testing"}
+																>
+																	{status.state === "testing" ? "Testing..." : "Test connection"}
+																</button>
+																{info.hasKey && (
+																	<button
+																		type="button"
+																		className="action-btn"
+																		onClick={() => void clearAiProvider(provider)}
+																	>
+																		Remove key
+																	</button>
+																)}
+																{status.message && (
+																	<span
+																		className={`text-xs ${
+																			status.state === "error"
+																				? "text-orange-600 dark:text-orange-400"
+																				: status.state === "ok"
+																					? "text-emerald-600 dark:text-emerald-400"
+																					: "text-neutral-500 dark:text-neutral-400"
+																		}`}
+																	>
+																		{status.message}
+																	</span>
+																)}
+															</div>
+														</div>
+													);
+												})}
+											</>
+										) : (
+											<p className="m-0 text-sm text-neutral-500 dark:text-neutral-300">
+												Loading integrations…
+											</p>
 										)}
 									</div>
 								)}
