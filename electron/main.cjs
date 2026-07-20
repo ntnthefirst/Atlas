@@ -1690,7 +1690,12 @@ function createNotchWindowForDisplay(display) {
 	});
 
 	notchWindow.notchDisplayId = display.id;
-	notchWindow.setAlwaysOnTop(true, "screen-saver");
+	// "floating" keeps the notch above ordinary windows without the
+	// screen-saver level's habit of covering full-screen video, games and
+	// presentations — the notch should sit in the desktop, not on top of
+	// everything. The capture popup still uses the higher level, since that one
+	// is explicitly summoned and wants focus.
+	notchWindow.setAlwaysOnTop(true, "floating");
 
 	if (isDev) {
 		notchWindow.loadURL("http://localhost:5173?mode=notch");
