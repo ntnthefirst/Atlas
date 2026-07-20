@@ -27,6 +27,71 @@ days. Calendar time depends entirely on the burst pattern (see section 4).
 
 ---
 
+## 1b. Status
+
+Last updated: 2026-07-21. Keep this current — it is what a fresh session reads first.
+
+| Package | State |
+|---|---|
+| WP-0.1 Test harness | **Done.** Vitest + 3-OS CI matrix. |
+| WP-0.2 Split main.cjs | **In progress.** 2455 → 1757 lines. Pure extractions done; stateful half not started. |
+| WP-0.3 Database engine swap | Not started. |
+| WP-0.4 Secret vault | **Done.** Keys encrypted, legacy plaintext migrated. |
+| WP-0.5 Event log | Not started. Blocked on WP-0.3. |
+| WP-0.6 Cross-platform adapter | Not started. |
+| WP-0.7 maps → environments | Not started. Blocked on WP-0.3. |
+| WP-0.8 Scoped data layer | Not started. Blocked on WP-0.5, WP-0.7. |
+
+**Suite: 349 tests, ~2s.** Verification commands now available:
+
+```
+npm test              # 349 unit/integration tests
+npm run lint          # now covers electron/ and scripts/ too
+npm run smoke         # boots the real Electron main process, fails on crash
+npm run verify:secrets # runs inside Electron; proves the vault encrypts
+```
+
+### WP-0.2: what is left, and the decision waiting to be made
+
+Extracted so far, all **pure** (no shared mutable state), which is why a
+mechanical cut-and-verify approach was safe:
+`services/version.cjs`, `services/http.cjs`, `config/notch-prefs.cjs`,
+`config/dashboard-prefs.cjs`, `config/focus-prefs.cjs`,
+`config/update-prefs.cjs`, `config/prefs-utils.cjs`.
+
+Still in main.cjs, all **stateful** — window factories (~450), notch window
+management (~220), tray, and `wireIpc` (~620, ~75 handlers). These mutate
+shared module-level refs (`mainWindow`, `notchWindows`, `db`, `tracker`,
+`isQuitting`).
+
+**Before moving any of it, decide how state is shared.** The two candidates:
+
+1. A `registry` module holding the mutable refs, required by every window
+   module. Mechanical, but rewrites hundreds of references, and `npm run
+   smoke` only catches boot-time breakage — not "the settings window stops
+   opening".
+2. Factories that take and return their dependencies, with main.cjs keeping
+   ownership. Cleaner, but a larger conceptual change per module.
+
+Do not start this without picking one, and do not start it with limited
+context budget — a half-migrated main.cjs violates D5.
+
+### Known bugs found while testing, deliberately not fixed
+
+Each is pinned by a test asserting the current (wrong) behaviour, so fixing
+it means updating that test:
+
+- `reorderTaskIds` (src/utils/taskHelpers.ts) — dragging a task onto itself
+  sends it to the end of the list instead of doing nothing.
+- `normalizeIdEnabledList` (electron/config/notch-prefs.cjs) — an item
+  missing from saved preferences is always re-added as `enabled: true`,
+  ignoring its default. Latent until the first off-by-default item ships.
+- `clampFocusInt` (electron/config/focus-prefs.cjs) — `null` becomes the
+  range minimum rather than the default, so `"focusMinutes": null` yields a
+  1-minute Pomodoro instead of 25.
+
+---
+
 ## 2. What we are building
 
 A personal adaptive layer between the user and their computer, made of:
