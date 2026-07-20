@@ -22,6 +22,11 @@ const { loadAiPreferences, getPublicAiConfig, setAiConfig, aiComplete } = requir
 const { compareVersionStrings, normalizeReleaseList } = require("./services/version.cjs");
 const { NOTCH_PREFS_FILE, defaultNotchPreferences, normalizeNotchPreferences } = require("./config/notch-prefs.cjs");
 const { computeNotchBounds, selectTargetDisplays } = require("./windows/notch-geometry.cjs");
+const { createSettingsWindow: createSettingsWindowModule } = require("./windows/settings-window.cjs");
+const {
+	createActionEditorWindow: createActionEditorWindowModule,
+} = require("./windows/action-editor-window.cjs");
+const { createNotchInputWindow: createNotchInputWindowModule } = require("./windows/notch-input-window.cjs");
 const {
 	DASHBOARD_PREFS_FILE,
 	defaultDashboardPreferences,
@@ -529,62 +534,29 @@ function createWelcomeWindow() {
 	return welcomeWindow;
 }
 
-function createSettingsWindow(parentWindow = null) {
-	if (settingsWindow && !settingsWindow.isDestroyed()) {
-		settingsWindow.show();
-		settingsWindow.focus();
-		return settingsWindow;
-	}
+// Resolved once (isDev/__dirname never change at runtime) and shared by the
+// three secondary window wrappers below. createMainWindow/createWelcomeWindow/
+// createMiniWindow intentionally keep their own inline copies of these same
+// paths -- out of scope for this extraction (WP-0.2).
+const secondaryWindowPaths = {
+	iconPath: isDev
+		? path.join(__dirname, "..", "src", "assets", "logosmall.png")
+		: path.join(__dirname, "..", "dist", "assets", "logosmall.png"),
+	preloadPath: path.join(__dirname, "preload.cjs"),
+	distIndexPath: path.join(__dirname, "..", "dist", "index.html"),
+};
 
-	settingsWindow = new BrowserWindow({
-		width: 980,
-		height: 680,
-		minWidth: 980,
-		minHeight: 680,
-		maxWidth: 980,
-		maxHeight: 680,
-		maximizable: false,
-		fullscreenable: false,
-		autoHideMenuBar: true,
-		show: false,
-		center: true,
-		backgroundColor: "#070707",
-		icon: isDev
-			? path.join(__dirname, "..", "src", "assets", "logosmall.png")
-			: path.join(__dirname, "..", "dist", "assets", "logosmall.png"),
-		frame: isMac,
-		titleBarStyle: isMac ? "hiddenInset" : "hidden",
+function createSettingsWindow(parentWindow = null) {
+	settingsWindow = createSettingsWindowModule(parentWindow, {
+		existingWindow: settingsWindow,
+		isDev,
+		isMac,
 		titleBarOverlay: getTitleBarOverlay(),
-		parent: parentWindow && !parentWindow.isDestroyed() ? parentWindow : undefined,
-		modal: Boolean(parentWindow && !parentWindow.isDestroyed()),
-		resizable: false,
-		webPreferences: {
-			preload: path.join(__dirname, "preload.cjs"),
-			contextIsolation: true,
-			nodeIntegration: false,
+		paths: secondaryWindowPaths,
+		onClosed: () => {
+			settingsWindow = null;
 		},
 	});
-
-	if (isDev) {
-		settingsWindow.loadURL("http://localhost:5173?mode=settings");
-	} else {
-		settingsWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"), {
-			query: { mode: "settings" },
-		});
-	}
-
-	settingsWindow.once("ready-to-show", () => {
-		if (!settingsWindow || settingsWindow.isDestroyed()) {
-			return;
-		}
-		settingsWindow.show();
-		settingsWindow.focus();
-	});
-
-	settingsWindow.on("closed", () => {
-		settingsWindow = null;
-	});
-
 	return settingsWindow;
 }
 
@@ -592,55 +564,16 @@ function createSettingsWindow(parentWindow = null) {
 // the same editor embedded in Settings, but reachable directly from a button
 // on the notch itself without going through the full Settings window.
 function createActionEditorWindow(parentWindow = null) {
-	if (actionEditorWindow && !actionEditorWindow.isDestroyed()) {
-		actionEditorWindow.show();
-		actionEditorWindow.focus();
-		return actionEditorWindow;
-	}
-
-	actionEditorWindow = new BrowserWindow({
-		width: 900,
-		height: 720,
-		minWidth: 640,
-		minHeight: 480,
-		autoHideMenuBar: true,
-		show: false,
-		center: true,
-		backgroundColor: "#070707",
-		icon: isDev
-			? path.join(__dirname, "..", "src", "assets", "logosmall.png")
-			: path.join(__dirname, "..", "dist", "assets", "logosmall.png"),
-		frame: isMac,
-		titleBarStyle: isMac ? "hiddenInset" : "hidden",
+	actionEditorWindow = createActionEditorWindowModule(parentWindow, {
+		existingWindow: actionEditorWindow,
+		isDev,
+		isMac,
 		titleBarOverlay: getTitleBarOverlay(),
-		parent: parentWindow && !parentWindow.isDestroyed() ? parentWindow : undefined,
-		webPreferences: {
-			preload: path.join(__dirname, "preload.cjs"),
-			contextIsolation: true,
-			nodeIntegration: false,
+		paths: secondaryWindowPaths,
+		onClosed: () => {
+			actionEditorWindow = null;
 		},
 	});
-
-	if (isDev) {
-		actionEditorWindow.loadURL("http://localhost:5173?mode=actions");
-	} else {
-		actionEditorWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"), {
-			query: { mode: "actions" },
-		});
-	}
-
-	actionEditorWindow.once("ready-to-show", () => {
-		if (!actionEditorWindow || actionEditorWindow.isDestroyed()) {
-			return;
-		}
-		actionEditorWindow.show();
-		actionEditorWindow.focus();
-	});
-
-	actionEditorWindow.on("closed", () => {
-		actionEditorWindow = null;
-	});
-
 	return actionEditorWindow;
 }
 
@@ -648,67 +581,17 @@ function createActionEditorWindow(parentWindow = null) {
 // (add a task / note). Keeping input in its own focused window beats cramming
 // a field into the notch itself, and it can be positioned wherever.
 function createNotchInputWindow(payload) {
-	pendingNotchInputPayload = payload;
-
-	if (notchInputWindow && !notchInputWindow.isDestroyed()) {
-		notchInputWindow.webContents.send("notchInput:payload", payload);
-		notchInputWindow.show();
-		notchInputWindow.focus();
-		return notchInputWindow;
-	}
-
-	notchInputWindow = new BrowserWindow({
-		width: 440,
-		height: 260,
-		resizable: false,
-		maximizable: false,
-		minimizable: false,
-		fullscreenable: false,
-		alwaysOnTop: true,
-		skipTaskbar: true,
-		show: false,
-		center: true,
-		frame: false,
-		transparent: true,
-		backgroundColor: "#00000000",
-		hasShadow: true,
-		webPreferences: {
-			preload: path.join(__dirname, "preload.cjs"),
-			contextIsolation: true,
-			nodeIntegration: false,
+	notchInputWindow = createNotchInputWindowModule(payload, {
+		existingWindow: notchInputWindow,
+		isDev,
+		paths: secondaryWindowPaths,
+		setPendingPayload: (value) => {
+			pendingNotchInputPayload = value;
+		},
+		onClosed: () => {
+			notchInputWindow = null;
 		},
 	});
-
-	notchInputWindow.setAlwaysOnTop(true, "screen-saver");
-
-	if (isDev) {
-		notchInputWindow.loadURL("http://localhost:5173?mode=notch-input");
-	} else {
-		notchInputWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"), {
-			query: { mode: "notch-input" },
-		});
-	}
-
-	notchInputWindow.once("ready-to-show", () => {
-		if (!notchInputWindow || notchInputWindow.isDestroyed()) {
-			return;
-		}
-		notchInputWindow.show();
-		notchInputWindow.focus();
-	});
-
-	// Capture popups are dismiss-on-blur, like a spotlight field.
-	notchInputWindow.on("blur", () => {
-		if (notchInputWindow && !notchInputWindow.isDestroyed()) {
-			notchInputWindow.close();
-		}
-	});
-
-	notchInputWindow.on("closed", () => {
-		notchInputWindow = null;
-		pendingNotchInputPayload = null;
-	});
-
 	return notchInputWindow;
 }
 
