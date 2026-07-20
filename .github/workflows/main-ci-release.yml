@@ -53,10 +53,40 @@ jobs:
             - name: Build
               run: npm run build --if-present
 
+    tests:
+        name: Tests (${{ matrix.os }})
+        runs-on: ${{ matrix.os }}
+
+        strategy:
+            fail-fast: false
+            matrix:
+                os:
+                    - ubuntu-latest
+                    - windows-latest
+                    - macos-latest
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 20
+                  cache: npm
+
+            - name: Install dependencies
+              run: npm ci
+
+            - name: Run tests
+              run: npm test
+
     release:
         name: Version and Release
         runs-on: ubuntu-latest
-        needs: quality
+        needs:
+            - quality
+            - tests
         outputs:
             created: ${{ steps.version.outputs.created }}
             version: ${{ steps.version.outputs.version }}
