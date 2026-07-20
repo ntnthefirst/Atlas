@@ -20,6 +20,7 @@
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"smoke": "node scripts/smoke-boot.cjs",
+		"verify:secrets": "electron scripts/verify-secrets.cjs",
 		"preview": "vite preview"
 	},
 	"build": {

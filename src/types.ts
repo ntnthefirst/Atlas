@@ -90,6 +90,9 @@ export type AiProviderPublic = {
 export type AiPublicConfig = {
 	defaultProvider: AiProvider;
 	providers: Record<AiProvider, AiProviderPublic>;
+	// False when the OS keystore is unavailable, in which case Atlas refuses to
+	// store API keys rather than falling back to plaintext on disk.
+	secretsAvailable: boolean;
 };
 
 export type AiConfigPatch = {

@@ -8,10 +8,16 @@ const { app } = require("electron");
 //
 // All calls go through the main process so the user's API keys never touch the
 // renderer: the renderer sends a prompt + which provider to use, the key is read
-// from local storage here, and only the resulting text is handed back. Keys are
-// stored on-device in the app's userData folder and are only sent to the single
-// provider the user picked for a given request.
+// here, and only the resulting text is handed back. Keys are only ever sent to
+// the single provider the user picked for a given request.
+//
+// Keys live in the encrypted vault (services/secrets.cjs), not in
+// ai-preferences.json — that file now holds only the chosen provider and model
+// names. Older installs wrote keys into it in plaintext; those are migrated
+// into the vault on first load and stripped from the file (WP-0.4).
 // ---------------------------------------------------------------------------
+
+const secrets = require("./services/secrets.cjs");
 
 const AI_PREFS_FILE = "ai-preferences.json";
 const AI_PROVIDERS = ["anthropic", "google", "openai"];
@@ -26,7 +32,17 @@ const DEFAULT_MODELS = {
 	openai: "gpt-4o-mini",
 };
 
-const emptyProvider = (provider) => ({ apiKey: "", model: DEFAULT_MODELS[provider] });
+const emptyProvider = (provider) => ({ model: DEFAULT_MODELS[provider] });
+
+// Vault key for a provider's API key. Namespaced so the vault can hold
+// unrelated secrets (integration tokens, later) without collision.
+const secretKeyFor = (provider) => `ai.${provider}.apiKey`;
+
+// Plaintext keys read from a legacy ai-preferences.json that could NOT be
+// migrated because the OS keystore was unavailable. Kept in memory only, so the
+// app keeps working for that session without ever writing plaintext again.
+// Migration is retried on the next load.
+let legacyPlaintextKeys = {};
 
 const defaultAiPreferences = () => ({
 	defaultProvider: "anthropic",
@@ -48,7 +64,6 @@ function normalizeAiPreferences(raw) {
 		const entry = providers[provider];
 		if (entry && typeof entry === "object") {
 			base.providers[provider] = {
-				apiKey: typeof entry.apiKey === "string" ? entry.apiKey : "",
 				model:
 					typeof entry.model === "string" && entry.model.trim()
 						? entry.model.trim()
@@ -63,13 +78,64 @@ function aiPrefsPath() {
 	return path.join(app.getPath("userData"), AI_PREFS_FILE);
 }
 
-function loadAiPreferences() {
-	try {
-		aiPreferences = normalizeAiPreferences(JSON.parse(fs.readFileSync(aiPrefsPath(), "utf8")));
-	} catch {
-		aiPreferences = defaultAiPreferences();
+// Lifts any plaintext keys out of a legacy preferences file and into the vault.
+// Returns true when at least one key moved, meaning the file must be rewritten
+// without them.
+//
+// If the keystore is unavailable we deliberately do NOT touch the file: that
+// plaintext is the user's only copy of the key, and destroying it to satisfy a
+// security rule would be a worse outcome than leaving it one more session.
+// Those keys are held in memory for this run and migration is retried on the
+// next load.
+function migrateLegacyKeys(raw) {
+	legacyPlaintextKeys = {};
+
+	const providers = raw && typeof raw === "object" && raw.providers && typeof raw.providers === "object"
+		? raw.providers
+		: {};
+
+	let moved = false;
+	for (const provider of AI_PROVIDERS) {
+		const entry = providers[provider];
+		const key = entry && typeof entry.apiKey === "string" ? entry.apiKey.trim() : "";
+		if (!key) {
+			continue;
+		}
+
+		try {
+			secrets.set(secretKeyFor(provider), key);
+			moved = true;
+		} catch {
+			legacyPlaintextKeys[provider] = key;
+		}
 	}
+
+	return moved;
+}
+
+function loadAiPreferences() {
+	let raw = null;
+	try {
+		raw = JSON.parse(fs.readFileSync(aiPrefsPath(), "utf8"));
+	} catch {
+		raw = null;
+	}
+
+	const moved = migrateLegacyKeys(raw);
+	aiPreferences = normalizeAiPreferences(raw);
+
+	// Rewrites the file in the new shape, which no longer carries apiKey.
+	if (moved) {
+		persistAiPreferences();
+	}
+
 	return aiPreferences;
+}
+
+// The usable key for a provider: the vault first, then any legacy plaintext we
+// could not migrate this session.
+function resolveKey(provider) {
+	return secrets.get(secretKeyFor(provider)) || legacyPlaintextKeys[provider] || "";
 }
 
 function persistAiPreferences() {
@@ -86,12 +152,18 @@ function getPublicAiConfig() {
 	const providers = {};
 	for (const provider of AI_PROVIDERS) {
 		providers[provider] = {
-			hasKey: Boolean(aiPreferences.providers[provider].apiKey),
+			hasKey: Boolean(resolveKey(provider)),
 			model: aiPreferences.providers[provider].model,
 			label: AI_PROVIDER_LABELS[provider],
 		};
 	}
-	return { defaultProvider: aiPreferences.defaultProvider, providers };
+	return {
+		defaultProvider: aiPreferences.defaultProvider,
+		providers,
+		// Surfaced so the UI can explain why saving a key fails on this device
+		// rather than appearing to silently ignore it.
+		secretsAvailable: secrets.isAvailable(),
+	};
 }
 
 // Merge a patch: an omitted apiKey keeps the stored one, an empty string clears
@@ -107,7 +179,12 @@ function setAiConfig(patch) {
 			const entry = providers[provider];
 			if (!entry || typeof entry !== "object") continue;
 			if (typeof entry.apiKey === "string") {
-				aiPreferences.providers[provider].apiKey = entry.apiKey.trim();
+				// Throws when the OS keystore is unavailable, which the caller
+				// surfaces to the user — never a silent plaintext fallback.
+				secrets.set(secretKeyFor(provider), entry.apiKey.trim());
+				// A key that has just been stored properly supersedes any
+				// legacy plaintext we were holding for this session.
+				delete legacyPlaintextKeys[provider];
 			}
 			if (typeof entry.model === "string" && entry.model.trim()) {
 				aiPreferences.providers[provider].model = entry.model.trim();
@@ -207,7 +284,8 @@ async function aiComplete(args) {
 	const request = args && typeof args === "object" ? args : {};
 	const provider = AI_PROVIDERS.includes(request.provider) ? request.provider : aiPreferences.defaultProvider;
 	const config = aiPreferences.providers[provider];
-	if (!config || !config.apiKey) {
+	const apiKey = resolveKey(provider);
+	if (!config || !apiKey) {
 		throw new Error(`No API key set for ${AI_PROVIDER_LABELS[provider]}. Add it in Settings → Integrations.`);
 	}
 	const model = typeof request.model === "string" && request.model.trim() ? request.model.trim() : config.model;
@@ -217,9 +295,9 @@ async function aiComplete(args) {
 	const maxTokens = Math.min(4096, Math.max(1, Math.round(Number(request.maxTokens) || 1024)));
 
 	let text = "";
-	if (provider === "anthropic") text = await completeAnthropic(config.apiKey, model, system, prompt, maxTokens);
-	else if (provider === "google") text = await completeGoogle(config.apiKey, model, system, prompt);
-	else text = await completeOpenai(config.apiKey, model, system, prompt);
+	if (provider === "anthropic") text = await completeAnthropic(apiKey, model, system, prompt, maxTokens);
+	else if (provider === "google") text = await completeGoogle(apiKey, model, system, prompt);
+	else text = await completeOpenai(apiKey, model, system, prompt);
 
 	return { text, provider, model };
 }

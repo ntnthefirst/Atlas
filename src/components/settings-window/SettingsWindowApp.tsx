@@ -11,6 +11,7 @@ import {
 } from "@heroicons/react/24/solid";
 import { AccentPicker, Select, ThemeModePicker, Toggle } from "../ui";
 import { useAccent } from "../../hooks";
+import { describeIpcError } from "../../utils/ipcError";
 import { NotchTabsEditor } from "./NotchTabsEditor";
 import type {
 	AiProvider,
@@ -268,10 +269,10 @@ export function SettingsWindowApp() {
 			setAiConfig(config);
 			setAiKeyDrafts((current) => ({ ...current, [provider]: "" }));
 			setAiStatus((current) => ({ ...current, [provider]: { state: "ok", message: "Saved" } }));
-		} catch {
+		} catch (error) {
 			setAiStatus((current) => ({
 				...current,
-				[provider]: { state: "error", message: "Could not save." },
+				[provider]: { state: "error", message: describeIpcError(error, "Could not save.") },
 			}));
 		}
 	};
