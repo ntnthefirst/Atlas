@@ -1,67 +1,112 @@
 name: Release
 
-# Releases are driven by git tags created with `npm version` (see RELEASE.md).
-# Pushing a vX.Y.Z (or vX.Y.Z-beta.N) tag lints, builds, and publishes the
-# GitHub release with Windows + macOS installers. The version comes straight
-# from the tag — no label policy, no tag-sorting, no version math.
+# The single release path: every push to main checks package.json, and if that
+# version hasn't been released yet it lints, builds, tags it, and publishes a
+# GitHub release with the Windows + macOS installers.
 #
-# `auto-tag-release.yml` also calls this workflow directly after it creates a
-# tag for a version bump that landed on main. That call is deliberate: a tag
-# pushed with GITHUB_TOKEN cannot trigger `on: push`, so the automatic path
-# would silently do nothing if it relied on the tag trigger alone.
+# package.json is the source of truth — the tag always matches it. PR Check
+# already guarantees a merged PR carries a new, higher version, so in practice
+# every merge publishes exactly one release. If the version is unchanged (a
+# direct push, or a re-run) the workflow simply skips.
+#
+# Everything happens in this one run, so nothing depends on a pushed tag
+# triggering another workflow — which matters, because a tag pushed with
+# GITHUB_TOKEN cannot trigger `on: push`.
+#
+# A version containing `-beta`, or a `"beta": true` field in package.json,
+# publishes as a pre-release.
 on:
     push:
-        tags:
-            - "v*"
-    workflow_call:
-        inputs:
-            tag:
-                description: The tag to release, e.g. v1.2.0
-                required: true
-                type: string
-            prerelease:
-                description: Publish the release as a pre-release
-                required: false
-                default: false
-                type: boolean
+        branches:
+            - main
+    # Lets a failed publish be re-run from the Actions tab without another commit.
+    workflow_dispatch:
 
 concurrency:
-    group: release-${{ inputs.tag || github.ref_name }}
+    group: release
     cancel-in-progress: false
 
 jobs:
-    quality:
-        name: Lint and Build
+    check:
+        name: Check version
         runs-on: ubuntu-latest
+        outputs:
+            should_release: ${{ steps.decide.outputs.should_release }}
+            version: ${{ steps.decide.outputs.version }}
+            tag: ${{ steps.decide.outputs.tag }}
+            prerelease: ${{ steps.decide.outputs.prerelease }}
         steps:
             - uses: actions/checkout@v4
               with:
-                  ref: ${{ inputs.tag || github.ref_name }}
+                  fetch-depth: 0
+
+            - name: Has this version been released yet?
+              id: decide
+              run: |
+                  VERSION=$(node -p "require('./package.json').version")
+                  BETA=$(node -p "require('./package.json').beta === true")
+                  TAG="v$VERSION"
+
+                  # A -beta version is a pre-release regardless of the flag.
+                  case "$VERSION" in
+                    *-beta*) BETA=true ;;
+                  esac
+
+                  echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+                  echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+                  echo "prerelease=$BETA" >> "$GITHUB_OUTPUT"
+
+                  if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+                    echo "should_release=false" >> "$GITHUB_OUTPUT"
+                    echo "::notice::$TAG already exists — nothing to release."
+                  else
+                    echo "should_release=true" >> "$GITHUB_OUTPUT"
+                    echo "::notice::Releasing $TAG (prerelease=$BETA)."
+                  fi
+
+    build:
+        name: Lint and Build
+        needs: check
+        if: needs.check.outputs.should_release == 'true'
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
             - uses: actions/setup-node@v4
               with:
                   node-version: 20
                   cache: npm
             - run: npm ci
-            - run: npm run lint --if-present
-            - run: npm run build --if-present
+            - run: npm run lint
+            - run: npm run build
 
-    create-release:
-        name: Create GitHub Release
-        needs: quality
+    publish:
+        name: Tag and create release
+        needs: [check, build]
+        if: needs.check.outputs.should_release == 'true'
         runs-on: ubuntu-latest
         permissions:
             contents: write
         steps:
-            - name: Create or update the release for this tag
+            - uses: actions/checkout@v4
+
+            - name: Tag this commit
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  git tag "${{ needs.check.outputs.tag }}"
+                  git push origin "${{ needs.check.outputs.tag }}"
+
+            - name: Create the GitHub release
               uses: softprops/action-gh-release@v2
               with:
-                  tag_name: ${{ inputs.tag || github.ref_name }}
-                  prerelease: ${{ inputs.prerelease || contains(inputs.tag || github.ref_name, '-beta') }}
+                  tag_name: ${{ needs.check.outputs.tag }}
+                  prerelease: ${{ needs.check.outputs.prerelease == 'true' }}
                   generate_release_notes: true
 
     installers:
-        name: Build Installers (${{ matrix.name }})
-        needs: [quality, create-release]
+        name: Installers (${{ matrix.name }})
+        needs: [check, publish]
+        if: needs.check.outputs.should_release == 'true'
         runs-on: ${{ matrix.os }}
         permissions:
             contents: write
@@ -85,25 +130,25 @@ jobs:
                           release/latest*.yml
         steps:
             - uses: actions/checkout@v4
-              with:
-                  ref: ${{ inputs.tag || github.ref_name }}
             - uses: actions/setup-node@v4
               with:
                   node-version: 20
                   cache: npm
             - run: npm ci
+
+            # electron-builder reads the version straight from package.json,
+            # which is exactly the version being released — no override needed.
             - name: Build and package
               shell: bash
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                   CSC_IDENTITY_AUTO_DISCOVERY: false
-                  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
               run: |
-                  VERSION="${RELEASE_TAG#v}"
                   npm run build
-                  npx electron-builder ${{ matrix.args }} --publish never --config.extraMetadata.version="$VERSION"
-            - name: Upload installers to the release
+                  npx electron-builder ${{ matrix.args }} --publish never
+
+            - name: Upload the installers to the release
               uses: softprops/action-gh-release@v2
               with:
-                  tag_name: ${{ inputs.tag || github.ref_name }}
+                  tag_name: ${{ needs.check.outputs.tag }}
                   files: ${{ matrix.asset_glob }}
