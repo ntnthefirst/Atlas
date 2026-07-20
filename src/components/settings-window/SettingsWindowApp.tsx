@@ -13,6 +13,7 @@ import { AccentPicker, Select, ThemeModePicker, Toggle } from "../ui";
 import { useAccent } from "../../hooks";
 import { NotchTabsEditor } from "./NotchTabsEditor";
 import type {
+	AiModel,
 	AiProvider,
 	AiPublicConfig,
 	AppRelease,
@@ -156,6 +157,17 @@ export function SettingsWindowApp() {
 		google: { state: "idle" },
 		openai: { state: "idle" },
 	});
+	const [aiModels, setAiModels] = useState<Record<AiProvider, AiModel[]>>({
+		anthropic: [],
+		google: [],
+		openai: [],
+	});
+	const [aiModelsSource, setAiModelsSource] = useState<Record<AiProvider, "live" | "fallback" | null>>({
+		anthropic: null,
+		google: null,
+		openai: null,
+	});
+	const [aiModelsLoading, setAiModelsLoading] = useState<AiProvider | null>(null);
 	const [timeFormat, setTimeFormat] = useState(() => readStorage("atlas.settings.timeFormat", "24h"));
 	const [startWeekOn, setStartWeekOn] = useState(() => readStorage("atlas.settings.startWeekOn", "monday"));
 	const [density, setDensity] = useState(() => readStorage("atlas.settings.density", "comfortable"));
@@ -252,6 +264,54 @@ export function SettingsWindowApp() {
 			})
 			.catch(() => undefined);
 	}, []);
+
+	// Pulls the model list for a provider. Always yields options (the service
+	// falls back to a built-in list when there's no key or the call fails).
+	const loadAiModels = useCallback(async (provider: AiProvider) => {
+		setAiModelsLoading(provider);
+		try {
+			const result = await window.atlas.listAiModels(provider);
+			setAiModels((current) => ({ ...current, [provider]: result.models }));
+			setAiModelsSource((current) => ({ ...current, [provider]: result.source }));
+		} catch {
+			setAiModelsSource((current) => ({ ...current, [provider]: "fallback" }));
+		} finally {
+			setAiModelsLoading(null);
+		}
+	}, []);
+
+	// Load models for whichever provider is selected, refreshing when the
+	// selection changes or a key is added/removed.
+	const activeProvider = aiConfig?.defaultProvider ?? null;
+	const activeProviderHasKey = activeProvider ? aiConfig?.providers[activeProvider].hasKey : false;
+	useEffect(() => {
+		if (!activeProvider) return;
+		void loadAiModels(activeProvider);
+	}, [activeProvider, activeProviderHasKey, loadAiModels]);
+
+	// Everything the Integrations panel needs about the provider currently
+	// selected in the pills, including the model options (the saved model is
+	// always offered even if the provider didn't list it).
+	const activeAi = useMemo(() => {
+		if (!aiConfig) return null;
+		const provider = aiConfig.defaultProvider;
+		const current = aiModelDrafts[provider];
+		const models = aiModels[provider];
+		const options: AiModel[] =
+			current && !models.some((model) => model.id === current)
+				? [{ id: current, label: current }, ...models]
+				: models;
+		return {
+			provider,
+			info: aiConfig.providers[provider],
+			all: aiConfig.providers,
+			hint: AI_PROVIDER_HINTS[provider],
+			status: aiStatus[provider],
+			options,
+			source: aiModelsSource[provider],
+			loading: aiModelsLoading === provider,
+		};
+	}, [aiConfig, aiModelDrafts, aiModels, aiModelsSource, aiModelsLoading, aiStatus]);
 
 	const saveAiProvider = async (provider: AiProvider) => {
 		setAiStatus((current) => ({ ...current, [provider]: { state: "saving" } }));
@@ -908,122 +968,103 @@ export function SettingsWindowApp() {
 											locally on this device and are only ever sent to the provider you choose.
 										</p>
 
-										{aiConfig ? (
+										{activeAi ? (
 											<>
-												<Select
-													label="Default provider"
-													value={aiConfig.defaultProvider}
-													onChange={(value) => void setDefaultAiProvider(value as AiProvider)}
-													options={AI_PROVIDER_ORDER.map((provider) => ({
-														value: provider,
-														label: aiConfig.providers[provider].label,
-														description: aiConfig.providers[provider].hasKey
-															? "Key connected"
-															: "No key yet",
-													}))}
-												/>
+												<div className="atlas-provider-pills" role="tablist" aria-label="AI provider">
+													{AI_PROVIDER_ORDER.map((provider) => {
+														const isActive = provider === activeAi.provider;
+														const entry = activeAi.all[provider];
+														return (
+															<button
+																key={provider}
+																type="button"
+																role="tab"
+																aria-selected={isActive}
+																className={`atlas-provider-pill ${isActive ? "is-active" : ""}`}
+																onClick={() => void setDefaultAiProvider(provider)}
+															>
+																<span className={`atlas-provider-pill-dot ${entry.hasKey ? "is-connected" : ""}`} />
+																{entry.label}
+															</button>
+														);
+													})}
+												</div>
 
-												{AI_PROVIDER_ORDER.map((provider) => {
-													const info = aiConfig.providers[provider];
-													const hint = AI_PROVIDER_HINTS[provider];
-													const status = aiStatus[provider];
-													return (
-														<div key={provider} className="atlas-settings-card-stack grid gap-2">
-															<div className="flex items-center justify-between">
-																<span className="text-sm font-semibold text-neutral-800 dark:text-neutral-100">
-																	{info.label}
-																</span>
-																<span
-																	className={`inline-flex items-center gap-1.5 text-xs ${
-																		info.hasKey
+												<div className="atlas-settings-card-stack grid gap-3">
+													<label className="grid gap-1 text-xs text-neutral-500 dark:text-neutral-300">
+														API key
+														<input
+															type="password"
+															value={aiKeyDrafts[activeAi.provider]}
+															onChange={(event) =>
+																setAiKeyDrafts((current) => ({ ...current, [activeAi.provider]: event.target.value }))
+															}
+															placeholder={
+																activeAi.info.hasKey ? "•••••••• stored — type to replace" : activeAi.hint.keyPlaceholder
+															}
+															autoComplete="off"
+															className="rounded-xl border border-neutral-200 bg-neutral-0 px-3 py-2 text-sm text-neutral-800 outline-none focus:border-primary dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-100"
+														/>
+														<span className="text-[11px] text-neutral-400">{activeAi.hint.help}</span>
+													</label>
+
+													<Select
+														label="Model"
+														value={aiModelDrafts[activeAi.provider]}
+														onChange={(value) =>
+															setAiModelDrafts((current) => ({ ...current, [activeAi.provider]: value }))
+														}
+														options={activeAi.options.map((model) => ({ value: model.id, label: model.label }))}
+													/>
+													<span className="text-[11px] text-neutral-400">
+														{activeAi.loading
+															? "Loading models…"
+															: activeAi.source === "live"
+																? `${activeAi.options.length} models available for this key`
+																: "Suggested models — add a key to list the ones your account can use"}
+													</span>
+
+													<div className="flex flex-wrap items-center gap-2">
+														<button
+															type="button"
+															className="action-btn"
+															onClick={() => void saveAiProvider(activeAi.provider)}
+															disabled={activeAi.status.state === "saving"}
+														>
+															{activeAi.status.state === "saving" ? "Saving..." : "Save"}
+														</button>
+														<button
+															type="button"
+															className="action-btn"
+															onClick={() => void testAiProvider(activeAi.provider)}
+															disabled={!activeAi.info.hasKey || activeAi.status.state === "testing"}
+														>
+															{activeAi.status.state === "testing" ? "Testing..." : "Test connection"}
+														</button>
+														{activeAi.info.hasKey && (
+															<button
+																type="button"
+																className="action-btn"
+																onClick={() => void clearAiProvider(activeAi.provider)}
+															>
+																Remove key
+															</button>
+														)}
+														{activeAi.status.message && (
+															<span
+																className={`text-xs ${
+																	activeAi.status.state === "error"
+																		? "text-orange-600 dark:text-orange-400"
+																		: activeAi.status.state === "ok"
 																			? "text-emerald-600 dark:text-emerald-400"
 																			: "text-neutral-500 dark:text-neutral-400"
-																	}`}
-																>
-																	<span
-																		className={`h-2 w-2 rounded-full ${
-																			info.hasKey ? "bg-emerald-500" : "bg-neutral-300 dark:bg-neutral-500"
-																		}`}
-																	/>
-																	{info.hasKey ? "Key connected" : "Not connected"}
-																</span>
-															</div>
-
-															<label className="grid gap-1 text-xs text-neutral-500 dark:text-neutral-300">
-																API key
-																<input
-																	type="password"
-																	value={aiKeyDrafts[provider]}
-																	onChange={(event) =>
-																		setAiKeyDrafts((current) => ({ ...current, [provider]: event.target.value }))
-																	}
-																	placeholder={
-																		info.hasKey ? "•••••••• stored — type to replace" : hint.keyPlaceholder
-																	}
-																	autoComplete="off"
-																	className="rounded-lg border border-neutral-200 bg-neutral-0 px-3 py-2 text-sm text-neutral-800 outline-none focus:border-primary dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100"
-																/>
-																<span className="text-[11px] text-neutral-400">{hint.help}</span>
-															</label>
-
-															<label className="grid gap-1 text-xs text-neutral-500 dark:text-neutral-300">
-																Model
-																<input
-																	type="text"
-																	value={aiModelDrafts[provider]}
-																	onChange={(event) =>
-																		setAiModelDrafts((current) => ({ ...current, [provider]: event.target.value }))
-																	}
-																	placeholder="model id"
-																	autoComplete="off"
-																	spellCheck={false}
-																	className="rounded-lg border border-neutral-200 bg-neutral-0 px-3 py-2 font-data text-sm text-neutral-800 outline-none focus:border-primary dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100"
-																/>
-															</label>
-
-															<div className="flex flex-wrap items-center gap-2">
-																<button
-																	type="button"
-																	className="action-btn"
-																	onClick={() => void saveAiProvider(provider)}
-																	disabled={status.state === "saving"}
-																>
-																	{status.state === "saving" ? "Saving..." : "Save"}
-																</button>
-																<button
-																	type="button"
-																	className="action-btn"
-																	onClick={() => void testAiProvider(provider)}
-																	disabled={!info.hasKey || status.state === "testing"}
-																>
-																	{status.state === "testing" ? "Testing..." : "Test connection"}
-																</button>
-																{info.hasKey && (
-																	<button
-																		type="button"
-																		className="action-btn"
-																		onClick={() => void clearAiProvider(provider)}
-																	>
-																		Remove key
-																	</button>
-																)}
-																{status.message && (
-																	<span
-																		className={`text-xs ${
-																			status.state === "error"
-																				? "text-orange-600 dark:text-orange-400"
-																				: status.state === "ok"
-																					? "text-emerald-600 dark:text-emerald-400"
-																					: "text-neutral-500 dark:text-neutral-400"
-																		}`}
-																	>
-																		{status.message}
-																	</span>
-																)}
-															</div>
-														</div>
-													);
-												})}
+																}`}
+															>
+																{activeAi.status.message}
+															</span>
+														)}
+													</div>
+												</div>
 											</>
 										) : (
 											<p className="m-0 text-sm text-neutral-500 dark:text-neutral-300">
