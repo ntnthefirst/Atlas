@@ -1979,3 +1979,86 @@ textarea {
 	align-items: center;
 	gap: 6px;
 }
+
+/* ---------------------------------------------------------------------------
+   Provider pills — the segmented selector in Settings -> Integrations. One
+   provider is active at a time; the dot shows whether its key is connected.
+--------------------------------------------------------------------------- */
+.atlas-provider-pills {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	padding: 4px;
+	border-radius: 999px;
+	border: 1px solid var(--neutral-200);
+	background: var(--neutral-50);
+}
+
+.dark .atlas-provider-pills {
+	border-color: var(--neutral-600);
+	background: var(--neutral-800);
+}
+
+.atlas-provider-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	flex: 1 1 auto;
+	justify-content: center;
+	padding: 7px 14px;
+	border: 1px solid transparent;
+	border-radius: 999px;
+	background: transparent;
+	color: var(--neutral-600);
+	font-family: var(--font-body);
+	font-size: 13px;
+	font-weight: 500;
+	cursor: pointer;
+	transition:
+		background-color 0.15s ease,
+		color 0.15s ease,
+		border-color 0.15s ease;
+}
+
+.atlas-provider-pill:hover {
+	color: var(--neutral-800);
+	background: color-mix(in srgb, var(--neutral-200) 55%, transparent);
+}
+
+.dark .atlas-provider-pill {
+	color: var(--neutral-300);
+}
+
+.dark .atlas-provider-pill:hover {
+	color: var(--neutral-0);
+	background: color-mix(in srgb, var(--neutral-700) 70%, transparent);
+}
+
+.atlas-provider-pill.is-active {
+	background: var(--neutral-0);
+	border-color: var(--neutral-200);
+	color: var(--neutral-900);
+	box-shadow: 0 6px 14px -10px rgba(15, 23, 42, 0.5);
+}
+
+.dark .atlas-provider-pill.is-active {
+	background: var(--neutral-700);
+	border-color: var(--neutral-500);
+	color: var(--neutral-0);
+}
+
+.atlas-provider-pill-dot {
+	width: 7px;
+	height: 7px;
+	flex-shrink: 0;
+	border-radius: 999px;
+	background: var(--neutral-300);
+}
+
+.dark .atlas-provider-pill-dot {
+	background: var(--neutral-500);
+}
+
+.atlas-provider-pill-dot.is-connected {
+	background: #10b981;
+}

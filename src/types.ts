@@ -109,6 +109,21 @@ export type AiCompleteResult =
 	| { ok: true; text: string; provider: AiProvider; model: string }
 	| { ok: false; error: string };
 
+export type AiModel = {
+	id: string;
+	label: string;
+};
+
+// Models always come back — `source` says whether they were listed live from the
+// provider or fell back to the built-in list (no key yet, or the call failed).
+export type AiModelsResult = {
+	ok: boolean;
+	provider: AiProvider;
+	models: AiModel[];
+	source: "live" | "fallback";
+	error?: string;
+};
+
 // What the notch's separate capture popup should collect, and the context it
 // writes back into.
 export type NotchInputPayload = {

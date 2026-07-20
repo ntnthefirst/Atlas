@@ -26,6 +26,24 @@ const DEFAULT_MODELS = {
 	openai: "gpt-4o-mini",
 };
 
+// Shown in the model picker before a key is set, and whenever listing models
+// from the provider fails — so the dropdown is never empty.
+const FALLBACK_MODELS = {
+	anthropic: [
+		{ id: "claude-opus-4-8", label: "Claude Opus 4.8" },
+		{ id: "claude-sonnet-5", label: "Claude Sonnet 5" },
+		{ id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
+	],
+	google: [
+		{ id: "gemini-1.5-pro", label: "Gemini 1.5 Pro" },
+		{ id: "gemini-1.5-flash", label: "Gemini 1.5 Flash" },
+	],
+	openai: [
+		{ id: "gpt-4o", label: "GPT-4o" },
+		{ id: "gpt-4o-mini", label: "GPT-4o mini" },
+	],
+};
+
 const emptyProvider = (provider) => ({ apiKey: "", model: DEFAULT_MODELS[provider] });
 
 const defaultAiPreferences = () => ({
@@ -224,10 +242,78 @@ async function aiComplete(args) {
 	return { text, provider, model };
 }
 
+// Lists the models the configured key can actually use, so the picker offers
+// real choices instead of a free-text box. Falls back to a curated list when
+// there's no key yet or the provider can't be reached — the dropdown is never
+// empty, and the caller is told which source it got.
+async function listAiModels(providerName) {
+	const provider = AI_PROVIDERS.includes(providerName) ? providerName : aiPreferences.defaultProvider;
+	const config = aiPreferences.providers[provider];
+	const fallback = FALLBACK_MODELS[provider];
+
+	if (!config || !config.apiKey) {
+		return { ok: true, provider, models: fallback, source: "fallback" };
+	}
+
+	try {
+		let models = [];
+		if (provider === "anthropic") {
+			const json = await httpsJson("https://api.anthropic.com/v1/models?limit=100", {
+				method: "GET",
+				headers: { "x-api-key": config.apiKey, "anthropic-version": "2023-06-01" },
+			});
+			models = (json.data || []).map((entry) => ({
+				id: entry.id,
+				label: entry.display_name || entry.id,
+			}));
+		} else if (provider === "google") {
+			const json = await httpsJson(
+				`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=${encodeURIComponent(config.apiKey)}`,
+				{ method: "GET" },
+			);
+			models = (json.models || [])
+				// Only models that can actually answer a prompt.
+				.filter(
+					(entry) =>
+						Array.isArray(entry.supportedGenerationMethods) &&
+						entry.supportedGenerationMethods.includes("generateContent"),
+				)
+				.map((entry) => ({
+					id: String(entry.name || "").replace(/^models\//, ""),
+					label: entry.displayName || entry.name,
+				}));
+		} else {
+			const json = await httpsJson("https://api.openai.com/v1/models", {
+				method: "GET",
+				headers: { Authorization: `Bearer ${config.apiKey}` },
+			});
+			models = (json.data || [])
+				.map((entry) => ({ id: entry.id, label: entry.id }))
+				// The models endpoint also returns embeddings/audio/image models.
+				.filter((entry) => /^(gpt|o\d)/i.test(entry.id) && !/embed|audio|realtime|image|tts|whisper/i.test(entry.id));
+		}
+
+		models = models.filter((entry) => entry.id).sort((a, b) => a.id.localeCompare(b.id));
+		if (models.length === 0) {
+			return { ok: true, provider, models: fallback, source: "fallback" };
+		}
+		return { ok: true, provider, models, source: "live" };
+	} catch (error) {
+		return {
+			ok: false,
+			provider,
+			models: fallback,
+			source: "fallback",
+			error: error instanceof Error ? error.message : "Could not list models.",
+		};
+	}
+}
+
 module.exports = {
 	AI_PROVIDERS,
 	loadAiPreferences,
 	getPublicAiConfig,
 	setAiConfig,
 	aiComplete,
+	listAiModels,
 };

@@ -102,6 +102,7 @@ contextBridge.exposeInMainWorld("atlas", {
 	},
 	getAiConfig: () => ipcRenderer.invoke("ai:getConfig"),
 	setAiConfig: (patch) => ipcRenderer.invoke("ai:setConfig", patch),
+	listAiModels: (provider) => ipcRenderer.invoke("ai:listModels", provider),
 	aiComplete: (args) => ipcRenderer.invoke("ai:complete", args),
 
 	pickAppFile: () => ipcRenderer.invoke("app:pickFile"),

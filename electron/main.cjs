@@ -19,7 +19,7 @@ const { autoUpdater } = require("electron-updater");
 const { AtlasDatabase } = require("./db.cjs");
 const { ActivityTracker } = require("./activity-tracker.cjs");
 const { getSystemStats, listOpenApps } = require("./system-info.cjs");
-const { loadAiPreferences, getPublicAiConfig, setAiConfig, aiComplete } = require("./ai.cjs");
+const { loadAiPreferences, getPublicAiConfig, setAiConfig, aiComplete, listAiModels } = require("./ai.cjs");
 
 let mainWindow = null;
 let miniWindow = null;
@@ -2372,6 +2372,7 @@ function wireIpc() {
 	// renderer only ever gets masked config back and sends prompts to run.
 	ipcMain.handle("ai:getConfig", () => getPublicAiConfig());
 	ipcMain.handle("ai:setConfig", (_event, patch) => setAiConfig(patch));
+	ipcMain.handle("ai:listModels", (_event, provider) => listAiModels(provider));
 	ipcMain.handle("ai:complete", async (_event, args) => {
 		try {
 			const result = await aiComplete(args);

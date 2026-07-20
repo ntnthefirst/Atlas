@@ -5,6 +5,8 @@ import type {
 	AiCompleteArgs,
 	AiCompleteResult,
 	AiConfigPatch,
+	AiModelsResult,
+	AiProvider,
 	AiPublicConfig,
 	AppRelease,
 	AtlasView,
@@ -120,6 +122,7 @@ declare global {
 			getAiConfig: () => Promise<AiPublicConfig>;
 			setAiConfig: (patch: AiConfigPatch) => Promise<AiPublicConfig>;
 			aiComplete: (args: AiCompleteArgs) => Promise<AiCompleteResult>;
+			listAiModels: (provider: AiProvider) => Promise<AiModelsResult>;
 
 			pickAppFile: () => Promise<string | null>;
 			getFileIcon: (filePath: string) => Promise<string | null>;
