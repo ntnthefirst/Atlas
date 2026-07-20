@@ -87,6 +87,7 @@ import type {
 	DashboardOverview,
 	MapItem,
 	NoteItem,
+	NotchIdleOpacity,
 	NotchPosition,
 	NotchPreferences,
 	NotchTabIcon,
@@ -117,6 +118,15 @@ const POLL_MS = 1500;
 // How much of the card stays visible (the accent line plus a sliver of background)
 // when it's retracted out of view.
 const PEEK_PX = 16;
+
+// How opaque the card is while idle, per the "Idle transparency" preference.
+// Hovering (or opening a panel / locking it) always brings it back to full
+// strength, so the notch fades into the desktop instead of sitting on top of it.
+const IDLE_OPACITY: Record<NotchIdleOpacity, number> = {
+	subtle: 0.32,
+	balanced: 0.62,
+	solid: 1,
+};
 
 // Matches tailwind's w-10/h-10 (grid cell) and gap-1.5 (gutter), so a tab's
 // grid renders identically here and in the settings editor.
@@ -875,6 +885,13 @@ export function NotchApp() {
 	// An open tab panel keeps the bar pulled into view even without a hover,
 	// since the panel only makes sense alongside a visible bar.
 	const isExpanded = isFree || hovered || preferences.locked || Boolean(activeTab);
+
+	// Idle is "nothing is asking for attention": no hover, no open panel, not
+	// pinned. A free-floating notch never retracts, but it still fades — so the
+	// transparency preference applies in every position rather than only the
+	// docked ones.
+	const isIdle = !hovered && !preferences.locked && !activeTab;
+	const cardOpacity = isIdle ? (IDLE_OPACITY[preferences.idleOpacity] ?? 1) : 1;
 
 	const onToggleLock = () => {
 		void window.atlas.setNotchPreferences({ locked: !preferences.locked });
@@ -1650,14 +1667,22 @@ export function NotchApp() {
 			<div ref={wrapperRef} className={`flex gap-2 ${WRAPPER_POSITION_CLASSES[preferences.position]}`}>
 				<motion.div
 					ref={cardRef}
-					className={`atlas-notch-card relative flex min-w-0 gap-2 cursor-default select-none overflow-hidden border border-neutral-200 bg-neutral-0 text-neutral-700 dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-50 ${CARD_POSITION_CLASSES[preferences.position]} ${
+					className={`atlas-notch-card relative flex min-w-0 gap-2 cursor-default select-none overflow-hidden border border-neutral-200 bg-neutral-0/85 text-neutral-700 backdrop-blur-md dark:border-neutral-600 dark:bg-neutral-700/85 dark:text-neutral-50 ${CARD_POSITION_CLASSES[preferences.position]} ${
 						isFree && !preferences.locked ? "notch-drag" : ""
 					}`}
 					onMouseEnter={() => setHovered(true)}
 					onMouseLeave={() => setHovered(false)}
 					initial={false}
-					animate={isExpanded ? { x: 0, y: 0 } : { x: collapseTarget.x, y: collapseTarget.y }}
-					transition={isExpanded ? { duration: 0.25, ease: "easeOut" } : { duration: 0.5, ease: "easeInOut" }}
+					animate={
+						isExpanded
+							? { x: 0, y: 0, opacity: cardOpacity }
+							: { x: collapseTarget.x, y: collapseTarget.y, opacity: cardOpacity }
+					}
+					transition={
+						isExpanded
+							? { duration: 0.25, ease: "easeOut" }
+							: { duration: 0.5, ease: "easeInOut", opacity: { duration: 0.35, ease: "easeOut" } }
+					}
 				>
 					<div
 						className={`notch-no-drag flex items-center gap-4 whitespace-nowrap ${isVertical ? "flex-col py-3" : "flex-row px-3"}`}
