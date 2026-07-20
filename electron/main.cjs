@@ -1,5 +1,4 @@
 const path = require("node:path");
-const https = require("node:https");
 const fs = require("node:fs");
 const { spawn } = require("node:child_process");
 const {
@@ -27,6 +26,12 @@ const {
 	defaultDashboardPreferences,
 	normalizeDashboardPreferences,
 } = require("./config/dashboard-prefs.cjs");
+const { fetchJson } = require("./services/http.cjs");
+const {
+	UPDATE_PREFS_FILE,
+	defaultUpdatePreferences,
+	normalizeUpdatePreferences,
+} = require("./config/update-prefs.cjs");
 const {
 	FOCUS_PREFS_FILE,
 	FOCUS_NUDGE_KINDS,
@@ -73,12 +78,6 @@ function getTitleBarOverlay() {
 const APP_USER_MODEL_ID = isDev ? "com.atlas.app.dev" : "com.atlas.app";
 const GITHUB_OWNER = "ntnthefirst";
 const GITHUB_REPO = "Atlas";
-const UPDATE_PREFS_FILE = "update-preferences.json";
-const defaultUpdatePreferences = {
-	autoCheck: true,
-	includeBeta: false,
-};
-
 let updatePreferences = { ...defaultUpdatePreferences };
 
 // ---------------------------------------------------------------------------
@@ -320,59 +319,8 @@ if (isDev) {
 	app.setPath("userData", devUserDataPath);
 }
 
-function fetchJson(url) {
-	return new Promise((resolve, reject) => {
-		const request = https.get(
-			url,
-			{
-				headers: {
-					"User-Agent": "Atlas-Version-Check",
-					Accept: "application/vnd.github+json",
-				},
-				timeout: 4000,
-			},
-			(response) => {
-				if (!response || response.statusCode < 200 || response.statusCode >= 300) {
-					reject(new Error(`HTTP ${response?.statusCode ?? "unknown"}`));
-					return;
-				}
-
-				let payload = "";
-				response.on("data", (chunk) => {
-					payload += chunk;
-				});
-				response.on("end", () => {
-					try {
-						resolve(JSON.parse(payload));
-					} catch {
-						reject(new Error("Invalid JSON response."));
-					}
-				});
-			},
-		);
-
-		request.on("timeout", () => {
-			request.destroy(new Error("Version check timeout."));
-		});
-		request.on("error", reject);
-	});
-}
-
 function getUpdatePrefsPath() {
 	return path.join(app.getPath("userData"), UPDATE_PREFS_FILE);
-}
-
-function normalizeUpdatePreferences(rawValue) {
-	if (!rawValue || typeof rawValue !== "object") {
-		return { ...defaultUpdatePreferences };
-	}
-
-	return {
-		autoCheck:
-			typeof rawValue.autoCheck === "boolean" ? rawValue.autoCheck : defaultUpdatePreferences.autoCheck,
-		includeBeta:
-			typeof rawValue.includeBeta === "boolean" ? rawValue.includeBeta : defaultUpdatePreferences.includeBeta,
-	};
 }
 
 function loadUpdatePreferences() {
