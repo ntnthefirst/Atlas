@@ -45,11 +45,17 @@ Last updated: 2026-07-21. Keep this current — it is what a fresh session reads
 **Suite: 349 tests, ~2s.** Verification commands now available:
 
 ```
-npm test              # 349 unit/integration tests
-npm run lint          # now covers electron/ and scripts/ too
-npm run smoke         # boots the real Electron main process, fails on crash
+npm test               # 370 unit/integration tests, ~2s
+npm run lint           # now covers electron/ and scripts/ too
+npm run smoke          # boots the real Electron main process, fails on crash
+npm run smoke:windows  # opens every window type, fails if any does not
 npm run verify:secrets # runs inside Electron; proves the vault encrypts
 ```
+
+Run all five before committing anything that touches `electron/`. The two
+smoke tests exist because vitest cannot construct a BrowserWindow and cannot
+reach `safeStorage` — between them they cover the failure modes unit tests
+structurally cannot see.
 
 ### WP-0.2: what is left, and the decision waiting to be made
 
@@ -64,17 +70,31 @@ management (~220), tray, and `wireIpc` (~620, ~75 handlers). These mutate
 shared module-level refs (`mainWindow`, `notchWindows`, `db`, `tracker`,
 `isQuitting`).
 
-**Before moving any of it, decide how state is shared.** The two candidates:
+**The state-sharing question is now decided. Follow this for every window
+module.** A shared mutable `registry` module was rejected: it would rewrite
+hundreds of references at once for no behavioural gain.
 
-1. A `registry` module holding the mutable refs, required by every window
-   module. Mechanical, but rewrites hundreds of references, and `npm run
-   smoke` only catches boot-time breakage — not "the settings window stops
-   opening".
-2. Factories that take and return their dependencies, with main.cjs keeping
-   ownership. Cleaner, but a larger conceptual change per module.
+Instead, each factory exports a function that **returns** the created
+BrowserWindow, and main.cjs keeps ownership of the reference variables. The
+factory receives an explicit dependencies object:
 
-Do not start this without picking one, and do not start it with limited
-context budget — a half-migrated main.cjs violates D5.
+- values it reads at construction time → passed as plain values;
+- anything read **later**, inside an event handler (`isQuitting` at close
+  time, for instance) → passed as a **getter function**, never a snapshot,
+  because capturing the value at construction silently changes behaviour;
+- anything that mutates main.cjs state (nulling the ref when a window
+  closes) → passed as a callback, e.g. `onClosed`.
+
+If a factory needs more than about six dependencies, or captures state that
+does not express cleanly as values/getters/callbacks, **leave it where it
+is** and say why. Two clean extractions beat three contorted ones.
+
+`npm run smoke:windows` is the gate that makes this safe — it opens every
+window type and fails on any that does not. Do not move a window factory
+without running it.
+
+Still, do not start this with a limited context budget: a half-migrated
+main.cjs violates D5.
 
 ### Known bugs found while testing, deliberately not fixed
 
