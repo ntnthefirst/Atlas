@@ -21,6 +21,7 @@ const { getSystemStats, listOpenApps } = require("./system-info.cjs");
 const { loadAiPreferences, getPublicAiConfig, setAiConfig, aiComplete } = require("./ai.cjs");
 const { compareVersionStrings, normalizeReleaseList } = require("./services/version.cjs");
 const { NOTCH_PREFS_FILE, defaultNotchPreferences, normalizeNotchPreferences } = require("./config/notch-prefs.cjs");
+const { computeNotchBounds, selectTargetDisplays } = require("./windows/notch-geometry.cjs");
 const {
 	DASHBOARD_PREFS_FILE,
 	defaultDashboardPreferences,
@@ -918,48 +919,25 @@ function saveDashboardPreferences(value) {
 function getTargetDisplays() {
 	const displays = screen.getAllDisplays();
 	const primary = screen.getPrimaryDisplay();
-	const selectedIds = notchPreferences.displayIds.length > 0 ? notchPreferences.displayIds : [primary.id];
-	const matched = displays.filter((display) => selectedIds.includes(display.id));
-	return matched.length > 0 ? matched : [primary];
+	return selectTargetDisplays(displays, primary, notchPreferences.displayIds);
 }
 
 function positionNotchWindow(notchWindow, display, width, height) {
 	if (!notchWindow || notchWindow.isDestroyed()) {
 		return;
 	}
-	const area = display.workArea;
-	const margin = 10;
 	const isPrimary = display.id === screen.getPrimaryDisplay().id;
-	let x;
-	let y;
+	const bounds = computeNotchBounds({
+		workArea: display.workArea,
+		width,
+		height,
+		position: notchPreferences.position,
+		isPrimary,
+		freeX: notchPreferences.x,
+		freeY: notchPreferences.y,
+	});
 
-	if (
-		isPrimary &&
-		notchPreferences.position === "free" &&
-		typeof notchPreferences.x === "number" &&
-		typeof notchPreferences.y === "number"
-	) {
-		x = notchPreferences.x;
-		y = notchPreferences.y;
-	} else if (notchPreferences.position === "left") {
-		// Docked flush against the left edge, vertically centered.
-		x = area.x;
-		y = area.y + Math.round((area.height - height) / 2);
-	} else if (notchPreferences.position === "right") {
-		// Docked flush against the right edge, vertically centered.
-		x = area.x + area.width - width;
-		y = area.y + Math.round((area.height - height) / 2);
-	} else if (notchPreferences.position === "top") {
-		// Docked flush against the top edge, horizontally centered.
-		x = area.x + Math.round((area.width - width) / 2);
-		y = area.y;
-	} else {
-		// "free" without saved coordinates: centered near the top with a margin.
-		x = area.x + Math.round((area.width - width) / 2);
-		y = area.y + margin;
-	}
-
-	notchWindow.setBounds({ x: Math.round(x), y: Math.round(y), width, height });
+	notchWindow.setBounds(bounds);
 }
 
 function createNotchWindowForDisplay(display) {
