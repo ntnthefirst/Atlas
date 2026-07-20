@@ -1,0 +1,68 @@
+name: PR Check
+
+# The single gate on every pull request into main: the code must build, and the
+# PR must land a new, higher version in package.json. That version is exactly
+# what Release publishes on merge, so passing this check means the PR is
+# releasable — nothing else to remember, no labels.
+#
+# Make both jobs required in the branch protection rules for `main` so a PR
+# can't be merged until they're green. Enabling "Require branches to be up to
+# date before merging" is recommended too: it forces a stale PR to rebase and
+# re-run, which catches two PRs racing on the same version number.
+on:
+    pull_request:
+        branches:
+            - main
+
+concurrency:
+    group: pr-check-${{ github.event.pull_request.number }}
+    cancel-in-progress: true
+
+jobs:
+    build:
+        name: Lint and Build
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 20
+                  cache: npm
+            - run: npm ci
+            - run: npm run lint
+            - run: npm run build
+
+    version:
+        name: Version
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  # Need the base branch and every tag to tell whether this
+                  # version is actually new.
+                  fetch-depth: 0
+
+            - name: Validate the version bump
+              env:
+                  BASE_REF: ${{ github.event.pull_request.base.ref }}
+              run: |
+                  HEAD_VERSION=$(node -p "require('./package.json').version")
+                  BASE_VERSION=$(git show "origin/$BASE_REF:package.json" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
+
+                  if git rev-parse -q --verify "refs/tags/v$HEAD_VERSION" >/dev/null; then
+                    TAG_EXISTS=true
+                  else
+                    TAG_EXISTS=false
+                  fi
+
+                  echo "PR version:   $HEAD_VERSION"
+                  echo "main version: $BASE_VERSION"
+                  echo "v$HEAD_VERSION already tagged: $TAG_EXISTS"
+                  echo ""
+
+                  node .github/scripts/check-version.mjs "$HEAD_VERSION" "$BASE_VERSION" "$TAG_EXISTS"
+
+            - name: Explain how to fix a failing version check
+              if: failure()
+              run: |
+                  echo "::notice::Bump the version in package.json, e.g. \`npm version minor --no-git-tag-version\` then commit it."

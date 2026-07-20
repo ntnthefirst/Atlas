@@ -1,82 +1,62 @@
 # Releasing Atlas
 
-Versions are driven by `package.json`. There is no release label and no version
-math — the version in `package.json` is the source of truth, and the `vX.Y.Z`
-tag always matches it.
+One rule: **the version in `package.json` is the release.** Bump it in your PR,
+merge, and it publishes itself. There are no labels, no manual tags, and no
+version math.
 
-There are two ways to release, and both end up in
-[`release.yml`](.github/workflows/release.yml), which lints, builds, and
-publishes the GitHub release with Windows + macOS installers.
+## The flow
 
-## 1. Automatic: bump the version in a PR
+1. Open a PR into `main` with the version bumped:
 
-[`auto-tag-release.yml`](.github/workflows/auto-tag-release.yml) watches pushes
-to `main`. When a merge lands a version that has **no tag yet**, it creates and
-pushes `v<version>` and publishes the release automatically.
+    ```bash
+    npm version minor --no-git-tag-version   # edits package.json only
+    git commit -am "chore: 1.2.0"
+    ```
 
-So to ship a change, bump the version in the PR itself:
+2. [**PR Check**](.github/workflows/pr-check.yml) runs on the PR and must pass
+   before it can be merged:
+    - **Lint and Build** — `npm run lint` + `npm run build`.
+    - **Version** — the version must be valid semver, higher than the one on
+      `main`, and not already tagged.
 
-```bash
-npm version minor --no-git-tag-version   # edits package.json only
-git commit -am "chore: 1.2.0"
-```
+3. Merge. [**Release**](.github/workflows/release.yml) runs on `main`, and when
+   the version is new it lints, builds, tags `v<version>`, creates the GitHub
+   release, and uploads the Windows + macOS installers.
 
-Merge the PR and the release builds and publishes on its own. If the merge does
-**not** change the version, the workflow is a no-op — ordinary merges never
-publish.
+That's the whole process — two workflows, one source of truth.
 
-## 2. Manual: tag from `main`
-
-`npm version` bumps the version, commits, and creates the tag in one step;
-pushing the tag publishes.
-
-## Stable release
+## Choosing the bump
 
 ```bash
-npm version patch      # 1.0.0 -> 1.0.1   (bug fixes)
-npm version minor      # 1.0.0 -> 1.1.0   (features)
-npm version major      # 0.8.0 -> 1.0.0   (breaking changes)
-git push --follow-tags
+npm version patch --no-git-tag-version   # 1.1.0 -> 1.1.1   bug fixes
+npm version minor --no-git-tag-version   # 1.1.0 -> 1.2.0   features
+npm version major --no-git-tag-version   # 1.1.0 -> 2.0.0   breaking changes
 ```
 
-## Beta release
+Use `--no-git-tag-version` so only `package.json` changes; the Release workflow
+creates the tag on `main`.
 
-A release is published as a **pre-release** when either the version contains
-`-beta` (e.g. `1.2.0-beta.0`) or `package.json` has `"beta": true`. The flag is
-useful with the automatic path when you want a plain version number shipped as a
-pre-release; remove it to go stable again.
+## Pre-releases (beta)
 
-Start a beta for the next version:
+A release is published as a **pre-release** when either:
 
-```bash
-npm version premajor --preid=beta   # 0.8.0 -> 1.0.0-beta.0
-npm version preminor --preid=beta   # 0.8.0 -> 0.9.0-beta.0
-npm version prepatch --preid=beta   # 0.8.0 -> 0.8.1-beta.0
-git push --follow-tags
-```
-
-Cut the next beta in the same line:
-
-```bash
-npm run release:beta   # 1.0.0-beta.0 -> 1.0.0-beta.1
-git push --follow-tags
-```
-
-Finalize the beta into its stable release:
-
-```bash
-npm version patch      # 1.0.0-beta.1 -> 1.0.0
-git push --follow-tags
-```
+- the version contains `-beta` — e.g.
+  `npm version preminor --preid=beta --no-git-tag-version` → `1.2.0-beta.0`, or
+- `package.json` contains `"beta": true` — useful to ship a plain version number
+  as a pre-release. Remove the field to go stable again.
 
 ## Notes
 
-- `npm version` requires a clean working tree and refuses to recreate a tag
-  that already exists, so the "tag already exists" failure can't happen
-  silently.
-- To redo a failed release, delete the tag locally and on the remote
-  (`git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z`), fix the issue,
-  then re-create and push the tag — or just re-run the failed workflow run from
-  the Actions tab.
-- PRs to `main` still run lint + build via `pr-ci-check.yml`; releasing is a
-  separate, deliberate step.
+- **Every PR must bump the version**, because every merge to `main` publishes.
+  If a PR genuinely shouldn't ship (say a README typo), fold it into another PR
+  that does bump.
+- Turn on branch protection for `main` and mark **Lint and Build** and
+  **Version** as required checks, so a PR can't merge until both are green.
+  Also enable **Require branches to be up to date before merging** — that forces
+  a stale PR to rebase and re-run, which is what catches two PRs racing on the
+  same version number.
+- Release is safe to re-run: if `v<version>` already exists it skips. A failed
+  publish can be retried from the Actions tab (**Run workflow**) without a new
+  commit.
+- The installer version comes from `package.json`, so the tag, the release, and
+  the installers can never disagree.
