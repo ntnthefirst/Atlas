@@ -19,6 +19,7 @@
 		"lint": "eslint .",
 		"test": "vitest run",
 		"test:watch": "vitest",
+		"smoke": "node scripts/smoke-boot.cjs",
 		"preview": "vite preview"
 	},
 	"build": {

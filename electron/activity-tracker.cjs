@@ -9,20 +9,20 @@ using System;
 using System.Runtime.InteropServices;
 using System.Text;
 public class Win32 {
-  [DllImport(\"user32.dll\")]
+  [DllImport("user32.dll")]
   public static extern IntPtr GetForegroundWindow();
 
-  [DllImport(\"user32.dll\")]
+  [DllImport("user32.dll")]
   public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
-  [DllImport(\"user32.dll\", CharSet = CharSet.Unicode)]
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
   public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
 }
 "@
 
 $hwnd = [Win32]::GetForegroundWindow()
 if ($hwnd -eq [IntPtr]::Zero) {
-  @{ processName = \"Unknown\"; title = \"\"; label = \"Unknown\" } | ConvertTo-Json -Compress
+  @{ processName = "Unknown"; title = ""; label = "Unknown" } | ConvertTo-Json -Compress
   exit
 }
 
@@ -35,14 +35,14 @@ $title = $titleBuffer.ToString().Trim()
 
 try {
 	$proc = Get-Process -Id $windowProcessId -ErrorAction Stop
-  $processName = if ([string]::IsNullOrWhiteSpace($proc.ProcessName)) { \"Unknown\" } else { $proc.ProcessName }
+  $processName = if ([string]::IsNullOrWhiteSpace($proc.ProcessName)) { "Unknown" } else { $proc.ProcessName }
 	$label = if ([string]::IsNullOrWhiteSpace($title)) { $processName } else { $title }
   @{ processName = $processName; title = $title; label = $label } | ConvertTo-Json -Compress
 } catch {
   if ([string]::IsNullOrWhiteSpace($title)) {
-    @{ processName = \"Unknown\"; title = \"\"; label = \"Unknown\" } | ConvertTo-Json -Compress
+    @{ processName = "Unknown"; title = ""; label = "Unknown" } | ConvertTo-Json -Compress
   } else {
-    @{ processName = \"Unknown\"; title = $title; label = $title } | ConvertTo-Json -Compress
+    @{ processName = "Unknown"; title = $title; label = $title } | ConvertTo-Json -Compress
   }
 }
 `;
