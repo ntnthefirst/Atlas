@@ -50,6 +50,9 @@ const {
 const { register: registerTaskIpc } = require("./ipc/tasks.cjs");
 const { register: registerNoteIpc } = require("./ipc/notes.cjs");
 const { register: registerEnvironmentIpc } = require("./ipc/environments.cjs");
+const { register: registerSessionIpc } = require("./ipc/sessions.cjs");
+const { register: registerActivityIpc } = require("./ipc/activity.cjs");
+const { register: registerInsightsIpc } = require("./ipc/insights.cjs");
 
 let mainWindow = null;
 let miniWindow = null;
@@ -1001,94 +1004,15 @@ function ensureTray() {
 function wireIpc() {
 	registerEnvironmentIpc(ipcMain, { getDb: () => db, openPrimaryWindowByMapState });
 
-	ipcMain.handle("session:active", () => db.getActiveSession());
+	registerSessionIpc(ipcMain, { getDb: () => db, getTracker: () => tracker, getMiniWindow: () => miniWindow });
 
-	ipcMain.handle("session:start", (_event, mapId) => {
-		if (!mapId) {
-			throw new Error("Map id missing.");
-		}
-
-		const session = db.startSession(mapId);
-		tracker.setCurrentSession(session.id);
-		return session;
-	});
-
-	ipcMain.handle("session:pause", (_event, sessionId) => {
-		const session = db.pauseSession(sessionId);
-		tracker.closeOpenBlockNow(sessionId);
-		return session;
-	});
-
-	ipcMain.handle("session:resume", (_event, sessionId) => db.resumeSession(sessionId));
-
-	ipcMain.handle("session:stop", (_event, sessionId) => {
-		// Finalize the last activity block
-		tracker.closeOpenBlockNow(sessionId);
-
-		// Immediately mark session as inactive in tracker to stop accepting new data
-		// This must happen BEFORE db.stopSession to prevent race conditions
-		if (tracker.currentSessionId === sessionId) {
-			tracker.clearCurrentSession();
-		}
-
-		// Mark session as ended in database
-		const session = db.stopSession(sessionId);
-
-		// Close mini window if open
-		if (miniWindow && !miniWindow.isDestroyed()) {
-			miniWindow.close();
-		}
-
-		return session;
-	});
-
-	ipcMain.handle("session:listByMap", (_event, mapId) => {
-		if (!mapId) {
-			return [];
-		}
-		return db.listSessionsByMap(mapId);
-	});
-
-	ipcMain.handle("session:delete", (_event, sessionId) => {
-		if (!sessionId) {
-			throw new Error("Session id missing.");
-		}
-		return db.deleteSession(sessionId);
-	});
-
-	ipcMain.handle("activity:listBySession", (_event, sessionId) => {
-		if (!sessionId) {
-			return [];
-		}
-		return db.listActivityBlocksBySession(sessionId);
-	});
-
-	ipcMain.handle("activity:current-app", () => tracker.getCurrentAppName());
+	registerActivityIpc(ipcMain, { getDb: () => db, getTracker: () => tracker });
 
 	registerTaskIpc(ipcMain, { getDb: () => db });
 
 	registerNoteIpc(ipcMain, { getDb: () => db });
 
-	ipcMain.handle("dashboard:overview", (_event, mapId) => {
-		if (!mapId) {
-			return {
-				totalTodayMs: 0,
-				timePerApp: [],
-				timePerMap: [],
-				quickStats: { sessionsToday: 0, openTasks: 0 },
-			};
-		}
-		return db.getDashboardOverview(mapId);
-	});
-
-	ipcMain.handle("data:repairCorruptedSessions", () => {
-		console.log("[Atlas] Starting repair of corrupted session data...");
-		const results = db.repairCorruptedSessions();
-		console.log(
-			`[Atlas] Repair complete: ${results.sessionsRepaired} sessions checked, ${results.blocksNormalized} blocks normalized.`,
-		);
-		return results;
-	});
+	registerInsightsIpc(ipcMain, { getDb: () => db });
 
 	ipcMain.handle("app:launch", (_event, command) => {
 		if (!command || !command.trim()) {
