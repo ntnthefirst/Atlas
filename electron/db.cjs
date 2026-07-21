@@ -3,12 +3,15 @@ const { Database } = require("node-sqlite3-wasm");
 const { wrapDatabase } = require("./migrations/sqlite-helpers.cjs");
 const { runMigrations } = require("./migrations/index.cjs");
 const { importLegacyDatabaseIfNeeded } = require("./migrations/legacy-import.cjs");
+const { seedGlobalDefaultNotchLayoutIfNeeded } = require("./migrations/notch-layout-seed.cjs");
 const { isValidIsolationMode, DEFAULT_ISOLATION_MODE } = require("./data/isolation.cjs");
 const {
 	parseEnvironmentConfig,
 	serializeEnvironmentConfig,
 	applyConfigPatch,
 } = require("./config/environment-config.cjs");
+const { GLOBAL_DEFAULT_NOTCH_LAYOUT_ID, resolveNotchLayout } = require("./config/notch-layouts.cjs");
+const { normalizeNotchPreferences } = require("./config/notch-prefs.cjs");
 
 // Requests WAL (so readers don't block the writer) and synchronous=NORMAL
 // (fsyncs at commit/checkpoint, so a hard crash can't corrupt the database —
@@ -108,6 +111,12 @@ class AtlasDatabase {
 		applyPragmas(rawDb);
 		this._core = wrapDatabase(rawDb);
 		runMigrations(this._core);
+		// WP-1.3: populate notch_layouts' "default" row from the pre-existing
+		// flat notch-preferences.json the very first time this table exists --
+		// see notch-layout-seed.cjs's header for why this can't be part of
+		// migration 006 itself (it needs filesystem access to a file beside the
+		// database, not inside it). Idempotent and safe to call on every boot.
+		seedGlobalDefaultNotchLayoutIfNeeded(this._core, dbPath);
 	}
 
 	run(sql, params = []) {
@@ -389,6 +398,13 @@ class AtlasDatabase {
 			throw new Error("Stop the active session in this environment before deleting it.");
 		}
 
+		// WP-1.3: capture this environment's own Notch layout id (if it has
+		// one) before the row disappears, so the now-unreferenced layout can be
+		// cleaned up in the same transaction. Read outside the transaction,
+		// same as `activeSession` above -- this is a plain SELECT, nothing here
+		// depends on transactional isolation from the deletes that follow.
+		const config = this.getEnvironmentConfig(environmentId);
+
 		return this.transaction(() => {
 			const sessionIds = this.all("SELECT id FROM sessions WHERE environment_id = ?", [environmentId]).map(
 				(row) => row.id,
@@ -403,6 +419,13 @@ class AtlasDatabase {
 			this.run("DELETE FROM tasks WHERE environment_id = ?", [environmentId]);
 			this.run("DELETE FROM notes WHERE environment_id = ?", [environmentId]);
 			this.run("DELETE FROM environments WHERE id = ?", [environmentId]);
+			// Never delete GLOBAL_DEFAULT_NOTCH_LAYOUT_ID here -- it is shared
+			// across every other environment that has no override of its own.
+			// Only an environment's OWN layout (a real, environment-specific
+			// row) is cleaned up when that environment goes away.
+			if (config?.notchLayoutId && config.notchLayoutId !== GLOBAL_DEFAULT_NOTCH_LAYOUT_ID) {
+				this.run("DELETE FROM notch_layouts WHERE id = ?", [config.notchLayoutId]);
+			}
 			return true;
 		});
 	}
@@ -473,6 +496,104 @@ class AtlasDatabase {
 		const next = applyConfigPatch(current, patch);
 		this.run("UPDATE environments SET config = ? WHERE id = ?", [serializeEnvironmentConfig(next), environmentId]);
 		return this.getEnvironmentConfig(environmentId);
+	}
+
+	// WP-1.3: per-environment Notch layouts. `notch_layouts` is keyed by id,
+	// not by environment -- many environments (every one with no override)
+	// share GLOBAL_DEFAULT_NOTCH_LAYOUT_ID's row, and `environments.config.
+	// notchLayoutId` (WP-1.1) is the only thing that ties a SPECIFIC
+	// environment to its OWN row instead. See electron/config/notch-
+	// layouts.cjs for the pure resolution function every method below
+	// delegates the actual "which one wins" decision to -- this class only
+	// fetches rows and hands their raw `data` column to that function.
+	getNotchLayoutRow(layoutId) {
+		if (!layoutId) {
+			return null;
+		}
+		return this.first("SELECT id, data FROM notch_layouts WHERE id = ?", [layoutId]);
+	}
+
+	// Resolves the EFFECTIVE Notch preferences for `environmentId`: its own
+	// layout if it has one, otherwise the global default. Passing a falsy
+	// `environmentId` (no environment selected/active yet, e.g. at app boot
+	// before any environment has been switched to) resolves straight to the
+	// global default, the same as an environment whose own `notchLayoutId`
+	// is null.
+	getEffectiveNotchPreferences(environmentId) {
+		const config = environmentId ? this.getEnvironmentConfig(environmentId) : null;
+		const notchLayoutId = config ? config.notchLayoutId : null;
+		const ownRow = notchLayoutId ? this.getNotchLayoutRow(notchLayoutId) : null;
+		const defaultRow = this.getNotchLayoutRow(GLOBAL_DEFAULT_NOTCH_LAYOUT_ID);
+		return resolveNotchLayout({
+			notchLayoutId,
+			ownLayoutRaw: ownRow ? ownRow.data : null,
+			defaultLayoutRaw: defaultRow ? defaultRow.data : null,
+		});
+	}
+
+	// Low-level upsert: normalizes `preferences` and writes it to the row at
+	// `layoutId` (creating it if it doesn't exist yet), regardless of which
+	// environment (if any) currently points at that id. Every higher-level
+	// write below (the default, or one environment's own override) goes
+	// through this, so there is exactly one place that ever writes a row's
+	// `data` column.
+	setNotchLayout(layoutId, preferences) {
+		const normalized = normalizeNotchPreferences(preferences);
+		const now = nowIso();
+		this.run(
+			`INSERT INTO notch_layouts (id, data, created_at, updated_at) VALUES (?, ?, ?, ?)
+			 ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
+			[layoutId, JSON.stringify(normalized), now, now],
+		);
+		return normalized;
+	}
+
+	// Edits the GLOBAL DEFAULT layout directly -- `patch` is shallow-merged
+	// onto the current default (the same merge shape notch:setPreferences
+	// has always used), never onto any specific environment's own override.
+	updateGlobalDefaultNotchLayout(patch = {}) {
+		const current = this.getEffectiveNotchPreferences(null).preferences;
+		const normalized = this.setNotchLayout(GLOBAL_DEFAULT_NOTCH_LAYOUT_ID, { ...current, ...(patch || {}) });
+		return { usesDefault: true, layoutId: GLOBAL_DEFAULT_NOTCH_LAYOUT_ID, preferences: normalized };
+	}
+
+	// Gives `environmentId` its OWN Notch layout, forking from whatever is
+	// currently effective for it (its own layout if it already had one, the
+	// default otherwise) and merging `patch` on top -- the same shallow
+	// merge updateGlobalDefaultNotchLayout uses. Reuses the environment's
+	// existing own-layout id if it has one, so repeated edits update the
+	// SAME row instead of orphaning a new one on every save; mints a fresh
+	// id (and points the environment's config at it) the first time it
+	// diverges from the default.
+	setEnvironmentNotchLayout(environmentId, patch = {}) {
+		const config = this.getEnvironmentConfig(environmentId);
+		if (!config) {
+			throw new Error("Environment not found.");
+		}
+		const currentEffective = this.getEffectiveNotchPreferences(environmentId).preferences;
+		const layoutId = config.notchLayoutId || randomUUID();
+		const normalized = this.setNotchLayout(layoutId, { ...currentEffective, ...(patch || {}) });
+		if (config.notchLayoutId !== layoutId) {
+			this.setEnvironmentConfig(environmentId, { notchLayoutId: layoutId });
+		}
+		return { usesDefault: false, layoutId, preferences: normalized };
+	}
+
+	// Reverts `environmentId` to the global default -- clears the reference
+	// only. Deliberately leaves the now-unreferenced notch_layouts row in
+	// place rather than deleting it (the same "migrate, never destroy"
+	// discipline as everywhere else in this schema): flipping back to a
+	// custom layout later mints a fresh row rather than resurrecting this
+	// one (see setEnvironmentNotchLayout), so nothing is lost by leaving it,
+	// and deleteEnvironment is what actually cleans up an orphaned row, once
+	// the environment itself is gone for good.
+	clearEnvironmentNotchLayout(environmentId) {
+		const config = this.getEnvironmentConfig(environmentId);
+		if (!config) {
+			throw new Error("Environment not found.");
+		}
+		this.setEnvironmentConfig(environmentId, { notchLayoutId: null });
+		return this.getEffectiveNotchPreferences(environmentId);
 	}
 
 	getSessionById(sessionId) {

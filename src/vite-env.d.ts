@@ -21,6 +21,7 @@ import type {
 	IsolationMode,
 	NoteItem,
 	NotchInputPayload,
+	NotchLayoutResolution,
 	NotchPreferences,
 	Session,
 	TaskItem,
@@ -100,6 +101,13 @@ declare global {
 
 			getNotchPreferences: () => Promise<NotchPreferences>;
 			setNotchPreferences: (preferences: Partial<NotchPreferences>) => Promise<NotchPreferences>;
+			getNotchLayoutForEnvironment: (environmentId: string) => Promise<NotchLayoutResolution>;
+			setDefaultNotchLayout: (patch: Partial<NotchPreferences>) => Promise<NotchLayoutResolution>;
+			setEnvironmentNotchLayout: (
+				environmentId: string,
+				patch: Partial<NotchPreferences>,
+			) => Promise<NotchLayoutResolution>;
+			clearEnvironmentNotchLayout: (environmentId: string) => Promise<NotchLayoutResolution>;
 			getDashboardLayout: () => Promise<DashboardPreferences>;
 			setDashboardLayout: (preferences: Partial<DashboardPreferences>) => Promise<DashboardPreferences>;
 			onDashboardLayoutChanged: (callback: (preferences: DashboardPreferences) => void) => () => void;

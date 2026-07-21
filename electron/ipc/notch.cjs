@@ -12,10 +12,11 @@
 // thread through `deps` for them.
 //
 // `getNotchPreferences` is a getter because `notchPreferences` is a `let`
-// main.cjs reassigns every time preferences load or save (see
-// `loadNotchPreferences`/`saveNotchPreferences`/`applyNotchPreferences`
-// there) -- a value capture here would freeze this module onto whatever
-// `notchPreferences` was at require time, before any prefs file is ever read.
+// main.cjs reassigns every time preferences load, save, or the active
+// environment changes (see `saveNotchPreferences`/`applyNotchPreferences`/
+// `refreshActiveNotchPreferences` there) -- a value capture here would
+// freeze this module onto whatever `notchPreferences` was at require time,
+// before any prefs are ever read.
 //
 // `getPendingNotchInputPayload` is a getter for the same reason:
 // `pendingNotchInputPayload` is reassigned by the `setPendingPayload`
@@ -25,19 +26,94 @@
 // `applyNotchPreferences` and `positionNotchWindow` are passed as plain
 // values: both are `function` declarations in main.cjs that are never
 // reassigned, so (unlike the two getters above) there's no stale-capture
-// risk in holding onto them directly.
+// risk in holding onto them directly. `refreshActiveNotchPreferences` is
+// the same kind of plain value -- also a `function` declaration -- added for
+// WP-1.3 below.
+//
+// WP-1.3 (per-environment Notch layouts): `getDb` and `getCurrentEnvironmentId`
+// are getters for the usual reason (`db` and `currentEnvironmentId` are both
+// `let`s main.cjs reassigns after this module is required -- `db` once, at
+// boot, `currentEnvironmentId` on every environment switch).
+//
+// `notch:getPreferences`/`notch:setPreferences` below are UNCHANGED in
+// shape from before this package -- they still read/write "whatever's
+// currently active". The three new `notch:*Layout*` channels are what the
+// Settings-window/Action-editor tabs+grid editors use INSTEAD: those editors
+// name their target explicitly (the global default, or one specific
+// environment) rather than relying on "whatever's active", because the
+// Action Editor window is not modal (see electron/windows/action-editor-
+// window.cjs) -- the active environment really can change while it's open,
+// and an ambient write there would silently land on the wrong environment.
 // ---------------------------------------------------------------------------
 
 const { BrowserWindow, screen } = require("electron");
 
 function register(ipcMain, deps) {
-	const { getNotchPreferences, applyNotchPreferences, positionNotchWindow, getPendingNotchInputPayload } = deps;
+	const {
+		getNotchPreferences,
+		applyNotchPreferences,
+		positionNotchWindow,
+		getPendingNotchInputPayload,
+		getDb,
+		getCurrentEnvironmentId,
+		refreshActiveNotchPreferences,
+	} = deps;
 
 	ipcMain.handle("notch:getPreferences", () => getNotchPreferences());
 
 	ipcMain.handle("notch:setPreferences", (_event, prefs) =>
 		applyNotchPreferences({ ...getNotchPreferences(), ...(prefs || {}) }),
 	);
+
+	// Read-only resolve: does this environment have its own layout, or is it
+	// inheriting the global default? Backs the editors' "uses default / has
+	// its own layout" toggle.
+	ipcMain.handle("notch:getLayoutForEnvironment", (_event, environmentId) => {
+		if (!environmentId) {
+			throw new Error("Environment id missing.");
+		}
+		return getDb().getEffectiveNotchPreferences(environmentId);
+	});
+
+	// Edits the GLOBAL DEFAULT layout directly -- what every environment
+	// with no override of its own inherits. Refreshes the live notch
+	// unconditionally afterward: the default may affect the currently active
+	// environment (or may not, if it has its own override), and re-resolving
+	// is cheap and always correct either way.
+	ipcMain.handle("notch:setDefaultLayout", (_event, patch) => {
+		const resolved = getDb().updateGlobalDefaultNotchLayout(patch || {});
+		refreshActiveNotchPreferences?.();
+		return resolved;
+	});
+
+	// Forks-or-updates `environmentId`'s OWN layout. Only refreshes the live
+	// notch if this environment happens to be the currently active one --
+	// editing some OTHER environment's layout must never visibly change what
+	// the notch is showing right now.
+	ipcMain.handle("notch:setEnvironmentLayout", (_event, environmentId, patch) => {
+		if (!environmentId) {
+			throw new Error("Environment id missing.");
+		}
+		const resolved = getDb().setEnvironmentNotchLayout(environmentId, patch || {});
+		if (environmentId === getCurrentEnvironmentId?.()) {
+			refreshActiveNotchPreferences?.();
+		}
+		return resolved;
+	});
+
+	// Reverts `environmentId` to the global default (its own layout row, if
+	// it had one, is left in place -- see db.cjs#clearEnvironmentNotchLayout
+	// -- never deleted here).
+	ipcMain.handle("notch:clearEnvironmentLayout", (_event, environmentId) => {
+		if (!environmentId) {
+			throw new Error("Environment id missing.");
+		}
+		const resolved = getDb().clearEnvironmentNotchLayout(environmentId);
+		if (environmentId === getCurrentEnvironmentId?.()) {
+			refreshActiveNotchPreferences?.();
+		}
+		return resolved;
+	});
 
 	ipcMain.handle("notch:resize", (event, width, height) => {
 		const notchWindow = BrowserWindow.fromWebContents(event.sender);

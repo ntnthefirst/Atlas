@@ -9,34 +9,113 @@ import {
 } from "@heroicons/react/24/outline";
 import { NotchTabGridEditor } from "./NotchTabGridEditor";
 import { TAB_ICON_MAP } from "./tabIconMap";
+import { Toggle } from "../ui";
 import { NOTCH_TAB_ICONS } from "../../types";
 import type { NotchTab, NotchTabIcon } from "../../types";
 
 let nextTabSuffix = 0;
 const createTabId = () => `tab-${Date.now()}-${nextTabSuffix++}`;
 
+// Mirrors NotchTabGridEditor.tsx's/NotchApp.tsx's own lastEnvironmentId() --
+// the same localStorage key App.tsx keeps in sync with the selected
+// environment (and NotchApp.tsx's own switcher updates directly), shared
+// across every window on this origin. `null` means no environment is
+// selected yet (e.g. before the very first one is created), in which case
+// this editor falls back to editing the plain global preferences exactly as
+// it did before WP-1.3 -- there is no environment to scope an override to.
+const lastEnvironmentId = () => {
+	try {
+		return localStorage.getItem("atlas.lastEnvironmentId");
+	} catch {
+		return null;
+	}
+};
+
 // Self-contained: reads/writes notch tabs directly via the same IPC the rest
 // of the notch preferences use, so it can be dropped into the Settings
 // window's Smart Notch tab and into the standalone Action Editor window
 // without either one owning the state.
 export function NotchTabsEditor({ centered = false }: { centered?: boolean } = {}) {
+	// Captured once at mount, not re-read reactively -- matches the existing
+	// level of sophistication SceneConfigEditor.tsx/NotchTabGridEditor.tsx
+	// already have around this same key. Both this editor's windows (the
+	// modal Settings window, and the standalone Action Editor window) are
+	// short-lived and single-purpose; a user does not switch environments
+	// mid-edit in practice.
+	const [environmentId] = useState<string | null>(() => lastEnvironmentId());
+	const [environmentName, setEnvironmentName] = useState<string | null>(null);
+	// Whether `environmentId` currently inherits the global default (true) or
+	// has its own layout (false). Meaningless when `environmentId` is null.
+	const [usesDefault, setUsesDefault] = useState(true);
 	const [tabs, setTabs] = useState<NotchTab[]>([]);
 	const [selectedTabId, setSelectedTabId] = useState<string | null>(null);
 	const [tabSelectOpen, setTabSelectOpen] = useState(false);
 	const [iconPickerOpen, setIconPickerOpen] = useState(false);
 
 	useEffect(() => {
-		window.atlas
-			.getNotchPreferences()
-			.then((prefs) => setTabs(prefs.tabs))
-			.catch(() => undefined);
-		const unsubscribe = window.atlas.onNotchPreferencesChanged?.((prefs) => setTabs(prefs.tabs));
-		return () => unsubscribe?.();
-	}, []);
+		if (!environmentId) {
+			// No environment context at all -- fall back to the plain global
+			// preferences exactly as this editor worked before WP-1.3.
+			window.atlas
+				.getNotchPreferences()
+				.then((prefs) => setTabs(prefs.tabs))
+				.catch(() => undefined);
+			const unsubscribe = window.atlas.onNotchPreferencesChanged?.((prefs) => setTabs(prefs.tabs));
+			return () => unsubscribe?.();
+		}
 
+		window.atlas
+			.listEnvironments()
+			.then((environments) => {
+				setEnvironmentName(environments.find((environment) => environment.id === environmentId)?.name ?? null);
+			})
+			.catch(() => setEnvironmentName(null));
+
+		window.atlas
+			.getNotchLayoutForEnvironment(environmentId)
+			.then((resolution) => {
+				setUsesDefault(resolution.usesDefault);
+				setTabs(resolution.preferences.tabs);
+			})
+			.catch(() => undefined);
+		return undefined;
+	}, [environmentId]);
+
+	// Every tab/grid mutation (add/remove/rename/reorder tab, and every grid
+	// placement edit inside NotchTabGridEditor, which bubbles back up through
+	// updateTab below) lands here. Deliberately NEVER goes through the
+	// ambient `notch:setPreferences` channel for a scoped environment: that
+	// channel always targets "whatever's currently active" in the main
+	// process, which is not necessarily `environmentId` (the Action Editor
+	// window is not modal -- the active environment really can change while
+	// it's open). `usesDefault` decides whether this edit lands on the
+	// shared global default or forks/updates this environment's own layout.
 	const updateTabs = (nextTabs: NotchTab[]) => {
 		setTabs(nextTabs);
-		void window.atlas.setNotchPreferences({ tabs: nextTabs });
+		if (!environmentId) {
+			void window.atlas.setNotchPreferences({ tabs: nextTabs });
+		} else if (usesDefault) {
+			void window.atlas.setDefaultNotchLayout({ tabs: nextTabs });
+		} else {
+			void window.atlas.setEnvironmentNotchLayout(environmentId, { tabs: nextTabs });
+		}
+	};
+
+	// Flips between "this environment uses the global default" and "this
+	// environment has its own layout". Turning custom ON forks a layout
+	// seeded from whatever is currently effective (nothing visually jumps the
+	// instant the toggle flips); turning it back OFF discards the reference
+	// (the row itself is never deleted -- see db.cjs#clearEnvironmentNotchLayout)
+	// and reverts to the default.
+	const toggleUsesDefault = async (nextUsesDefault: boolean) => {
+		if (!environmentId) {
+			return;
+		}
+		const resolution = nextUsesDefault
+			? await window.atlas.clearEnvironmentNotchLayout(environmentId)
+			: await window.atlas.setEnvironmentNotchLayout(environmentId, {});
+		setUsesDefault(resolution.usesDefault);
+		setTabs(resolution.preferences.tabs);
 	};
 
 	const addTab = () => {
@@ -72,6 +151,19 @@ export function NotchTabsEditor({ centered = false }: { centered?: boolean } = {
 
 	return (
 		<>
+			{environmentId && (
+				<Toggle
+					label={`Layout for ${environmentName ?? "this environment"}`}
+					description={
+						usesDefault
+							? "Using the global default — edits here also change what every other environment without its own layout shows."
+							: "This environment has its own layout, separate from the global default."
+					}
+					checked={!usesDefault}
+					onChange={(nextChecked) => void toggleUsesDefault(!nextChecked)}
+				/>
+			)}
+
 			<div className={centered ? "text-center" : ""}>
 				<span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
 					Action buttons

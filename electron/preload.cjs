@@ -69,6 +69,17 @@ contextBridge.exposeInMainWorld("atlas", {
 
 	getNotchPreferences: () => ipcRenderer.invoke("notch:getPreferences"),
 	setNotchPreferences: (preferences) => ipcRenderer.invoke("notch:setPreferences", preferences),
+	// WP-1.3: per-environment Notch layouts. Unlike the ambient pair above
+	// (which always target "whatever's currently active"), each of these
+	// names its target explicitly -- used by the Settings-window/Action-
+	// editor tabs+grid editors, never by the live notch itself.
+	getNotchLayoutForEnvironment: (environmentId) =>
+		ipcRenderer.invoke("notch:getLayoutForEnvironment", environmentId),
+	setDefaultNotchLayout: (patch) => ipcRenderer.invoke("notch:setDefaultLayout", patch),
+	setEnvironmentNotchLayout: (environmentId, patch) =>
+		ipcRenderer.invoke("notch:setEnvironmentLayout", environmentId, patch),
+	clearEnvironmentNotchLayout: (environmentId) =>
+		ipcRenderer.invoke("notch:clearEnvironmentLayout", environmentId),
 
 	getDashboardLayout: () => ipcRenderer.invoke("dashboard:getLayout"),
 	setDashboardLayout: (preferences) => ipcRenderer.invoke("dashboard:setLayout", preferences),

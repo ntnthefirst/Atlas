@@ -936,6 +936,14 @@ export function NotchApp() {
 			// Ignore storage failures (e.g. private mode); state still updates below.
 		}
 		setActiveEnvId(envId);
+		// WP-1.3: tells the main process which environment is now active so it
+		// can resolve and apply that environment's own Notch layout (or the
+		// global default) and re-render every notch window immediately — the
+		// same signal App.tsx already sends on its own environment switcher.
+		// Without this, switching environments FROM the notch itself would
+		// change what the rest of the app sees but leave the notch's own
+		// layout stuck on whatever was last active.
+		void window.atlas.notifyEnvironmentSwitch(envId).catch(() => {});
 	};
 
 	const onCycleEnvironment = () => {

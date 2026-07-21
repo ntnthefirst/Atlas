@@ -19,13 +19,26 @@
 // `environment:switch` (WP-0.5) is new, not extracted: environment selection
 // is renderer-only local state (see App.tsx's "remember the active
 // environment" effect) with no prior main-process signal at all, so there was
-// no existing call site to hang the event log off of for it. This channel is
-// a fire-and-forget notification that exists purely to feed the event log --
-// it has no other side effect and changes no existing behaviour.
+// no existing call site to hang the event log off of for it. Originally a
+// pure fire-and-forget notification that fed only the event log.
+//
+// WP-1.3 gives it a second job: it is now also main.cjs's one authoritative
+// signal for "which environment is active", which per-environment Notch
+// layout resolution needs (electron/config/notch-layouts.cjs) and Electron
+// alone has no other way to learn -- the renderer keeps this in
+// localStorage (`atlas.lastEnvironmentId`), shared across windows, but the
+// main process cannot read a renderer's localStorage. `setActiveEnvironment`
+// (main.cjs) records the id, resolves that environment's effective Notch
+// layout (its own override, or the global default), and re-renders every
+// notch window immediately -- see main.cjs's setActiveEnvironment/
+// refreshActiveNotchPreferences and windows/notch-windows.cjs's
+// renderNotchPreferences. Called from both App.tsx's own switcher and the
+// Notch's (NotchApp.tsx's onSwitchEnvironment), so switching from either
+// place re-renders the Notch with no restart.
 // ---------------------------------------------------------------------------
 
 function register(ipcMain, deps) {
-	const { getDb, openPrimaryWindowByEnvironmentState, getEventLog } = deps;
+	const { getDb, openPrimaryWindowByEnvironmentState, getEventLog, setActiveEnvironment } = deps;
 
 	ipcMain.handle("environment:list", () => getDb().listEnvironments());
 
@@ -78,6 +91,10 @@ function register(ipcMain, deps) {
 			return false;
 		}
 		getEventLog?.()?.record("environment.switch", { environmentId });
+		// WP-1.3: live-switching -- resolves and applies this environment's
+		// effective Notch layout (own override, or the global default) and
+		// re-renders every notch window immediately.
+		setActiveEnvironment?.(environmentId);
 		return true;
 	});
 

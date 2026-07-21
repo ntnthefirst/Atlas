@@ -8,6 +8,7 @@ const { ActivityTracker } = require("./activity-tracker.cjs");
 const { EventLog } = require("./services/event-log.cjs");
 const { loadAiPreferences } = require("./ai.cjs");
 const { NOTCH_PREFS_FILE, defaultNotchPreferences, normalizeNotchPreferences } = require("./config/notch-prefs.cjs");
+const { GLOBAL_DEFAULT_NOTCH_LAYOUT_ID } = require("./config/notch-layouts.cjs");
 const { createNotchWindowManager } = require("./windows/notch-windows.cjs");
 const { createTrayManager } = require("./services/tray.cjs");
 const { createSettingsWindow: createSettingsWindowModule } = require("./windows/settings-window.cjs");
@@ -90,6 +91,21 @@ const APP_USER_MODEL_ID = isDev ? "com.atlas.app.dev" : "com.atlas.app";
 
 let notchPreferences = { ...defaultNotchPreferences };
 let dashboardPreferences = { ...defaultDashboardPreferences };
+// WP-1.3: which environment is currently active, for Notch layout
+// resolution purposes -- set by setActiveEnvironment(), called from the
+// `environment:switch` IPC handler (environments.cjs) whenever the renderer
+// reports a switch (App.tsx and NotchApp.tsx's own environment switcher both
+// call it). `null` until the first switch happens (e.g. at boot, before any
+// window has reported anything), which resolves to the global default --
+// exactly like an environment whose own config has no override.
+let currentEnvironmentId = null;
+// Tracks which notch_layouts row `notchPreferences` currently reflects --
+// GLOBAL_DEFAULT_NOTCH_LAYOUT_ID, or a specific environment's own layout id
+// -- so saveNotchPreferences() (live edits made through the Notch itself:
+// dragging the free-floating window, opacity/lock/activation toggles, the
+// tray's "Toggle Smart Notch") writes back to the SAME row the in-memory
+// value was resolved from, rather than always writing the default.
+let activeNotchLayoutId = GLOBAL_DEFAULT_NOTCH_LAYOUT_ID;
 
 if (isDev) {
 	// Keep development state fully isolated from the installed production app.
@@ -255,8 +271,14 @@ const notchWindowManager = createNotchWindowManager({
 	isDev,
 	paths: secondaryWindowPaths,
 });
-const { notchWindows, positionNotchWindow, shouldNotchBeActive, syncNotchWindows, applyNotchPreferences } =
-	notchWindowManager;
+const {
+	notchWindows,
+	positionNotchWindow,
+	shouldNotchBeActive,
+	syncNotchWindows,
+	applyNotchPreferences,
+	renderNotchPreferences,
+} = notchWindowManager;
 
 // `quitApp` is a callback (not inlined in tray.cjs) because flipping
 // `isQuitting` is main.cjs's own state mutation, read by the main/mini window
@@ -456,28 +478,73 @@ function createMiniWindow() {
 	return miniWindow;
 }
 
-function loadNotchPreferences() {
-	try {
-		const raw = fs.readFileSync(path.join(app.getPath("userData"), NOTCH_PREFS_FILE), "utf8");
-		notchPreferences = normalizeNotchPreferences(JSON.parse(raw));
-	} catch {
-		notchPreferences = { ...defaultNotchPreferences };
+// WP-1.3: persists a live edit to WHICHEVER layout is currently active
+// (`activeNotchLayoutId` -- the global default, or one environment's own
+// override), never unconditionally to "the" layout the way the pre-WP-1.3
+// version of this function did. This is what the Notch's own live controls
+// (drag-to-move, opacity, lock, activation, the tray's "Toggle Smart Notch")
+// go through via applyNotchPreferences -- see notch-windows.cjs. The
+// Settings-window/Action-editor tabs+grid editors deliberately do NOT use
+// this path (see ipc/notch.cjs's notch:setDefaultLayout/
+// notch:setEnvironmentLayout) -- ambient "whatever's active" is correct for
+// the live notch chrome, but would be a real bug for an editor that isn't
+// necessarily showing the currently-active environment.
+function saveNotchPreferences(value) {
+	notchPreferences = normalizeNotchPreferences(value);
+	if (db) {
+		db.setNotchLayout(activeNotchLayoutId, notchPreferences);
+	}
+	// Keeps the legacy flat file in sync for at least one release (D3: a
+	// migration must be reversible), but ONLY while editing the GLOBAL
+	// DEFAULT -- a pre-WP-1.3 build has no concept of a per-environment
+	// override, so writing an override's contents here would silently hand
+	// an older build (or a downgrade) somebody else's environment-specific
+	// layout instead of the shared default it actually expects.
+	if (activeNotchLayoutId === GLOBAL_DEFAULT_NOTCH_LAYOUT_ID) {
+		try {
+			fs.writeFileSync(
+				path.join(app.getPath("userData"), NOTCH_PREFS_FILE),
+				JSON.stringify(notchPreferences, null, 2),
+				"utf8",
+			);
+		} catch {
+			// Non-blocking: notch still works with in-memory preferences.
+		}
 	}
 	return notchPreferences;
 }
 
-function saveNotchPreferences(value) {
-	notchPreferences = normalizeNotchPreferences(value);
-	try {
-		fs.writeFileSync(
-			path.join(app.getPath("userData"), NOTCH_PREFS_FILE),
-			JSON.stringify(notchPreferences, null, 2),
-			"utf8",
-		);
-	} catch {
-		// Non-blocking: notch still works with in-memory preferences.
-	}
-	return notchPreferences;
+// Re-resolves the effective Notch preferences for whichever environment is
+// currently active (`currentEnvironmentId`) and re-renders every notch
+// window to match, WITHOUT touching storage -- the DB already has whatever
+// `db.getEffectiveNotchPreferences` returns; this only updates the in-memory
+// mirror (`notchPreferences`/`activeNotchLayoutId`) that saveNotchPreferences
+// and the IPC layer read. Called on every environment switch (live
+// switching, WP-1.3's headline feature) and after any editor-driven change
+// to a layout that might affect what's currently showing.
+//
+// Falls back to schema defaults directly (not through the db) when `db`
+// isn't open yet -- this can run once, at boot, before AtlasDatabase.create()
+// resolves.
+function refreshActiveNotchPreferences() {
+	const resolved = db
+		? db.getEffectiveNotchPreferences(currentEnvironmentId)
+		: { usesDefault: true, layoutId: GLOBAL_DEFAULT_NOTCH_LAYOUT_ID, preferences: { ...defaultNotchPreferences } };
+	notchPreferences = resolved.preferences;
+	activeNotchLayoutId = resolved.layoutId;
+	renderNotchPreferences(notchPreferences);
+	return resolved;
+}
+
+// The live-switching wire-up (WP-1.3): called from the `environment:switch`
+// IPC handler whenever the renderer (App.tsx, or the Notch's own environment
+// switcher -- see NotchApp.tsx's onSwitchEnvironment) reports the active
+// environment changed. Updates which environment Notch resolution follows,
+// then immediately re-resolves and re-renders -- no restart, matching this
+// package's acceptance criteria.
+function setActiveEnvironment(environmentId) {
+	currentEnvironmentId = environmentId || null;
+	return refreshActiveNotchPreferences();
 }
 
 function loadDashboardPreferences() {
@@ -517,6 +584,7 @@ function wireIpc() {
 		getDb: () => db,
 		openPrimaryWindowByEnvironmentState,
 		getEventLog: () => eventLog,
+		setActiveEnvironment,
 	});
 
 	registerSessionIpc(ipcMain, {
@@ -568,10 +636,13 @@ function wireIpc() {
 	});
 
 	registerNotchIpc(ipcMain, {
+		getDb: () => db,
 		getNotchPreferences: () => notchPreferences,
 		applyNotchPreferences,
 		positionNotchWindow,
 		getPendingNotchInputPayload: () => pendingNotchInputPayload,
+		getCurrentEnvironmentId: () => currentEnvironmentId,
+		refreshActiveNotchPreferences,
 	});
 
 	registerSystemIpc(ipcMain, {
@@ -586,7 +657,6 @@ function wireIpc() {
 
 app.whenReady().then(async () => {
 	loadUpdatePreferences();
-	loadNotchPreferences();
 	loadDashboardPreferences();
 	loadFocusPreferences();
 	loadAiPreferences();
@@ -619,6 +689,16 @@ app.whenReady().then(async () => {
 		app.quit();
 		return;
 	}
+
+	// WP-1.3: now that the database (and therefore the Notch layout store) is
+	// open, resolve the in-memory notch preferences from it instead of the
+	// schema-default placeholder `notchPreferences` was declared with. No
+	// environment is active yet at boot (`currentEnvironmentId` starts null),
+	// so this resolves straight to the global default -- the seeded/migrated
+	// contents of the pre-existing notch-preferences.json (see
+	// electron/migrations/notch-layout-seed.cjs), exactly what
+	// loadNotchPreferences() used to read directly from that same file.
+	refreshActiveNotchPreferences();
 
 	// CRITICAL: Finalize any stranded sessions from crashes or ungraceful shutdowns
 	// This prevents old sessions from being resumed and continuing to accumulate time

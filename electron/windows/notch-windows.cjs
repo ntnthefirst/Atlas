@@ -27,11 +27,12 @@ const { computeNotchBounds, selectTargetDisplays } = require("./notch-geometry.c
 //
 // deps:
 // - `getNotchPreferences` is a getter, not a value, because `notchPreferences`
-//   is a `let` main.cjs reassigns every time preferences load or save (see
-//   main.cjs's `loadNotchPreferences`/`saveNotchPreferences`, neither of which
-//   moved here) -- a value capture here would freeze this module onto
-//   whatever `notchPreferences` was when the manager was created, before any
-//   prefs file is ever read. Every function below calls it fresh rather than
+//   is a `let` main.cjs reassigns every time preferences load, save, or the
+//   active environment changes (see main.cjs's `saveNotchPreferences`/
+//   `refreshActiveNotchPreferences`, neither of which moved here) -- a value
+//   capture here would freeze this module onto whatever `notchPreferences`
+//   was when the manager was created, before any prefs are ever read. Every
+//   function below calls it fresh rather than
 //   caching the result, except where a function already holds the exact
 //   object `saveNotchPreferences` just returned (see `applyNotchPreferences`)
 //   -- reusing that local is equivalent, not a stale capture, since nothing
@@ -209,9 +210,18 @@ function createNotchWindowManager(deps) {
 		}
 	}
 
-	function applyNotchPreferences(next) {
-		const prefs = saveNotchPreferences(next);
-
+	// Re-renders every notch window to match `prefs` and broadcasts the
+	// change to every window, WITHOUT persisting anything. Split out of
+	// applyNotchPreferences (WP-1.3) because "the effective preferences
+	// changed" now has two different causes that must NOT both trigger a
+	// save: a genuine edit (applyNotchPreferences, below, which still saves
+	// first) and the active ENVIRONMENT changing, where `prefs` is already
+	// exactly what's on disk (that environment's own layout, or the global
+	// default) and re-saving it would be redundant at best -- and, for an
+	// environment with no override, would incorrectly promote the global
+	// default into a real per-environment override the instant someone
+	// merely switched into it.
+	function renderNotchPreferences(prefs) {
 		syncNotchWindows();
 		for (const [displayId, notchWindow] of notchWindows) {
 			if (notchWindow.isDestroyed()) {
@@ -232,6 +242,11 @@ function createNotchWindowManager(deps) {
 		return prefs;
 	}
 
+	function applyNotchPreferences(next) {
+		const prefs = saveNotchPreferences(next);
+		return renderNotchPreferences(prefs);
+	}
+
 	return {
 		notchWindows,
 		getTargetDisplays,
@@ -240,6 +255,7 @@ function createNotchWindowManager(deps) {
 		shouldNotchBeActive,
 		syncNotchWindows,
 		applyNotchPreferences,
+		renderNotchPreferences,
 	};
 }
 

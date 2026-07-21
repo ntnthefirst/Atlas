@@ -552,6 +552,18 @@ export type NotchPreferences = {
 	infoItems: NotchInfoItemConfig[];
 };
 
+// The result of resolving which Notch layout applies to a given environment
+// (WP-1.3). Mirrors electron/config/notch-layouts.cjs's resolveNotchLayout()
+// exactly -- `usesDefault: true` means `preferences` is the shared global
+// default (edited via `setDefaultNotchLayout`); `false` means this
+// environment has its own layout (`layoutId` identifies it, edited via
+// `setEnvironmentNotchLayout`).
+export type NotchLayoutResolution = {
+	usesDefault: boolean;
+	layoutId: string;
+	preferences: NotchPreferences;
+};
+
 export type DisplaySummary = {
 	id: number;
 	label: string;

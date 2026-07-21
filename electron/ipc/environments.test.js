@@ -53,6 +53,29 @@ describe("environment:switch — event log recording (WP-0.5)", () => {
 
 		expect(() => ipcMain.invoke("environment:switch", "env-123")).not.toThrow();
 	});
+
+	// WP-1.3: live Notch switching rides on this same channel now.
+	it("calls setActiveEnvironment with the new environment id, for live Notch layout switching", () => {
+		const setActiveEnvironment = vi.fn();
+		const ipcMain = createFakeIpcMain();
+		register(ipcMain, {
+			getDb: () => ({}),
+			openPrimaryWindowByEnvironmentState: () => {},
+			setActiveEnvironment,
+		});
+
+		ipcMain.invoke("environment:switch", "env-456");
+
+		expect(setActiveEnvironment).toHaveBeenCalledTimes(1);
+		expect(setActiveEnvironment).toHaveBeenCalledWith("env-456");
+	});
+
+	it("never throws when no setActiveEnvironment is supplied", () => {
+		const ipcMain = createFakeIpcMain();
+		register(ipcMain, { getDb: () => ({}), openPrimaryWindowByEnvironmentState: () => {} });
+
+		expect(() => ipcMain.invoke("environment:switch", "env-789")).not.toThrow();
+	});
 });
 
 describe("environment:getConfig / environment:setConfig (WP-1.1)", () => {
