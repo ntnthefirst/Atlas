@@ -4,8 +4,8 @@
 // Extracted from main.cjs (WP-0.2) with no behaviour change. This is the pure
 // half of the focus engine: schema, defaults, clamping and the day key. The
 // stateful half — the live runtime, the 1s interval, nudge pacing and the
-// broadcast to every window — stays in main.cjs, since it owns the timers and
-// the window list.
+// broadcast to every window — lives in electron/services/focus-engine.cjs
+// (also WP-0.2), which owns the timers and reads the window list itself.
 //
 // Mirrors the FocusState shape in src/types.ts.
 // ---------------------------------------------------------------------------

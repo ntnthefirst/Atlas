@@ -1,26 +1,15 @@
 const path = require("node:path");
 const fs = require("node:fs");
-const {
-	app,
-	BrowserWindow,
-	dialog,
-	ipcMain,
-	Menu,
-	Notification,
-	Tray,
-	nativeImage,
-	nativeTheme,
-	screen,
-} = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, nativeTheme, screen } = require("electron");
 const { autoUpdater } = require("electron-updater");
 
 const { AtlasDatabase } = require("./db.cjs");
 const { ActivityTracker } = require("./activity-tracker.cjs");
 const { EventLog } = require("./services/event-log.cjs");
 const { loadAiPreferences } = require("./ai.cjs");
-const { compareVersionStrings, normalizeReleaseList } = require("./services/version.cjs");
 const { NOTCH_PREFS_FILE, defaultNotchPreferences, normalizeNotchPreferences } = require("./config/notch-prefs.cjs");
-const { computeNotchBounds, selectTargetDisplays } = require("./windows/notch-geometry.cjs");
+const { createNotchWindowManager } = require("./windows/notch-windows.cjs");
+const { createTrayManager } = require("./services/tray.cjs");
 const { createSettingsWindow: createSettingsWindowModule } = require("./windows/settings-window.cjs");
 const {
 	createActionEditorWindow: createActionEditorWindowModule,
@@ -31,21 +20,27 @@ const {
 	defaultDashboardPreferences,
 	normalizeDashboardPreferences,
 } = require("./config/dashboard-prefs.cjs");
-const { fetchJson } = require("./services/http.cjs");
 const {
-	UPDATE_PREFS_FILE,
-	defaultUpdatePreferences,
-	normalizeUpdatePreferences,
-} = require("./config/update-prefs.cjs");
+	getUpdatePreferences,
+	loadUpdatePreferences,
+	saveUpdatePreferences,
+	fetchReleases,
+	checkLatestGitHubVersion,
+	performInAppUpdate,
+} = require("./services/updater.cjs");
 const {
-	FOCUS_PREFS_FILE,
-	FOCUS_NUDGE_KINDS,
-	defaultFocusConfig,
-	NUDGE_COPY,
-	todayKey,
-	normalizeFocusConfig,
-	normalizeFocusStats,
-} = require("./config/focus-prefs.cjs");
+	getFocusState,
+	rollFocusStatsIfNeeded,
+	loadFocusPreferences,
+	startFocusEngine,
+	startFocus,
+	pauseFocus,
+	resumeFocus,
+	advanceFocusPhase,
+	stopFocus,
+	setFocusGoal,
+	updateFocusConfig,
+} = require("./services/focus-engine.cjs");
 const { register: registerTaskIpc } = require("./ipc/tasks.cjs");
 const { register: registerNoteIpc } = require("./ipc/notes.cjs");
 const { register: registerEnvironmentIpc } = require("./ipc/environments.cjs");
@@ -69,9 +64,6 @@ let notchInputWindow = null;
 // popup once it loads, since a freshly created window can't receive it on the
 // constructor.
 let pendingNotchInputPayload = null;
-// Keyed by display id, since the notch can be shown on multiple screens at once.
-let notchWindows = new Map();
-let tray = null;
 let isQuitting = false;
 let db = null;
 let tracker = null;
@@ -94,239 +86,6 @@ function getTitleBarOverlay() {
 		: { color: "#f7f7f7", symbolColor: "#4a4a4a", height: 49 };
 }
 const APP_USER_MODEL_ID = isDev ? "com.atlas.app.dev" : "com.atlas.app";
-const GITHUB_OWNER = "ntnthefirst";
-const GITHUB_REPO = "Atlas";
-let updatePreferences = { ...defaultUpdatePreferences };
-
-// ---------------------------------------------------------------------------
-// Focus mode (Pomodoro) + wellbeing nudges engine.
-//
-// This is the single source of truth shared by every window. Config + daily
-// stats are persisted; the live `runtime` is intentionally not (a focus cycle
-// doesn't survive an app restart). A 1s interval advances phases and fires the
-// recurring nudges as native notifications, broadcasting state to all windows
-// only when something actually changes (renderers tick their own countdowns).
-// Mirrors src/types.ts FocusState.
-// ---------------------------------------------------------------------------
-let focusState = {
-	config: { ...defaultFocusConfig, nudges: defaultFocusConfig.nudges.map((nudge) => ({ ...nudge })) },
-	runtime: null,
-	stats: { day: todayKey(), focusRoundsCompleted: 0, focusMsCompleted: 0 },
-};
-// Per-nudge timestamp (epoch ms) of the last time it fired, kept in memory so
-// nudges pace from when they were enabled / the engine started, never persisted.
-let nudgeLastFired = {};
-let focusTimer = null;
-
-// Reset the daily counters in place if the calendar day has rolled over.
-function rollFocusStatsIfNeeded() {
-	const today = todayKey();
-	if (focusState.stats.day !== today) {
-		focusState.stats = { day: today, focusRoundsCompleted: 0, focusMsCompleted: 0 };
-	}
-}
-
-function loadFocusPreferences() {
-	try {
-		const raw = fs.readFileSync(path.join(app.getPath("userData"), FOCUS_PREFS_FILE), "utf8");
-		const parsed = JSON.parse(raw);
-		focusState = {
-			config: normalizeFocusConfig(parsed.config),
-			runtime: null,
-			stats: normalizeFocusStats(parsed.stats),
-		};
-	} catch {
-		focusState = {
-			config: normalizeFocusConfig(null),
-			runtime: null,
-			stats: normalizeFocusStats(null),
-		};
-	}
-	rollFocusStatsIfNeeded();
-	return focusState;
-}
-
-function persistFocusPreferences() {
-	try {
-		fs.writeFileSync(
-			path.join(app.getPath("userData"), FOCUS_PREFS_FILE),
-			JSON.stringify({ config: focusState.config, stats: focusState.stats }, null, 2),
-			"utf8",
-		);
-	} catch {
-		// Non-blocking: focus still works from in-memory state this session.
-	}
-}
-
-function broadcastFocusState() {
-	for (const browserWindow of BrowserWindow.getAllWindows()) {
-		if (!browserWindow.isDestroyed()) {
-			browserWindow.webContents.send("focus:state-changed", focusState);
-		}
-	}
-}
-
-function phaseDurationMs(phase) {
-	const config = focusState.config;
-	if (phase === "shortBreak") return config.shortBreakMinutes * 60000;
-	if (phase === "longBreak") return config.longBreakMinutes * 60000;
-	return config.focusMinutes * 60000;
-}
-
-function notify(title, body) {
-	try {
-		if (Notification.isSupported()) {
-			new Notification({ title, body, silent: false }).show();
-		}
-	} catch {
-		// Notifications are best-effort; never let one crash the engine.
-	}
-}
-
-// Build a runtime for a phase, honoring whether it should auto-start or wait
-// paused for a manual start.
-function makePhaseRuntime(phase, roundIndex, goal, startedAt, autoStart) {
-	const duration = phaseDurationMs(phase);
-	const now = Date.now();
-	return {
-		phase,
-		roundIndex,
-		phaseDurationMs: duration,
-		phaseEndsAt: now + duration,
-		isPaused: !autoStart,
-		remainingMs: duration,
-		goal: goal || "",
-		startedAt: startedAt || now,
-	};
-}
-
-// Advance to the next phase when the current one elapses (or is skipped).
-function advanceFocusPhase(skipped) {
-	const runtime = focusState.runtime;
-	if (!runtime) return;
-	const config = focusState.config;
-	const goal = runtime.goal;
-	const startedAt = runtime.startedAt;
-
-	if (runtime.phase === "focus") {
-		// Credit the completed focus round (a skip still ended the work block).
-		rollFocusStatsIfNeeded();
-		focusState.stats.focusRoundsCompleted += 1;
-		focusState.stats.focusMsCompleted += runtime.phaseDurationMs;
-		const completedRounds = runtime.roundIndex + 1;
-		const longBreakDue = completedRounds % config.roundsBeforeLongBreak === 0;
-		const nextPhase = longBreakDue ? "longBreak" : "shortBreak";
-		focusState.runtime = makePhaseRuntime(nextPhase, runtime.roundIndex, goal, startedAt, config.autoStartBreaks);
-		if (!skipped) {
-			notify(
-				longBreakDue ? "Long break time" : "Break time",
-				`Focus round done. ${longBreakDue ? config.longBreakMinutes : config.shortBreakMinutes} min break.`,
-			);
-		}
-	} else {
-		// A break finished → next focus round. After a long break the cycle resets.
-		const wasLong = runtime.phase === "longBreak";
-		const nextRoundIndex = wasLong ? 0 : runtime.roundIndex + 1;
-		focusState.runtime = makePhaseRuntime("focus", nextRoundIndex, goal, startedAt, config.autoStartFocus);
-		if (!skipped) {
-			notify("Back to focus", goal ? `Next up: ${goal}` : "Break over — back to it.");
-		}
-	}
-	persistFocusPreferences();
-	broadcastFocusState();
-}
-
-function maybeFireNudges(now) {
-	const config = focusState.config;
-	const runtime = focusState.runtime;
-	const active = config.nudgesOnlyDuringFocus
-		? Boolean(runtime && runtime.phase === "focus" && !runtime.isPaused)
-		: true;
-	if (!active) return;
-	for (const nudge of config.nudges) {
-		if (!nudge.enabled) continue;
-		const last = nudgeLastFired[nudge.kind] || 0;
-		if (now - last >= nudge.everyMinutes * 60000) {
-			nudgeLastFired[nudge.kind] = now;
-			const copy = NUDGE_COPY[nudge.kind];
-			if (copy) notify(copy.title, copy.body);
-		}
-	}
-}
-
-// Single 1s heartbeat: advances an elapsed phase and paces the nudges. Kept
-// running for the app's lifetime — cheap, and nudges fire without a focus cycle.
-function startFocusEngine() {
-	if (focusTimer) return;
-	// Pace nudges from "now" so enabling one never fires it instantly.
-	const now = Date.now();
-	for (const kind of FOCUS_NUDGE_KINDS) nudgeLastFired[kind] = now;
-	focusTimer = setInterval(() => {
-		const tickNow = Date.now();
-		const runtime = focusState.runtime;
-		if (runtime && !runtime.isPaused && tickNow >= runtime.phaseEndsAt) {
-			advanceFocusPhase(false);
-		}
-		maybeFireNudges(tickNow);
-	}, 1000);
-	if (typeof focusTimer.unref === "function") focusTimer.unref();
-}
-
-function startFocus(goal) {
-	rollFocusStatsIfNeeded();
-	if (focusState.runtime) {
-		// Already mid-cycle: just (re)start the clock and clear any pause.
-		const runtime = focusState.runtime;
-		runtime.isPaused = false;
-		runtime.phaseEndsAt = Date.now() + runtime.remainingMs;
-		if (typeof goal === "string") runtime.goal = goal;
-	} else {
-		focusState.runtime = makePhaseRuntime("focus", 0, typeof goal === "string" ? goal : "", Date.now(), true);
-	}
-	broadcastFocusState();
-	return focusState;
-}
-
-function pauseFocus() {
-	const runtime = focusState.runtime;
-	if (runtime && !runtime.isPaused) {
-		runtime.remainingMs = Math.max(0, runtime.phaseEndsAt - Date.now());
-		runtime.isPaused = true;
-		broadcastFocusState();
-	}
-	return focusState;
-}
-
-function resumeFocus() {
-	const runtime = focusState.runtime;
-	if (runtime && runtime.isPaused) {
-		runtime.isPaused = false;
-		runtime.phaseEndsAt = Date.now() + runtime.remainingMs;
-		broadcastFocusState();
-	}
-	return focusState;
-}
-
-function stopFocus() {
-	focusState.runtime = null;
-	broadcastFocusState();
-	return focusState;
-}
-
-function setFocusGoal(goal) {
-	if (focusState.runtime) {
-		focusState.runtime.goal = typeof goal === "string" ? goal : "";
-		broadcastFocusState();
-	}
-	return focusState;
-}
-
-function updateFocusConfig(patch) {
-	focusState.config = normalizeFocusConfig({ ...focusState.config, ...(patch || {}) });
-	persistFocusPreferences();
-	broadcastFocusState();
-	return focusState;
-}
 
 let notchPreferences = { ...defaultNotchPreferences };
 let dashboardPreferences = { ...defaultDashboardPreferences };
@@ -335,94 +94,6 @@ if (isDev) {
 	// Keep development state fully isolated from the installed production app.
 	const devUserDataPath = path.join(app.getPath("appData"), "Atlas-Dev");
 	app.setPath("userData", devUserDataPath);
-}
-
-function getUpdatePrefsPath() {
-	return path.join(app.getPath("userData"), UPDATE_PREFS_FILE);
-}
-
-function loadUpdatePreferences() {
-	try {
-		const rawContent = fs.readFileSync(getUpdatePrefsPath(), "utf8");
-		const parsed = JSON.parse(rawContent);
-		updatePreferences = normalizeUpdatePreferences(parsed);
-	} catch {
-		updatePreferences = { ...defaultUpdatePreferences };
-	}
-
-	return updatePreferences;
-}
-
-function saveUpdatePreferences(nextValue) {
-	updatePreferences = normalizeUpdatePreferences(nextValue);
-
-	try {
-		fs.writeFileSync(getUpdatePrefsPath(), JSON.stringify(updatePreferences, null, 2), "utf8");
-	} catch {
-		// Non-blocking: update checks should still work with in-memory preferences.
-	}
-
-	return updatePreferences;
-}
-
-async function fetchReleases(includePrerelease) {
-	const releaseList = await fetchJson(
-		`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases?per_page=30`,
-	);
-	return normalizeReleaseList(releaseList, includePrerelease);
-}
-
-async function checkLatestGitHubVersion(includePrerelease) {
-	const localVersion = app.getVersion();
-
-	try {
-		const releases = await fetchReleases(includePrerelease);
-		const latestRelease = releases[0];
-		if (!latestRelease) {
-			return;
-		}
-
-		if (compareVersionStrings(latestRelease.version, localVersion) > 0) {
-			console.log(`[Atlas] New version available: ${latestRelease.tag} (local: v${localVersion}).`);
-		}
-	} catch {
-		console.log("[Atlas] Version check skipped (offline or GitHub unavailable). Continuing startup.");
-	}
-}
-
-async function performInAppUpdate(includePrerelease) {
-	if (!app.isPackaged) {
-		return {
-			started: false,
-			error: "In-app install is only available in packaged builds.",
-		};
-	}
-
-	try {
-		autoUpdater.allowPrerelease = includePrerelease;
-		autoUpdater.allowDowngrade = includePrerelease;
-		autoUpdater.autoDownload = true;
-
-		const result = await autoUpdater.checkForUpdates();
-		if (!result?.downloadPromise) {
-			return {
-				started: false,
-				error: "No update download started.",
-			};
-		}
-
-		await result.downloadPromise;
-		setImmediate(() => {
-			autoUpdater.quitAndInstall(false, true);
-		});
-
-		return { started: true };
-	} catch (error) {
-		return {
-			started: false,
-			error: error instanceof Error ? error.message : "Unknown update error",
-		};
-	}
 }
 
 function createMainWindow() {
@@ -557,6 +228,50 @@ const secondaryWindowPaths = {
 	preloadPath: path.join(__dirname, "preload.cjs"),
 	distIndexPath: path.join(__dirname, "..", "dist", "index.html"),
 };
+const traySvgPath = isDev
+	? path.join(__dirname, "..", "public", "favicon.svg")
+	: path.join(__dirname, "..", "dist", "favicon.svg");
+
+// See electron/windows/notch-windows.cjs's header for why this is a factory
+// call (not a per-call `deps` argument like the window factories above) and
+// why getNotchPreferences/getMainWindow are getters rather than values.
+//
+// `ensureTray` is a lazy reference (`() => trayManager.ensureTray()`), not the
+// plain value it looks like it should be, to break a construction-order cycle:
+// this manager needs `ensureTray` (from `trayManager`, built below) and
+// `trayManager` needs `applyNotchPreferences` (from this manager) -- neither
+// is actually *called* until well after both factories have finished
+// constructing (a notch window isn't created, and the tray isn't built,
+// during this synchronous setup), so the arrow function's `trayManager`
+// reference only needs to resolve by call time, not by the time this object
+// literal is evaluated. Same trick as every other getter here, just closing
+// over a `const` assigned two statements down instead of a reassigned `let`.
+const notchWindowManager = createNotchWindowManager({
+	getNotchPreferences: () => notchPreferences,
+	saveNotchPreferences,
+	getMainWindow: () => mainWindow,
+	ensureTray: () => trayManager.ensureTray(),
+	isDev,
+	paths: secondaryWindowPaths,
+});
+const { notchWindows, positionNotchWindow, shouldNotchBeActive, syncNotchWindows, applyNotchPreferences } =
+	notchWindowManager;
+
+// `quitApp` is a callback (not inlined in tray.cjs) because flipping
+// `isQuitting` is main.cjs's own state mutation, read by the main/mini window
+// "close" handlers below -- tray.cjs never touches that `let` directly.
+const trayManager = createTrayManager({
+	svgPath: traySvgPath,
+	showMainWindow,
+	createMiniWindow,
+	getNotchPreferences: () => notchPreferences,
+	applyNotchPreferences,
+	quitApp: () => {
+		isQuitting = true;
+		app.quit();
+	},
+});
+const { ensureTray } = trayManager;
 
 function createSettingsWindow(parentWindow = null) {
 	settingsWindow = createSettingsWindowModule(parentWindow, {
@@ -657,19 +372,6 @@ nativeTheme.on("updated", () => {
 		applyNativeTheme("system");
 	}
 });
-
-function getTrayIcon() {
-	const svgPath = isDev
-		? path.join(__dirname, "..", "public", "favicon.svg")
-		: path.join(__dirname, "..", "dist", "favicon.svg");
-	const icon = nativeImage.createFromPath(svgPath);
-	if (!icon.isEmpty()) {
-		return icon.resize({ width: 16, height: 16 });
-	}
-	return nativeImage.createFromDataURL(
-		"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z6xQAAAAASUVORK5CYII=",
-	);
-}
 
 function showMainWindow() {
 	if (!hasAnyEnvironments()) {
@@ -808,204 +510,6 @@ function saveDashboardPreferences(value) {
 	return dashboardPreferences;
 }
 
-// Resolves which displays should currently show a notch. Falls back to the
-// primary display whenever the saved selection is empty or none of the saved
-// ids are connected, so there's always at least one.
-function getTargetDisplays() {
-	const displays = screen.getAllDisplays();
-	const primary = screen.getPrimaryDisplay();
-	return selectTargetDisplays(displays, primary, notchPreferences.displayIds);
-}
-
-function positionNotchWindow(notchWindow, display, width, height) {
-	if (!notchWindow || notchWindow.isDestroyed()) {
-		return;
-	}
-	const isPrimary = display.id === screen.getPrimaryDisplay().id;
-	const bounds = computeNotchBounds({
-		workArea: display.workArea,
-		width,
-		height,
-		position: notchPreferences.position,
-		isPrimary,
-		freeX: notchPreferences.x,
-		freeY: notchPreferences.y,
-	});
-
-	notchWindow.setBounds(bounds);
-}
-
-function createNotchWindowForDisplay(display) {
-	const existing = notchWindows.get(display.id);
-	if (existing && !existing.isDestroyed()) {
-		existing.show();
-		return existing;
-	}
-
-	const notchWindow = new BrowserWindow({
-		width: 300,
-		height: 70,
-		frame: false,
-		transparent: true,
-		backgroundColor: "#00000000",
-		hasShadow: false,
-		alwaysOnTop: true,
-		skipTaskbar: true,
-		resizable: false,
-		maximizable: false,
-		minimizable: false,
-		fullscreenable: false,
-		movable: notchPreferences.position === "free" && !notchPreferences.locked,
-		focusable: true,
-		webPreferences: {
-			preload: path.join(__dirname, "preload.cjs"),
-			contextIsolation: true,
-			nodeIntegration: false,
-		},
-	});
-
-	notchWindow.notchDisplayId = display.id;
-	notchWindow.setAlwaysOnTop(true, "screen-saver");
-
-	if (isDev) {
-		notchWindow.loadURL("http://localhost:5173?mode=notch");
-	} else {
-		notchWindow.loadFile(path.join(__dirname, "..", "dist", "index.html"), {
-			query: { mode: "notch" },
-		});
-	}
-
-	notchWindow.on("moved", () => {
-		if (notchWindow.isDestroyed()) {
-			return;
-		}
-		// Only the primary display's free position is persisted; other displays
-		// keep their own default placement.
-		if (notchPreferences.position === "free" && display.id === screen.getPrimaryDisplay().id) {
-			const [x, y] = notchWindow.getPosition();
-			notchPreferences.x = x;
-			notchPreferences.y = y;
-			saveNotchPreferences(notchPreferences);
-		}
-	});
-
-	notchWindow.on("closed", () => {
-		if (notchWindows.get(display.id) === notchWindow) {
-			notchWindows.delete(display.id);
-		}
-	});
-
-	// Lets the renderer close an open tab panel when the user clicks anywhere
-	// outside the notch window (another app, the desktop, the main window).
-	notchWindow.on("blur", () => {
-		if (!notchWindow.isDestroyed()) {
-			notchWindow.webContents.send("notch:blur");
-		}
-	});
-
-	notchWindows.set(display.id, notchWindow);
-	positionNotchWindow(notchWindow, display, 300, 70);
-	ensureTray();
-	return notchWindow;
-}
-
-function shouldNotchBeActive() {
-	if (!notchPreferences.enabled) {
-		return false;
-	}
-	if (notchPreferences.activation === "withMain") {
-		return Boolean(mainWindow && !mainWindow.isDestroyed());
-	}
-	return true;
-}
-
-// Creates/destroys notch windows to match shouldNotchBeActive() and the
-// selected displays. Call this whenever notch preferences change, the main
-// window's lifecycle changes, or the connected displays change.
-function syncNotchWindows() {
-	if (!shouldNotchBeActive()) {
-		for (const notchWindow of notchWindows.values()) {
-			if (!notchWindow.isDestroyed()) {
-				notchWindow.destroy();
-			}
-		}
-		notchWindows.clear();
-		return;
-	}
-
-	const targets = getTargetDisplays();
-	const targetIds = new Set(targets.map((display) => display.id));
-
-	for (const [displayId, notchWindow] of [...notchWindows]) {
-		if (!targetIds.has(displayId)) {
-			if (!notchWindow.isDestroyed()) {
-				notchWindow.destroy();
-			}
-			notchWindows.delete(displayId);
-		}
-	}
-
-	for (const display of targets) {
-		const existing = notchWindows.get(display.id);
-		if (!existing || existing.isDestroyed()) {
-			createNotchWindowForDisplay(display);
-		}
-	}
-}
-
-function applyNotchPreferences(next) {
-	notchPreferences = saveNotchPreferences(next);
-
-	syncNotchWindows();
-	for (const [displayId, notchWindow] of notchWindows) {
-		if (notchWindow.isDestroyed()) {
-			continue;
-		}
-		notchWindow.setMovable(notchPreferences.position === "free" && !notchPreferences.locked);
-		const display =
-			screen.getAllDisplays().find((item) => item.id === displayId) ?? screen.getPrimaryDisplay();
-		const [width, height] = notchWindow.getContentSize();
-		positionNotchWindow(notchWindow, display, width, height);
-	}
-
-	for (const browserWindow of BrowserWindow.getAllWindows()) {
-		if (!browserWindow.isDestroyed()) {
-			browserWindow.webContents.send("notch:preferences-changed", notchPreferences);
-		}
-	}
-	return notchPreferences;
-}
-
-function ensureTray() {
-	if (tray) {
-		return tray;
-	}
-
-	tray = new Tray(getTrayIcon());
-	tray.setToolTip("Atlas");
-	tray.on("double-click", () => {
-		showMainWindow();
-	});
-
-	const contextMenu = Menu.buildFromTemplate([
-		{ label: "Show Atlas", click: () => showMainWindow() },
-		{ label: "Open Mini Window", click: () => createMiniWindow() },
-		{
-			label: "Toggle Smart Notch",
-			click: () => applyNotchPreferences({ ...notchPreferences, enabled: !notchPreferences.enabled }),
-		},
-		{ type: "separator" },
-		{
-			label: "Quit",
-			click: () => {
-				isQuitting = true;
-				app.quit();
-			},
-		},
-	]);
-	tray.setContextMenu(contextMenu);
-	return tray;
-}
 
 function wireIpc() {
 	registerEnvironmentIpc(ipcMain, {
@@ -1043,7 +547,7 @@ function wireIpc() {
 	});
 
 	registerAppIpc(ipcMain, {
-		getUpdatePreferences: () => updatePreferences,
+		getUpdatePreferences,
 		saveUpdatePreferences,
 		fetchReleases,
 		performInAppUpdate,
@@ -1051,7 +555,7 @@ function wireIpc() {
 	});
 
 	registerFocusIpc(ipcMain, {
-		getFocusState: () => focusState,
+		getFocusState,
 		rollFocusStatsIfNeeded,
 		startFocus,
 		pauseFocus,
@@ -1154,8 +658,8 @@ app.whenReady().then(async () => {
 
 	wireIpc();
 	openPrimaryWindowByEnvironmentState();
-	if (updatePreferences.autoCheck) {
-		void checkLatestGitHubVersion(updatePreferences.includeBeta);
+	if (getUpdatePreferences().autoCheck) {
+		void checkLatestGitHubVersion(getUpdatePreferences().includeBeta);
 	}
 
 	// Re-sync notch windows whenever a monitor is connected/disconnected so the
