@@ -47,6 +47,9 @@ const {
 	normalizeFocusConfig,
 	normalizeFocusStats,
 } = require("./config/focus-prefs.cjs");
+const { register: registerTaskIpc } = require("./ipc/tasks.cjs");
+const { register: registerNoteIpc } = require("./ipc/notes.cjs");
+const { register: registerEnvironmentIpc } = require("./ipc/environments.cjs");
 
 let mainWindow = null;
 let miniWindow = null;
@@ -996,51 +999,7 @@ function ensureTray() {
 }
 
 function wireIpc() {
-	ipcMain.handle("map:list", () => db.listMaps());
-
-	ipcMain.handle("map:create", (_event, name, options = {}) => {
-		if (!name || !name.trim()) {
-			throw new Error("Environment name is required.");
-		}
-		const createdMap = db.createMap(name.trim(), {
-			icon: options?.icon ?? null,
-			accent: options?.accent ?? null,
-			preset: options?.preset ?? null,
-		});
-		openPrimaryWindowByMapState();
-		return createdMap;
-	});
-
-	ipcMain.handle("map:rename", (_event, mapId, name) => {
-		if (!mapId) {
-			throw new Error("Environment id missing.");
-		}
-		if (!name || !name.trim()) {
-			throw new Error("Environment name is required.");
-		}
-		return db.renameMap(mapId, name.trim());
-	});
-
-	ipcMain.handle("map:update", (_event, mapId, fields = {}) => {
-		if (!mapId) {
-			throw new Error("Environment id missing.");
-		}
-		const sanitized = {};
-		if (typeof fields?.name === "string" && fields.name.trim()) sanitized.name = fields.name.trim();
-		if (typeof fields?.icon === "string" || fields?.icon === null) sanitized.icon = fields.icon;
-		if (typeof fields?.accent === "string" || fields?.accent === null) sanitized.accent = fields.accent;
-		if (typeof fields?.preset === "string" || fields?.preset === null) sanitized.preset = fields.preset;
-		return db.updateMap(mapId, sanitized);
-	});
-
-	ipcMain.handle("map:delete", (_event, mapId) => {
-		if (!mapId) {
-			throw new Error("Map id missing.");
-		}
-		const deleted = db.deleteMap(mapId);
-		openPrimaryWindowByMapState();
-		return deleted;
-	});
+	registerEnvironmentIpc(ipcMain, { getDb: () => db, openPrimaryWindowByMapState });
 
 	ipcMain.handle("session:active", () => db.getActiveSession());
 
@@ -1106,86 +1065,9 @@ function wireIpc() {
 
 	ipcMain.handle("activity:current-app", () => tracker.getCurrentAppName());
 
-	ipcMain.handle("task:listByMap", (_event, mapId) => {
-		if (!mapId) {
-			return [];
-		}
-		return db.listTasksByMap(mapId);
-	});
+	registerTaskIpc(ipcMain, { getDb: () => db });
 
-	ipcMain.handle("task:create", (_event, mapId, title, description, fields) => {
-		if (!mapId || !title || !title.trim()) {
-			throw new Error("Task map and title are required.");
-		}
-		return db.createTask(mapId, title.trim(), (description || "").trim(), fields || {});
-	});
-
-	ipcMain.handle("task:updateStatus", (_event, taskId, status) => {
-		if (!taskId || !status) {
-			throw new Error("Task id and status are required.");
-		}
-		return db.updateTaskStatus(taskId, status);
-	});
-
-	ipcMain.handle("task:update", (_event, taskId, fields) => {
-		if (!taskId || !fields || typeof fields !== "object") {
-			throw new Error("Task id and fields are required.");
-		}
-		return db.updateTask(taskId, fields);
-	});
-
-	ipcMain.handle("task:delete", (_event, taskId) => {
-		if (!taskId) {
-			throw new Error("Task id is required.");
-		}
-		return db.deleteTask(taskId);
-	});
-
-	ipcMain.handle("note:listByMap", (_event, mapId) => {
-		if (!mapId) {
-			return [];
-		}
-		return db.listNotesByMap(mapId);
-	});
-
-	ipcMain.handle("note:create", (_event, mapId, content) => {
-		if (!mapId) {
-			throw new Error("Map id is required.");
-		}
-		return db.createNote(mapId, (content || "").trim());
-	});
-
-	ipcMain.handle("note:update", (_event, noteId, content) => {
-		if (!noteId) {
-			throw new Error("Note id is required.");
-		}
-		return db.updateNote(noteId, content || "");
-	});
-
-	ipcMain.handle("note:delete", (_event, noteId) => {
-		if (!noteId) {
-			throw new Error("Note id is required.");
-		}
-		db.deleteNote(noteId);
-		return true;
-	});
-
-	ipcMain.handle("notebook:getByMap", (_event, mapId) => {
-		if (!mapId) {
-			throw new Error("Map id is required.");
-		}
-		return db.getNotebookByMap(mapId);
-	});
-
-	ipcMain.handle("notebook:updateByMap", (_event, mapId, content) => {
-		if (!mapId) {
-			throw new Error("Map id is required.");
-		}
-		if (typeof content !== "string") {
-			throw new Error("Notebook content must be a string.");
-		}
-		return db.updateNotebookByMap(mapId, content);
-	});
+	registerNoteIpc(ipcMain, { getDb: () => db });
 
 	ipcMain.handle("dashboard:overview", (_event, mapId) => {
 		if (!mapId) {
