@@ -20,30 +20,46 @@
 // `?.` on both the getter and the returned value: this file must keep working
 // exactly as it did before WP-0.5 for any caller (e.g. a test harness) that
 // doesn't wire an event log in.
+//
+// WP-0.8 routes every database call below through the scoped accessor
+// (electron/data/scoped.cjs) instead of calling `getDb()` methods directly.
+// `session:pause/resume/stop/delete` take only a session id, no environment
+// id -- see scoped.cjs's file header for why `scoped.forSession` resolving
+// the scope from the session's own row is the correct (and only available)
+// scoping for those channels. `session:active` is the one documented
+// exception -- see `scoped.getGlobalActiveSession`'s comment in scoped.cjs
+// for why it is not (and, given its channel shape, cannot be) scoped to an
+// environment at all.
 // ---------------------------------------------------------------------------
+
+const { scoped } = require("../data/scoped.cjs");
 
 function register(ipcMain, deps) {
 	const { getDb, getTracker, getMiniWindow, getEventLog } = deps;
 
-	ipcMain.handle("session:active", () => getDb().getActiveSession());
+	ipcMain.handle("session:active", () => scoped.getGlobalActiveSession(getDb()));
 
 	ipcMain.handle("session:start", (_event, environmentId) => {
 		if (!environmentId) {
 			throw new Error("Environment id missing.");
 		}
 
-		const session = getDb().startSession(environmentId);
+		const session = scoped(getDb(), environmentId).sessions.start();
 		getTracker().setCurrentSession(session.id);
 		getEventLog?.()?.record("session.start", { environmentId, sessionId: session.id });
 		return session;
 	});
 
 	ipcMain.handle("session:pause", (_event, sessionId) => {
+		const scope = scoped.forSession(getDb(), sessionId);
+		if (!scope) {
+			throw new Error("No active session found to pause.");
+		}
 		// pauseSession() is a no-op that returns the session unchanged if it's
 		// already paused (see db.cjs); check the prior state first so a
 		// redundant pause call doesn't record a duplicate session.pause event.
-		const wasAlreadyPaused = getDb().getSessionById(sessionId)?.is_paused === 1;
-		const session = getDb().pauseSession(sessionId);
+		const wasAlreadyPaused = scope.sessions.get(sessionId)?.is_paused === 1;
+		const session = scope.sessions.pause(sessionId);
 		getTracker().closeOpenBlockNow(sessionId);
 		if (!wasAlreadyPaused) {
 			getEventLog?.()?.record("session.pause", { environmentId: session.environment_id, sessionId });
@@ -52,10 +68,14 @@ function register(ipcMain, deps) {
 	});
 
 	ipcMain.handle("session:resume", (_event, sessionId) => {
+		const scope = scoped.forSession(getDb(), sessionId);
+		if (!scope) {
+			throw new Error("No active session found to resume.");
+		}
 		// Same reasoning as session:pause above -- resumeSession() no-ops if the
 		// session isn't actually paused.
-		const wasPaused = getDb().getSessionById(sessionId)?.is_paused === 1;
-		const session = getDb().resumeSession(sessionId);
+		const wasPaused = scope.sessions.get(sessionId)?.is_paused === 1;
+		const session = scope.sessions.resume(sessionId);
 		if (wasPaused) {
 			getEventLog?.()?.record("session.resume", { environmentId: session.environment_id, sessionId });
 		}
@@ -63,9 +83,13 @@ function register(ipcMain, deps) {
 	});
 
 	ipcMain.handle("session:stop", (_event, sessionId) => {
+		const scope = scoped.forSession(getDb(), sessionId);
+		if (!scope) {
+			throw new Error("No active session found to stop.");
+		}
 		// Same reasoning again -- stopSession() no-ops if the session is already
 		// inactive. Read the prior state before any of the calls below mutate it.
-		const wasActive = getDb().getSessionById(sessionId)?.is_active === 1;
+		const wasActive = scope.sessions.get(sessionId)?.is_active === 1;
 
 		// Finalize the last activity block
 		getTracker().closeOpenBlockNow(sessionId);
@@ -77,7 +101,7 @@ function register(ipcMain, deps) {
 		}
 
 		// Mark session as ended in database
-		const session = getDb().stopSession(sessionId);
+		const session = scope.sessions.stop(sessionId);
 		if (wasActive) {
 			getEventLog?.()?.record("session.stop", { environmentId: session.environment_id, sessionId });
 		}
@@ -94,14 +118,18 @@ function register(ipcMain, deps) {
 		if (!environmentId) {
 			return [];
 		}
-		return getDb().listSessionsByEnvironment(environmentId);
+		return scoped(getDb(), environmentId).sessions.list();
 	});
 
 	ipcMain.handle("session:delete", (_event, sessionId) => {
 		if (!sessionId) {
 			throw new Error("Session id missing.");
 		}
-		return getDb().deleteSession(sessionId);
+		const scope = scoped.forSession(getDb(), sessionId);
+		if (!scope) {
+			throw new Error("Session not found.");
+		}
+		return scope.sessions.delete(sessionId);
 	});
 }
 

@@ -3,6 +3,7 @@ const { Database } = require("node-sqlite3-wasm");
 const { wrapDatabase } = require("./migrations/sqlite-helpers.cjs");
 const { runMigrations } = require("./migrations/index.cjs");
 const { importLegacyDatabaseIfNeeded } = require("./migrations/legacy-import.cjs");
+const { isValidIsolationMode } = require("./data/isolation.cjs");
 
 // Requests WAL (so readers don't block the writer) and synchronous=NORMAL
 // (fsyncs at commit/checkpoint, so a hard crash can't corrupt the database —
@@ -384,6 +385,41 @@ class AtlasDatabase {
 		});
 	}
 
+	// The three isolation-mode primitives WP-0.8's scoped accessor
+	// (electron/data/scoped.cjs) is built on. None of these are wired to an
+	// IPC channel -- there is no renderer-facing way to change an
+	// environment's mode yet (that is WP-1.2's UI). They exist so the data
+	// layer itself, and tests, have a way to read and change the one column
+	// the whole isolation model hinges on, without every caller writing its
+	// own raw SQL against `environments`.
+	getEnvironmentIsolationMode(environmentId) {
+		const row = this.first("SELECT isolation_mode FROM environments WHERE id = ?", [environmentId]);
+		// Fail closed: an environment that can't be found has no confirmed
+		// mode, so return null rather than guessing `connected` -- callers
+		// (scoped.cjs) treat "unknown" as "deny", never as "assume the safe
+		// default".
+		return row ? row.isolation_mode : null;
+	}
+
+	// Every environment's mode in one query -- what the scoped accessor's
+	// cross-environment dashboard read uses to build the set of environments
+	// that must never appear in another environment's aggregate.
+	listEnvironmentIsolationModes() {
+		return this.all("SELECT id, name, isolation_mode FROM environments");
+	}
+
+	setEnvironmentIsolationMode(environmentId, mode) {
+		if (!isValidIsolationMode(mode)) {
+			throw new Error(`Invalid isolation mode: ${mode}`);
+		}
+		const environment = this.first("SELECT id FROM environments WHERE id = ?", [environmentId]);
+		if (!environment) {
+			throw new Error("Environment not found.");
+		}
+		this.run("UPDATE environments SET isolation_mode = ? WHERE id = ?", [mode, environmentId]);
+		return this.getEnvironmentIsolationMode(environmentId);
+	}
+
 	getSessionById(sessionId) {
 		return normalizeSession(this.first("SELECT * FROM sessions WHERE id = ?", [sessionId]));
 	}
@@ -733,6 +769,16 @@ class AtlasDatabase {
 			return [];
 		}
 		return [this.getNotebookByEnvironment(environmentId)];
+	}
+
+	// Added for WP-0.8: the scoped accessor needs a way to look up which
+	// environment owns a bare note id (`note:update`/`note:delete` are
+	// called with only the id, no environment id, so ownership has to be
+	// resolved from the row itself before an update/delete can be scoped).
+	getNoteById(noteId) {
+		return this.first("SELECT id, environment_id, content, created_at, updated_at FROM notes WHERE id = ?", [
+			noteId,
+		]);
 	}
 
 	createNote(environmentId, content = "") {

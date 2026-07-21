@@ -13,6 +13,7 @@ const MIGRATIONS = [
 	require("./001_initial.cjs"),
 	require("./002_rename_maps_to_environments.cjs"),
 	require("./003_event_log.cjs"),
+	require("./004_environment_isolation.cjs"),
 ];
 
 function ensureMigrationsTable(dbLike) {

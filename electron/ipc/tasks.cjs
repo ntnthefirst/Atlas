@@ -11,7 +11,16 @@
 // `task.create`/`task.complete`. Only the task id is ever recorded as
 // `subject` -- never the title or description, which is exactly the body
 // text the event log must never store.
+//
+// WP-0.8 routes every database call below through the scoped accessor
+// (electron/data/scoped.cjs) instead of calling `getDb()` methods directly.
+// `task:updateStatus`/`task:update`/`task:delete` take only a task id, no
+// environment id -- see scoped.cjs's file header for why `scoped.forTask`
+// resolving the scope from the task's own row is the correct (and only
+// available) scoping for those three channels.
 // ---------------------------------------------------------------------------
+
+const { scoped } = require("../data/scoped.cjs");
 
 function register(ipcMain, deps) {
 	const { getDb, getEventLog } = deps;
@@ -20,14 +29,18 @@ function register(ipcMain, deps) {
 		if (!environmentId) {
 			return [];
 		}
-		return getDb().listTasksByEnvironment(environmentId);
+		return scoped(getDb(), environmentId).tasks.list();
 	});
 
 	ipcMain.handle("task:create", (_event, environmentId, title, description, fields) => {
 		if (!environmentId || !title || !title.trim()) {
 			throw new Error("Task environment and title are required.");
 		}
-		const task = getDb().createTask(environmentId, title.trim(), (description || "").trim(), fields || {});
+		const task = scoped(getDb(), environmentId).tasks.create(
+			title.trim(),
+			(description || "").trim(),
+			fields || {},
+		);
 		getEventLog?.()?.record("task.create", { environmentId, subject: task.id });
 		return task;
 	});
@@ -36,10 +49,14 @@ function register(ipcMain, deps) {
 		if (!taskId || !status) {
 			throw new Error("Task id and status are required.");
 		}
+		const scope = scoped.forTask(getDb(), taskId);
+		if (!scope) {
+			return null;
+		}
 		// Read the prior status so task.complete fires once, on the transition
 		// into "done" -- not on every subsequent edit of an already-done task.
-		const previousStatus = getDb().getTaskById(taskId)?.status;
-		const task = getDb().updateTaskStatus(taskId, status);
+		const previousStatus = scope.tasks.get(taskId)?.status;
+		const task = scope.tasks.updateStatus(taskId, status);
 		if (task && status === "done" && previousStatus !== "done") {
 			getEventLog?.()?.record("task.complete", { environmentId: task.environment_id, subject: taskId });
 		}
@@ -50,8 +67,12 @@ function register(ipcMain, deps) {
 		if (!taskId || !fields || typeof fields !== "object") {
 			throw new Error("Task id and fields are required.");
 		}
-		const previousStatus = getDb().getTaskById(taskId)?.status;
-		const task = getDb().updateTask(taskId, fields);
+		const scope = scoped.forTask(getDb(), taskId);
+		if (!scope) {
+			return null;
+		}
+		const previousStatus = scope.tasks.get(taskId)?.status;
+		const task = scope.tasks.update(taskId, fields);
 		if (task && task.status === "done" && previousStatus !== "done") {
 			getEventLog?.()?.record("task.complete", { environmentId: task.environment_id, subject: taskId });
 		}
@@ -62,7 +83,11 @@ function register(ipcMain, deps) {
 		if (!taskId) {
 			throw new Error("Task id is required.");
 		}
-		return getDb().deleteTask(taskId);
+		const scope = scoped.forTask(getDb(), taskId);
+		if (!scope) {
+			return false;
+		}
+		return scope.tasks.delete(taskId);
 	});
 }
 

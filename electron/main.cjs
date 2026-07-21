@@ -1023,7 +1023,7 @@ function wireIpc() {
 
 	registerNoteIpc(ipcMain, { getDb: () => db, getEventLog: () => eventLog });
 
-	registerInsightsIpc(ipcMain, { getDb: () => db });
+	registerInsightsIpc(ipcMain, { getDb: () => db, getEventLog: () => eventLog });
 
 	ipcMain.handle("app:launch", (_event, command) => {
 		if (!command || !command.trim()) {

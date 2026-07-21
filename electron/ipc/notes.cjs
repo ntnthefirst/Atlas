@@ -10,7 +10,16 @@
 // WP-0.5 adds `getEventLog` (same optional-getter shape) to record
 // `note.create`. Only the note id is ever recorded as `subject` -- never
 // `content`, which is exactly the body text the event log must never store.
+//
+// WP-0.8 routes every database call below through the scoped accessor
+// (electron/data/scoped.cjs) instead of calling `getDb()` methods directly.
+// `note:update`/`note:delete` take only a note id, no environment id -- see
+// scoped.cjs's file header for why `scoped.forNote` resolving the scope from
+// the note's own row is the correct (and only available) scoping for those
+// two channels.
 // ---------------------------------------------------------------------------
+
+const { scoped } = require("../data/scoped.cjs");
 
 function register(ipcMain, deps) {
 	const { getDb, getEventLog } = deps;
@@ -19,14 +28,14 @@ function register(ipcMain, deps) {
 		if (!environmentId) {
 			return [];
 		}
-		return getDb().listNotesByEnvironment(environmentId);
+		return scoped(getDb(), environmentId).notes.list();
 	});
 
 	ipcMain.handle("note:create", (_event, environmentId, content) => {
 		if (!environmentId) {
 			throw new Error("Environment id is required.");
 		}
-		const note = getDb().createNote(environmentId, (content || "").trim());
+		const note = scoped(getDb(), environmentId).notes.create((content || "").trim());
 		getEventLog?.()?.record("note.create", { environmentId, subject: note.id });
 		return note;
 	});
@@ -35,14 +44,19 @@ function register(ipcMain, deps) {
 		if (!noteId) {
 			throw new Error("Note id is required.");
 		}
-		return getDb().updateNote(noteId, content || "");
+		const scope = scoped.forNote(getDb(), noteId);
+		if (!scope) {
+			return null;
+		}
+		return scope.notes.update(noteId, content || "");
 	});
 
 	ipcMain.handle("note:delete", (_event, noteId) => {
 		if (!noteId) {
 			throw new Error("Note id is required.");
 		}
-		getDb().deleteNote(noteId);
+		const scope = scoped.forNote(getDb(), noteId);
+		scope?.notes.delete(noteId);
 		return true;
 	});
 
@@ -50,7 +64,7 @@ function register(ipcMain, deps) {
 		if (!environmentId) {
 			throw new Error("Environment id is required.");
 		}
-		return getDb().getNotebookByEnvironment(environmentId);
+		return scoped(getDb(), environmentId).notes.getNotebook();
 	});
 
 	ipcMain.handle("notebook:updateByEnvironment", (_event, environmentId, content) => {
@@ -60,7 +74,7 @@ function register(ipcMain, deps) {
 		if (typeof content !== "string") {
 			throw new Error("Notebook content must be a string.");
 		}
-		return getDb().updateNotebookByEnvironment(environmentId, content);
+		return scoped(getDb(), environmentId).notes.updateNotebook(content);
 	});
 }
 
