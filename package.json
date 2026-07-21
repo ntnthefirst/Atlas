@@ -75,9 +75,9 @@
 		"@heroicons/react": "^2.2.0",
 		"electron-updater": "^6.8.3",
 		"framer-motion": "^12.38.0",
+		"node-sqlite3-wasm": "^0.8.59",
 		"react": "^19.2.4",
-		"react-dom": "^19.2.4",
-		"sql.js": "^1.14.1"
+		"react-dom": "^19.2.4"
 	},
 	"devDependencies": {
 		"@eslint/js": "^9.39.4",

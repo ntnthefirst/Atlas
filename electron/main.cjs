@@ -1366,7 +1366,26 @@ app.whenReady().then(async () => {
 		: path.join(__dirname, "..", "dist", "assets", "logosmall.png");
 
 	const dbPath = path.join(app.getPath("userData"), "atlas.db");
-	db = await AtlasDatabase.create(dbPath);
+	try {
+		db = await AtlasDatabase.create(dbPath);
+	} catch (error) {
+		// AtlasDatabase.create() throws if an existing (pre-WP-0.3) database
+		// fails to import into the new engine — e.g. a row-count mismatch or a
+		// corrupt/partial file. In every such case it has already left the
+		// original database untouched and (if it got far enough to attempt the
+		// import) saved a timestamped backup alongside it, so this is safe to
+		// surface rather than silently crash: nothing about the user's data has
+		// been destroyed.
+		console.error("[Atlas] Failed to open the database:", error);
+		dialog.showErrorBox(
+			"Atlas failed to start",
+			"Atlas could not open its database and cannot continue.\n\n" +
+				`${error instanceof Error ? error.message : String(error)}\n\n` +
+				"Your existing data has not been modified.",
+		);
+		app.quit();
+		return;
+	}
 
 	// CRITICAL: Finalize any stranded sessions from crashes or ungraceful shutdowns
 	// This prevents old sessions from being resumed and continuing to accumulate time

@@ -1,7 +1,28 @@
-const fs = require("node:fs");
-const path = require("node:path");
-const initSqlJs = require("sql.js");
 const { randomUUID } = require("node:crypto");
+const { Database } = require("node-sqlite3-wasm");
+const { wrapDatabase } = require("./migrations/sqlite-helpers.cjs");
+const { runMigrations } = require("./migrations/index.cjs");
+const { importLegacyDatabaseIfNeeded } = require("./migrations/legacy-import.cjs");
+
+// Requests WAL (so readers don't block the writer) and synchronous=NORMAL
+// (fsyncs at commit/checkpoint, so a hard crash can't corrupt the database —
+// it can only lose the last few uncommitted writes; never use OFF, which
+// drops that guarantee).
+//
+// Verified empirically: node-sqlite3-wasm's filesystem VFS does not actually
+// honor `journal_mode = WAL` — the pragma call does not error, but
+// `PRAGMA journal_mode` still reports `delete` (the default rollback
+// journal) immediately afterward, on every connection, including a freshly
+// created database. This is a limitation of the WASM VFS itself (it has no
+// shared-memory backing for WAL's coordination file), not a mistake in how
+// it's invoked here. `synchronous = NORMAL` *does* take effect (confirmed
+// via `PRAGMA synchronous` returning `1`), which is the setting that matters
+// for crash-safety; the call to set WAL is left in place — it's harmless,
+// and future versions of the package may add support for it.
+function applyPragmas(rawDb) {
+	rawDb.exec("PRAGMA journal_mode = WAL");
+	rawDb.exec("PRAGMA synchronous = NORMAL");
+}
 
 const nowIso = () => new Date().toISOString();
 
@@ -65,157 +86,53 @@ const normalizeSession = (session) => {
 };
 
 class AtlasDatabase {
+	// Kept `async` for compatibility with every existing caller (they all
+	// `await AtlasDatabase.create(...)`), even though node-sqlite3-wasm's
+	// constructor is synchronous. The legacy sql.js import (if needed) also
+	// runs synchronously, before the real connection is ever opened.
 	static async create(dbPath) {
-		const wasmPath = require.resolve("sql.js/dist/sql-wasm.wasm");
-		const SQL = await initSqlJs({
-			locateFile: (file) => {
-				if (file === "sql-wasm.wasm") {
-					return wasmPath;
-				}
-				return path.join(path.dirname(wasmPath), file);
-			},
-		});
-
-		let db;
-		if (fs.existsSync(dbPath)) {
-			db = new SQL.Database(fs.readFileSync(dbPath));
-		} else {
-			db = new SQL.Database();
-		}
-
-		return new AtlasDatabase(dbPath, db);
+		importLegacyDatabaseIfNeeded(dbPath);
+		const rawDb = new Database(dbPath);
+		return new AtlasDatabase(dbPath, rawDb);
 	}
 
-	constructor(dbPath, db) {
+	constructor(dbPath, rawDb) {
 		this.dbPath = dbPath;
-		this.db = db;
-		this.initSchema();
-	}
-
-	persist() {
-		const bytes = this.db.export();
-		fs.writeFileSync(this.dbPath, Buffer.from(bytes));
+		this.db = rawDb;
+		applyPragmas(rawDb);
+		this._core = wrapDatabase(rawDb);
+		runMigrations(this._core);
 	}
 
 	run(sql, params = []) {
-		this.db.run(sql, params);
-		this.persist();
+		this._core.run(sql, params);
 	}
 
 	first(sql, params = []) {
-		const rows = this.all(sql, params);
-		return rows[0] ?? null;
+		return this._core.first(sql, params);
 	}
 
 	all(sql, params = []) {
-		const statement = this.db.prepare(sql, params);
-		const rows = [];
-		while (statement.step()) {
-			rows.push(statement.getAsObject());
-		}
-		statement.free();
-		return rows;
+		return this._core.all(sql, params);
 	}
 
 	tableExists(tableName) {
-		const row = this.first("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", [tableName]);
-		return Boolean(row);
+		return this._core.tableExists(tableName);
 	}
 
 	columnExists(tableName, columnName) {
-		if (!this.tableExists(tableName)) {
-			return false;
-		}
-		const cols = this.all(`PRAGMA table_info(${tableName})`);
-		return cols.some((col) => col.name === columnName);
+		return this._core.columnExists(tableName, columnName);
 	}
 
-	initSchema() {
-		this.run(
-			`CREATE TABLE IF NOT EXISTS maps (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      )`,
-		);
-
-		// Environment metadata (icon / accent color / preset type) added incrementally
-		// so existing databases migrate without losing data.
-		for (const column of ["icon", "accent", "preset"]) {
-			if (!this.columnExists("maps", column)) {
-				this.run(`ALTER TABLE maps ADD COLUMN ${column} TEXT`);
-			}
-		}
-
-		this.run(
-			`CREATE TABLE IF NOT EXISTS sessions (
-        id TEXT PRIMARY KEY,
-        map_id TEXT,
-        started_at TEXT NOT NULL,
-        ended_at TEXT,
-        total_duration INTEGER DEFAULT 0,
-        paused_duration INTEGER DEFAULT 0,
-        is_active INTEGER DEFAULT 1,
-        is_paused INTEGER DEFAULT 0,
-        pause_started_at TEXT,
-        created_at TEXT NOT NULL
-      )`,
-		);
-
-		this.run(
-			`CREATE TABLE IF NOT EXISTS pauses (
-        id TEXT PRIMARY KEY,
-        session_id TEXT NOT NULL,
-        started_at TEXT NOT NULL,
-        ended_at TEXT
-      )`,
-		);
-
-		this.run(
-			`CREATE TABLE IF NOT EXISTS activity_blocks (
-        id TEXT PRIMARY KEY,
-        session_id TEXT NOT NULL,
-        app_name TEXT NOT NULL,
-        started_at TEXT NOT NULL,
-        ended_at TEXT,
-        duration INTEGER DEFAULT 0
-      )`,
-		);
-
-		this.run(
-			`CREATE TABLE IF NOT EXISTS tasks (
-        id TEXT PRIMARY KEY,
-        map_id TEXT NOT NULL,
-        title TEXT NOT NULL,
-        description TEXT DEFAULT '',
-        status TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )`,
-		);
-
-		// GitHub-Projects-style task fields, added incrementally so existing
-		// databases migrate in place. tags is a JSON array string; due_date is an
-		// ISO date (yyyy-mm-dd) or null.
-		for (const [column, ddl] of [
-			["priority", "TEXT DEFAULT 'none'"],
-			["tags", "TEXT DEFAULT '[]'"],
-			["due_date", "TEXT"],
-		]) {
-			if (!this.columnExists("tasks", column)) {
-				this.run(`ALTER TABLE tasks ADD COLUMN ${column} ${ddl}`);
-			}
-		}
-
-		this.run(
-			`CREATE TABLE IF NOT EXISTS notes (
-        id TEXT PRIMARY KEY,
-        map_id TEXT NOT NULL,
-        content TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )`,
-		);
+	// Runs `fn` (which may issue several `this.run`/`this.all` calls) inside a
+	// single SQLite transaction. Every method below that issues more than one
+	// write uses this, both so a crash or thrown error mid-operation can't
+	// leave orphaned rows, and because node-sqlite3-wasm is dramatically
+	// faster when writes are batched into one transaction than when each hits
+	// disk individually (benchmarked: ~0.016ms/insert batched vs ~12.7ms/insert
+	// unbatched).
+	transaction(fn) {
+		return this._core.transaction(fn);
 	}
 
 	/**
@@ -223,67 +140,69 @@ class AtlasDatabase {
 	 * Called on app startup to handle crash scenarios or stale data.
 	 */
 	finalizeStrandedSessions() {
-		const strandedSessions = this.all(
-			`SELECT * FROM sessions
+		return this.transaction(() => {
+			const strandedSessions = this.all(
+				`SELECT * FROM sessions
        WHERE is_active = 1
        ORDER BY created_at DESC`,
-		);
+			);
 
-		const results = {
-			finalized: 0,
-			blocksRepairedWithSessionEnd: 0,
-		};
+			const results = {
+				finalized: 0,
+				blocksRepairedWithSessionEnd: 0,
+			};
 
-		for (const session of strandedSessions) {
-			// Check if session has any activity blocks
-			const blocks = this.listActivityBlocksBySession(session.id);
-			if (blocks.length === 0) {
-				// No activity tracked, mark session as ended with 0 duration
-				this.run(
-					`UPDATE sessions
+			for (const session of strandedSessions) {
+				// Check if session has any activity blocks
+				const blocks = this.listActivityBlocksBySession(session.id);
+				if (blocks.length === 0) {
+					// No activity tracked, mark session as ended with 0 duration
+					this.run(
+						`UPDATE sessions
            SET is_active = 0, ended_at = ?, total_duration = 0
            WHERE id = ?`,
-					[session.started_at, session.id],
+						[session.started_at, session.id],
+					);
+					results.finalized++;
+					continue;
+				}
+
+				// Get the most recent block to determine when activity ended
+				const lastBlock = blocks[blocks.length - 1];
+				const assumedEndTime = lastBlock.ended_at || lastBlock.started_at;
+
+				// Mark session as ended
+				const totalDuration = Math.max(
+					0,
+					toDurationMs(session.started_at, assumedEndTime) - session.paused_duration,
 				);
-				results.finalized++;
-				continue;
-			}
-
-			// Get the most recent block to determine when activity ended
-			const lastBlock = blocks[blocks.length - 1];
-			const assumedEndTime = lastBlock.ended_at || lastBlock.started_at;
-
-			// Mark session as ended
-			const totalDuration = Math.max(
-				0,
-				toDurationMs(session.started_at, assumedEndTime) - session.paused_duration,
-			);
-			this.run(
-				`UPDATE sessions
+				this.run(
+					`UPDATE sessions
          SET is_active = 0, ended_at = ?, total_duration = ?
          WHERE id = ?`,
-				[assumedEndTime, totalDuration, session.id],
-			);
+					[assumedEndTime, totalDuration, session.id],
+				);
 
-			// Repair any unclosed blocks
-			for (const block of blocks) {
-				if (!block.ended_at) {
-					const validEndTime = Math.min(block.started_at, assumedEndTime);
-					const blockDuration = toDurationMs(block.started_at, validEndTime);
-					this.run(
-						`UPDATE activity_blocks
+				// Repair any unclosed blocks
+				for (const block of blocks) {
+					if (!block.ended_at) {
+						const validEndTime = Math.min(block.started_at, assumedEndTime);
+						const blockDuration = toDurationMs(block.started_at, validEndTime);
+						this.run(
+							`UPDATE activity_blocks
              SET ended_at = ?, duration = ?
              WHERE id = ?`,
-						[validEndTime, blockDuration, block.id],
-					);
-					results.blocksRepairedWithSessionEnd++;
+							[validEndTime, blockDuration, block.id],
+						);
+						results.blocksRepairedWithSessionEnd++;
+					}
 				}
+
+				results.finalized++;
 			}
 
-			results.finalized++;
-		}
-
-		return results;
+			return results;
+		});
 	}
 
 	/**
@@ -291,77 +210,79 @@ class AtlasDatabase {
 	 * Rebuilds app durations from activity block timestamps.
 	 */
 	repairCorruptedSessions() {
-		const results = {
-			sessionsRepaired: 0,
-			blocksNormalized: 0,
-		};
+		return this.transaction(() => {
+			const results = {
+				sessionsRepaired: 0,
+				blocksNormalized: 0,
+			};
 
-		// Find all completed sessions
-		const completedSessions = this.all(
-			`SELECT id, started_at, ended_at, total_duration FROM sessions
+			// Find all completed sessions
+			const completedSessions = this.all(
+				`SELECT id, started_at, ended_at, total_duration FROM sessions
        WHERE is_active = 0 AND ended_at IS NOT NULL`,
-		);
+			);
 
-		for (const session of completedSessions) {
-			const sessionStart = new Date(session.started_at).getTime();
-			const sessionEnd = new Date(session.ended_at).getTime();
-			const sessionDurationMs = Math.max(0, sessionEnd - sessionStart);
+			for (const session of completedSessions) {
+				const sessionStart = new Date(session.started_at).getTime();
+				const sessionEnd = new Date(session.ended_at).getTime();
+				const sessionDurationMs = Math.max(0, sessionEnd - sessionStart);
 
-			// Get all blocks for this session
-			const blocks = this.listActivityBlocksBySession(session.id);
+				// Get all blocks for this session
+				const blocks = this.listActivityBlocksBySession(session.id);
 
-			let hasCorruption = false;
-			let totalAppDuration = 0;
+				let hasCorruption = false;
+				let totalAppDuration = 0;
 
-			// Validate and repair each block
-			for (const block of blocks) {
-				const blockStart = new Date(block.started_at).getTime();
-				let blockEnd = block.ended_at ? new Date(block.ended_at).getTime() : blockStart;
+				// Validate and repair each block
+				for (const block of blocks) {
+					const blockStart = new Date(block.started_at).getTime();
+					let blockEnd = block.ended_at ? new Date(block.ended_at).getTime() : blockStart;
 
-				// Ensure block is within session bounds
-				if (blockStart > sessionEnd) {
-					blockEnd = sessionEnd;
-					hasCorruption = true;
-				} else if (blockEnd > sessionEnd) {
-					blockEnd = sessionEnd;
-					hasCorruption = true;
-				}
+					// Ensure block is within session bounds
+					if (blockStart > sessionEnd) {
+						blockEnd = sessionEnd;
+						hasCorruption = true;
+					} else if (blockEnd > sessionEnd) {
+						blockEnd = sessionEnd;
+						hasCorruption = true;
+					}
 
-				// Also ensure block didn't start before session started
-				const actualStart = Math.max(blockStart, sessionStart);
-				const actualEnd = Math.min(blockEnd, sessionEnd);
+					// Also ensure block didn't start before session started
+					const actualStart = Math.max(blockStart, sessionStart);
+					const actualEnd = Math.min(blockEnd, sessionEnd);
 
-				const blockDuration = Math.max(0, actualEnd - actualStart);
-				if (blockDuration !== block.duration || !block.ended_at) {
-					this.run(
-						`UPDATE activity_blocks
+					const blockDuration = Math.max(0, actualEnd - actualStart);
+					if (blockDuration !== block.duration || !block.ended_at) {
+						this.run(
+							`UPDATE activity_blocks
              SET started_at = ?, ended_at = ?, duration = ?
              WHERE id = ?`,
-						[
-							new Date(actualStart).toISOString(),
-							new Date(actualEnd).toISOString(),
-							blockDuration,
-							block.id,
-						],
-					);
-					hasCorruption = true;
-					results.blocksNormalized++;
+							[
+								new Date(actualStart).toISOString(),
+								new Date(actualEnd).toISOString(),
+								blockDuration,
+								block.id,
+							],
+						);
+						hasCorruption = true;
+						results.blocksNormalized++;
+					}
+
+					totalAppDuration += blockDuration;
 				}
 
-				totalAppDuration += blockDuration;
+				// If total app duration exceeds session, that's data corruption
+				if (totalAppDuration > sessionDurationMs * 1.05) {
+					hasCorruption = true;
+				}
+
+				if (hasCorruption) {
+					results.sessionsRepaired++;
+				}
 			}
 
-			// If total app duration exceeds session, that's data corruption
-			if (totalAppDuration > sessionDurationMs * 1.05) {
-				hasCorruption = true;
-			}
-
-			if (hasCorruption) {
-				results.sessionsRepaired++;
-			}
-		}
-
-		return results;
+			return results;
+		});
 	}
 
 	/**
@@ -443,18 +364,20 @@ class AtlasDatabase {
 			throw new Error("Stop the active session in this map before deleting it.");
 		}
 
-		const sessionIds = this.all("SELECT id FROM sessions WHERE map_id = ?", [mapId]).map((row) => row.id);
-		if (sessionIds.length > 0) {
-			const placeholders = sessionIds.map(() => "?").join(", ");
-			this.run(`DELETE FROM pauses WHERE session_id IN (${placeholders})`, sessionIds);
-			this.run(`DELETE FROM activity_blocks WHERE session_id IN (${placeholders})`, sessionIds);
-			this.run(`DELETE FROM sessions WHERE id IN (${placeholders})`, sessionIds);
-		}
+		return this.transaction(() => {
+			const sessionIds = this.all("SELECT id FROM sessions WHERE map_id = ?", [mapId]).map((row) => row.id);
+			if (sessionIds.length > 0) {
+				const placeholders = sessionIds.map(() => "?").join(", ");
+				this.run(`DELETE FROM pauses WHERE session_id IN (${placeholders})`, sessionIds);
+				this.run(`DELETE FROM activity_blocks WHERE session_id IN (${placeholders})`, sessionIds);
+				this.run(`DELETE FROM sessions WHERE id IN (${placeholders})`, sessionIds);
+			}
 
-		this.run("DELETE FROM tasks WHERE map_id = ?", [mapId]);
-		this.run("DELETE FROM notes WHERE map_id = ?", [mapId]);
-		this.run("DELETE FROM maps WHERE id = ?", [mapId]);
-		return true;
+			this.run("DELETE FROM tasks WHERE map_id = ?", [mapId]);
+			this.run("DELETE FROM notes WHERE map_id = ?", [mapId]);
+			this.run("DELETE FROM maps WHERE id = ?", [mapId]);
+			return true;
+		});
 	}
 
 	getSessionById(sessionId) {
@@ -507,13 +430,15 @@ class AtlasDatabase {
 
 		const pauseStartedAt = nowIso();
 
-		this.run("UPDATE sessions SET is_paused = 1, pause_started_at = ? WHERE id = ?", [pauseStartedAt, sessionId]);
+		this.transaction(() => {
+			this.run("UPDATE sessions SET is_paused = 1, pause_started_at = ? WHERE id = ?", [pauseStartedAt, sessionId]);
 
-		this.run("INSERT INTO pauses (id, session_id, started_at) VALUES (?, ?, ?)", [
-			randomUUID(),
-			sessionId,
-			pauseStartedAt,
-		]);
+			this.run("INSERT INTO pauses (id, session_id, started_at) VALUES (?, ?, ?)", [
+				randomUUID(),
+				sessionId,
+				pauseStartedAt,
+			]);
+		});
 
 		return this.getSessionById(sessionId);
 	}
@@ -531,21 +456,23 @@ class AtlasDatabase {
 		const pauseDelta = toDurationMs(session.pause_started_at, resumedAt);
 		const newPausedDuration = session.paused_duration + pauseDelta;
 
-		this.run(
-			`UPDATE sessions
+		this.transaction(() => {
+			this.run(
+				`UPDATE sessions
        SET is_paused = 0,
            pause_started_at = NULL,
            paused_duration = ?
        WHERE id = ?`,
-			[newPausedDuration, sessionId],
-		);
+				[newPausedDuration, sessionId],
+			);
 
-		this.run(
-			`UPDATE pauses
+			this.run(
+				`UPDATE pauses
        SET ended_at = ?
        WHERE session_id = ? AND ended_at IS NULL`,
-			[resumedAt, sessionId],
-		);
+				[resumedAt, sessionId],
+			);
+		});
 
 		return this.getSessionById(sessionId);
 	}
@@ -563,22 +490,23 @@ class AtlasDatabase {
 		const endedAt = nowIso();
 		let pausedDuration = active.paused_duration;
 
-		if (active.is_paused && active.pause_started_at) {
-			const trailingPause = toDurationMs(active.pause_started_at, endedAt);
-			pausedDuration += trailingPause;
+		this.transaction(() => {
+			if (active.is_paused && active.pause_started_at) {
+				const trailingPause = toDurationMs(active.pause_started_at, endedAt);
+				pausedDuration += trailingPause;
 
-			this.run(
-				`UPDATE pauses
+				this.run(
+					`UPDATE pauses
          SET ended_at = ?
          WHERE session_id = ? AND ended_at IS NULL`,
-				[endedAt, sessionId],
-			);
-		}
+					[endedAt, sessionId],
+				);
+			}
 
-		const totalDuration = Math.max(0, toDurationMs(active.started_at, endedAt) - pausedDuration);
+			const totalDuration = Math.max(0, toDurationMs(active.started_at, endedAt) - pausedDuration);
 
-		this.run(
-			`UPDATE sessions
+			this.run(
+				`UPDATE sessions
        SET ended_at = ?,
            total_duration = ?,
            paused_duration = ?,
@@ -586,10 +514,11 @@ class AtlasDatabase {
            is_paused = 0,
            pause_started_at = NULL
        WHERE id = ?`,
-			[endedAt, totalDuration, pausedDuration, sessionId],
-		);
+				[endedAt, totalDuration, pausedDuration, sessionId],
+			);
 
-		this.closeOpenActivityBlock(sessionId, endedAt);
+			this.closeOpenActivityBlock(sessionId, endedAt);
+		});
 
 		return this.getSessionById(sessionId);
 	}
@@ -613,11 +542,11 @@ class AtlasDatabase {
 			throw new Error("Cannot delete an active session. Stop it first.");
 		}
 
-		this.run(`DELETE FROM pauses WHERE session_id = ?`, [sessionId]);
-
-		this.run(`DELETE FROM activity_blocks WHERE session_id = ?`, [sessionId]);
-
-		this.run(`DELETE FROM sessions WHERE id = ?`, [sessionId]);
+		this.transaction(() => {
+			this.run(`DELETE FROM pauses WHERE session_id = ?`, [sessionId]);
+			this.run(`DELETE FROM activity_blocks WHERE session_id = ?`, [sessionId]);
+			this.run(`DELETE FROM sessions WHERE id = ?`, [sessionId]);
+		});
 
 		return true;
 	}
@@ -872,9 +801,13 @@ class AtlasDatabase {
 			throw new Error("Map id is required.");
 		}
 
-		const notebook = this.getNotebookByMap(mapId);
-		this.run("UPDATE notes SET content = ?, updated_at = ? WHERE id = ?", [content, nowIso(), notebook.id]);
-		return this.first("SELECT id, map_id, content, created_at, updated_at FROM notes WHERE id = ?", [notebook.id]);
+		return this.transaction(() => {
+			const notebook = this.getNotebookByMap(mapId);
+			this.run("UPDATE notes SET content = ?, updated_at = ? WHERE id = ?", [content, nowIso(), notebook.id]);
+			return this.first("SELECT id, map_id, content, created_at, updated_at FROM notes WHERE id = ?", [
+				notebook.id,
+			]);
+		});
 	}
 
 	getDashboardOverview(mapId) {
