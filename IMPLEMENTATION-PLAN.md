@@ -34,7 +34,7 @@ Last updated: 2026-07-21. Keep this current — it is what a fresh session reads
 | Package | State |
 |---|---|
 | WP-0.1 Test harness | **Done.** Vitest + 3-OS CI matrix. |
-| WP-0.2 Split main.cjs | **In progress.** 2455 → 1549 lines. Pure config, window geometry, three window factories and the data-domain IPC handlers all extracted. |
+| WP-0.2 Split main.cjs | **In progress.** 2455 → 1473 lines, 18 modules. Pure config, window geometry, three window factories and six IPC domains extracted. |
 | WP-0.3 Database engine swap | Not started. |
 | WP-0.4 Secret vault | **Done.** Keys encrypted, legacy plaintext migrated. |
 | WP-0.5 Event log | Not started. Blocked on WP-0.3. |
@@ -71,14 +71,19 @@ factories (`settings-window`, `action-editor-window`, `notch-input-window`),
 and the first three IPC domains (`ipc/tasks`, `ipc/notes`,
 `ipc/environments`).
 
-**Still in main.cjs (~1549 lines):**
+**Still in main.cjs (~1473 lines):**
 
-- `wireIpc` — 56 of the original 72 handlers remain. Extract them domain by
-  domain following `ipc/tasks.cjs`: each module exports
-  `register(ipcMain, deps)`. **Pass `db` and `tracker` as getters**, never
-  values — they are assigned during `app.whenReady()`, after the modules are
-  required, so a value capture freezes them at `null`. Plain function
-  declarations that are never reassigned can be passed directly.
+- `wireIpc` — 45 of the original 72 handlers remain: `window:*`, `notch:*`,
+  `focus:*`, `app:*`, `ai:*`, `screen:*`, `system:*`, `notchInput:*` and
+  `dashboard:getLayout`/`setLayout`. Extract them domain by domain following
+  `ipc/sessions.cjs`: each module exports `register(ipcMain, deps)`.
+  **Pass anything reassigned as a getter**, never a value — `db` and
+  `tracker` are assigned during `app.whenReady()` (after the modules are
+  required, so a value freezes at `null`), and window refs like `miniWindow`
+  are reassigned across their lifecycle (so a value goes stale). Plain
+  `function` declarations that are never reassigned can be passed directly.
+  The remaining domains are more entangled than the ones already done: they
+  touch window refs and the focus engine's live runtime.
 - `createMainWindow`, `createWelcomeWindow`, `createMiniWindow` — entangled
   with the tray and session lifecycle.
 - `syncNotchWindows`, `applyNotchPreferences`, `createNotchWindowForDisplay`,
