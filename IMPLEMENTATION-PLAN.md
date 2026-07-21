@@ -38,7 +38,7 @@ Last updated: 2026-07-21. Keep this current — it is what a fresh session reads
 | WP-0.3 Database engine swap | **Done.** `node-sqlite3-wasm` (see D9), migration framework, verified legacy import. |
 | WP-0.4 Secret vault | **Done.** Keys encrypted, legacy plaintext migrated. |
 | WP-0.5 Event log | Not started. Unblocked — WP-0.3 is done. |
-| WP-0.6 Cross-platform adapter | Not started. |
+| WP-0.6 Platform adapter (Windows) | Not started. Rescoped by D10. |
 | WP-0.7 maps → environments | **Done.** Migration 002, plus a localStorage key migration. |
 | WP-0.8 Scoped data layer | Not started. Blocked on WP-0.5 only. |
 
@@ -155,7 +155,8 @@ seems to conflict with one, the decision wins and the package is wrong.
 
 | # | Decision | Consequence for the plan |
 |---|---|---|
-| **D1** | **Windows and macOS in parallel.** | Every OS-touching package ships both implementations in the same PR. Sizes below already include this (+40–50% on affected work). A package is not done when it works on Windows. |
+| ~~**D1**~~ | ~~Windows and macOS in parallel.~~ | **SUPERSEDED BY D10.** |
+| **D10** | **Windows only, for now.** | No macOS implementation is written, tested, or claimed. OS-touching packages ship a Windows implementation behind a platform abstraction, plus a fallback that reports `unsupported` — never fake data. macOS becomes a later package that fills in one file per adapter, not a rewrite. |
 | **D2** | **Atlas evolves; tracking becomes one module.** | Sessions, logbook, notebook, and task boards are preserved and reframed. `maps` become `environments`. The dashboard becomes the Statistics surface. No feature deletion. |
 | **D3** | **Real users exist; data must migrate cleanly.** | Every schema change needs a versioned, tested, reversible migration. Never ship a change that silently drops user data. Back up before migrating. |
 | **D9** | **Database engine is `node-sqlite3-wasm`, not `better-sqlite3`.** | Superseded the original WP-0.3 choice. See "D9 in detail" below — this changes how writes must be issued. |
@@ -218,12 +219,29 @@ sessions, all preserved with identical counts and `integrity_check` ok.
 
 ### A tension worth naming
 
-**D1 + D7 + D5 pull hard against each other.** A cross-platform file indexer is the most
+**D7 + D5 pull against each other** (D1 no longer applies — see D10). A cross-platform file indexer is the most
 OS-specific, most performance-sensitive subsystem in the plan, and D5 says nothing may sit
 half-finished across a gap. Phase 2 is therefore deliberately sliced so the launcher is
 useful and shippable *before* the indexer exists (WP-2.1 → 2.4, 2.9), and the indexer
 itself lands in three independently-shippable pieces (WP-2.5 → 2.7). If appetite runs out
 mid-Phase-2, you still have a working launcher rather than a broken one.
+
+---
+
+### A note on macOS (D10)
+
+Atlas currently publishes a macOS DMG whose core feature does nothing: the activity
+tracker returns `"Unknown"` for any non-Windows platform. With macOS out of scope, that
+installer is shipping a promise the build cannot keep.
+
+**Recommended, not yet done** (it touches the release pipeline and existing Mac users'
+update path, so it needs a deliberate decision): either stop publishing the macOS target
+in `.github/workflows/`, or label it clearly as unsupported on the releases page. Leaving
+it as-is is the one option that actively misleads people.
+
+The 3-OS CI test matrix is worth keeping regardless — it runs the unit suite on macOS and
+Linux, costs nothing meaningful, and catches path-handling bugs (the temp-file database
+tests especially) long before anyone tries to support those platforms properly.
 
 ---
 
@@ -362,7 +380,9 @@ WP-0.8 must land before Phases 2–6, and why retrofitting it later would be a r
 - [ ] Every acceptance criterion in the package is met.
 - [ ] `npm run lint` and `npm run build` pass.
 - [ ] `npm test` passes (once WP-0.1 lands).
-- [ ] Works on Windows **and** macOS where the package touches the OS (D1).
+- [ ] Works on Windows. macOS is out of scope (D10) — do not write untested macOS
+      code, but do keep OS-specific work behind a platform adapter so adding it
+      later is filling in a file rather than unpicking the codebase.
 - [ ] Any schema change has a versioned, reversible, tested migration (D3).
 - [ ] `main` remains shippable — no half-migrated state (D5).
 - [ ] No plaintext secrets written to disk.
@@ -585,43 +605,51 @@ clipboard. App identity and coarse action types only.
 
 ---
 
-### WP-0.6 — Cross-platform system adapter
+### WP-0.6 — Platform adapter (Windows)
 
-**Size:** 6–8 days · **Depends on:** WP-0.2 · **Platform:** Win + macOS
+**Size:** 3–4 days · **Depends on:** WP-0.2 · **Platform:** Windows only (D10)
 
-**Goal:** one interface for OS-level queries, with real implementations on both platforms.
-Fixes the macOS gap that exists today.
+**Goal:** one interface for every OS-level query, with a Windows implementation behind it
+and an honest `unsupported` fallback everywhere else.
 
-**Why now:** D1 says both platforms. Today's tracker is an inline PowerShell script that
-returns `"Unknown"` on macOS, meaning the app's core feature silently does nothing on a
-platform you publish installers for. Every later package (launcher, indexer, context
-detection) needs this same abstraction.
+**Why now:** OS access is currently an inline PowerShell string inside
+`activity-tracker.cjs`. Every later package — the launcher, the app index, the file
+indexer, context detection — needs the same access, and none of them should each grow
+their own `execFile("powershell.exe", ...)`. The abstraction is worth building for that
+reason alone, independently of which platforms exist.
+
+**Scope changed by D10.** This was originally "make macOS work too". It is now "put the
+seam in place". No macOS code is written. The value is that adding macOS later means
+implementing one file against a settled interface, rather than unpicking PowerShell calls
+scattered through feature code.
 
 **Approach**
 - Interface: `getForegroundWindow()`, `listRunningApps()`, `listInstalledApps()`,
   `getSystemStats()`, `launch(target)`.
-- Windows: keep the existing PowerShell approach initially, but move it behind the adapter.
-  Note in the PR whether spawn cost justifies a native module later.
-- macOS: `NSWorkspace` via a small native helper or `osascript`. Requires Accessibility
-  permission for window titles — request it properly, degrade gracefully without it.
-- Fallback implementation returns explicit `unsupported`, never fake data like `"Unknown"`.
-- Rewire `activity-tracker.cjs` to consume the adapter.
+- Windows: move the existing PowerShell approach behind the adapter unchanged. Note in the
+  PR whether the 1500ms spawn cost justifies a native module later.
+- Fallback: returns an explicit `unsupported` result, never fake data. Today
+  `activity-tracker.cjs` returns the string `"Unknown"` on any non-Windows platform, which
+  is indistinguishable from a real app named Unknown — that is the anti-pattern to remove.
+- Callers must handle `unsupported` explicitly rather than treating it as a value.
+- Rewire `activity-tracker.cjs` and `system-info.cjs` to consume the adapter.
 
 **Files:** `electron/platform/index.cjs`, `electron/platform/win32.cjs`,
-`electron/platform/darwin.cjs`, `electron/platform/fallback.cjs` (all new),
-`electron/activity-tracker.cjs`, `electron/system-info.cjs`.
+`electron/platform/unsupported.cjs` (all new), `electron/activity-tracker.cjs`,
+`electron/system-info.cjs`.
 
 **Acceptance criteria**
-- [ ] Foreground app tracking works on macOS — verified by a real session producing correct
-      activity blocks.
-- [ ] macOS Accessibility permission requested with a clear explanation; app functions in a
-      reduced mode if denied.
-- [ ] No `powershell.exe` call outside `platform/win32.cjs`.
-- [ ] Tracker polling cost measured and recorded in the PR for both platforms.
-- [ ] Fallback path returns `unsupported`, and callers handle it.
+- [ ] No `powershell.exe` call anywhere outside `platform/win32.cjs`.
+- [ ] Foreground tracking still works on Windows, verified by a real session producing
+      correct activity blocks — this is a refactor and must not regress it.
+- [ ] The fallback returns `unsupported`; no code path invents `"Unknown"`.
+- [ ] Every caller handles `unsupported` explicitly.
+- [ ] Tracker polling cost measured and recorded in the PR.
+- [ ] The interface is documented well enough that a macOS implementation is a
+      fill-in-the-blanks job.
 
-**Gotchas:** the current 1500ms PowerShell spawn is already meaningful overhead. Measure it
-on macOS before assuming the same interval is acceptable there.
+**Gotchas:** the 1500ms PowerShell spawn is already meaningful overhead — measure before
+and after so the refactor is not quietly making it worse.
 
 ---
 
