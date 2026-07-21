@@ -38,14 +38,14 @@ Last updated: 2026-07-21. Keep this current — it is what a fresh session reads
 | WP-0.3 Database engine swap | **Done.** `node-sqlite3-wasm` (see D9), migration framework, verified legacy import. |
 | WP-0.4 Secret vault | **Done.** Keys encrypted, legacy plaintext migrated. |
 | WP-0.5 Event log | **Done.** Batched writer, retention, privacy-constrained.  |
-| WP-0.6 Platform adapter (Windows) | Not started. Rescoped by D10. |
+| WP-0.6 Platform adapter (Windows) | **Done.** Rescoped by D10; powershell now confined to one file. |
 | WP-0.7 maps → environments | **Done.** Migration 002, plus a localStorage key migration. |
-| WP-0.8 Scoped data layer | **In progress.** Unblocked. |
+| WP-0.8 Scoped data layer | **Done.** Two modes, frozen allowlist, leak-tested. |
 
-**Suite: 435 tests, ~10s.** Verification commands now available:
+**Suite: 504 tests, ~13s.** Verification commands now available:
 
 ```
-npm test               # 435 unit/integration tests, ~10s
+npm test               # 504 unit/integration tests, ~13s
 npm run lint           # now covers electron/ and scripts/ too
 npm run smoke          # boots the real Electron main process, fails on crash
 npm run smoke:windows  # opens every window type, fails if any does not
