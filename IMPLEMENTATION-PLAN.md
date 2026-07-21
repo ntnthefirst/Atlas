@@ -34,7 +34,7 @@ Last updated: 2026-07-21. Keep this current — it is what a fresh session reads
 | Package | State |
 |---|---|
 | WP-0.1 Test harness | **Done.** Vitest + 3-OS CI matrix. |
-| WP-0.2 Split main.cjs | **In progress.** 2455 → 1473 lines, 18 modules. Pure config, window geometry, three window factories and six IPC domains extracted. |
+| WP-0.2 Split main.cjs | **Substantially done.** 2455 → 746 lines (−70%), ~30 modules. All 73 IPC handlers, all config, the updater, focus engine, notch windows and tray extracted. See the note below on the remaining 746 lines. |
 | WP-0.3 Database engine swap | **Done.** `node-sqlite3-wasm` (see D9), migration framework, verified legacy import. |
 | WP-0.4 Secret vault | **Done.** Keys encrypted, legacy plaintext migrated. |
 | WP-0.5 Event log | **Done.** Batched writer, retention, privacy-constrained.  |
@@ -42,7 +42,7 @@ Last updated: 2026-07-21. Keep this current — it is what a fresh session reads
 | WP-0.7 maps → environments | **Done.** Migration 002, plus a localStorage key migration. |
 | WP-0.8 Scoped data layer | **Done.** Two modes, frozen allowlist, leak-tested. |
 
-**Suite: 504 tests, ~13s.** Verification commands now available:
+**Suite: 504 tests, ~9s.** Verification commands now available:
 
 ```
 npm test               # 504 unit/integration tests, ~13s
@@ -57,7 +57,39 @@ smoke tests exist because vitest cannot construct a BrowserWindow and cannot
 reach `safeStorage` — between them they cover the failure modes unit tests
 structurally cannot see.
 
-### WP-0.2: what is left, and the decision waiting to be made
+### WP-0.2: what is left, and why the 250-line target was not chased
+
+`main.cjs` went from 2,455 lines to **746**. Every IPC handler (73), every
+preference schema, the updater, the focus engine, the notch window manager
+and the tray now live in their own modules under `config/`, `services/`,
+`windows/` and `ipc/`.
+
+**The original acceptance criteria — `main.cjs` under 250 lines, nothing in
+`electron/` over 400 — are not met, and chasing them further is not
+obviously worth it.** What remains is `createMainWindow`,
+`createWelcomeWindow`, `createMiniWindow`, the preference load/save
+functions, `app.whenReady()` and the app lifecycle events. Extracting the
+three factories would land `main.cjs` near 570 — still over 250 — and
+`createMainWindow` alone needs well past the six-dependency threshold this
+plan itself sets as the point to stop: its close handler reaches the
+database, the mini window, the tray, notch sync and the quitting flag.
+
+Per this plan's own guidance, two clean extractions beat three contorted
+ones. The practical goals are met: no file is big enough to block parallel
+work, every subsystem is independently testable, and the remaining file is
+app bootstrap plus three window builders — which is roughly what a main
+process is supposed to be.
+
+`electron/db.cjs` is 942 lines and also exceeds the 400 target. It was never
+in WP-0.2's scope; splitting the data layer by domain is worth its own
+package if it ever gets in the way.
+
+**If someone does pick this up:** follow `windows/settings-window.cjs`. The
+factory returns the window, main.cjs keeps the ref, getters for anything
+reassigned, callbacks for anything that mutates main.cjs state. Run
+`npm run smoke:windows` — it is the only thing that catches a broken factory.
+
+### The state-sharing decision (settled)
 
 Extracted so far, all **pure** (no shared mutable state), which is why a
 mechanical cut-and-verify approach was safe:
