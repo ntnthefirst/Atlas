@@ -48,13 +48,22 @@ try {
 `;
 
 class ActivityTracker {
-	constructor(db) {
+	// `eventLog` is optional (defaults to null) so this class stays usable
+	// wherever it was constructed before the event log existed; when absent,
+	// `recordFocus` below is a no-op.
+	constructor(db, eventLog = null) {
 		this.db = db;
+		this.eventLog = eventLog;
 		this.intervalId = null;
 		this.currentAppName = "Unknown";
 		this.currentSessionId = null;
 		this.isSessionActive = false;
 		this.isTickInProgress = false;
+		// Tracks the last process name an `app.focus` event was recorded for, so
+		// the event log gets one event per real app switch rather than one per
+		// activity_blocks row (which also splits on window-title changes -- see
+		// the comment in tick() below).
+		this.lastFocusedProcessName = null;
 	}
 
 	start() {
@@ -79,11 +88,17 @@ class ActivityTracker {
 	setCurrentSession(sessionId) {
 		this.currentSessionId = sessionId;
 		this.isSessionActive = true;
+		// A new session is a fresh context for the event log even if the
+		// foreground app happens to be the same as the previous session's --
+		// without this reset, resuming the same app across a session boundary
+		// would silently produce zero app.focus events for the new session.
+		this.lastFocusedProcessName = null;
 	}
 
 	clearCurrentSession() {
 		this.currentSessionId = null;
 		this.isSessionActive = false;
+		this.lastFocusedProcessName = null;
 	}
 
 	getCurrentAppName() {
@@ -156,16 +171,35 @@ class ActivityTracker {
 
 			if (!openBlock) {
 				this.db.createActivityBlock(session.id, appName, now);
-				return;
-			}
-
-			if (openBlock.app_name !== appName) {
+			} else if (openBlock.app_name !== appName) {
 				this.db.closeOpenActivityBlock(session.id, now);
 				this.db.createActivityBlock(session.id, appName, now);
 			}
+
+			this.recordFocusChange(session, appInfo.processName);
 		} finally {
 			this.isTickInProgress = false;
 		}
+	}
+
+	// Event-log signal for WP-0.5. Deliberately independent of the
+	// activity_blocks bookkeeping above: `appName` there is `appInfo.label`,
+	// which prefers the window *title* when one is present (see
+	// getForegroundAppInfo), and title content is exactly what the event log
+	// must never store. This only ever records `appInfo.processName` -- a
+	// coarse app identity (e.g. "chrome", "Code") -- and only when it actually
+	// changes, so re-titling the same app's window doesn't spam the log.
+	recordFocusChange(session, processName) {
+		const name = processName || "Unknown";
+		if (name === this.lastFocusedProcessName) {
+			return;
+		}
+		this.lastFocusedProcessName = name;
+		this.eventLog?.record("app.focus", {
+			environmentId: session.environment_id,
+			sessionId: session.id,
+			subject: name,
+		});
 	}
 
 	closeOpenBlockNow(sessionId) {

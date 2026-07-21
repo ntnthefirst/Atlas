@@ -6,10 +6,14 @@
 // is `db` itself. `getDb` is a getter rather than a plain value because `db`
 // is assigned during app startup, after this module is required -- capturing
 // it by value here would freeze it at `null` and break every handler.
+//
+// WP-0.5 adds `getEventLog` (same optional-getter shape) to record
+// `note.create`. Only the note id is ever recorded as `subject` -- never
+// `content`, which is exactly the body text the event log must never store.
 // ---------------------------------------------------------------------------
 
 function register(ipcMain, deps) {
-	const { getDb } = deps;
+	const { getDb, getEventLog } = deps;
 
 	ipcMain.handle("note:listByEnvironment", (_event, environmentId) => {
 		if (!environmentId) {
@@ -22,7 +26,9 @@ function register(ipcMain, deps) {
 		if (!environmentId) {
 			throw new Error("Environment id is required.");
 		}
-		return getDb().createNote(environmentId, (content || "").trim());
+		const note = getDb().createNote(environmentId, (content || "").trim());
+		getEventLog?.()?.record("note.create", { environmentId, subject: note.id });
+		return note;
 	});
 
 	ipcMain.handle("note:update", (_event, noteId, content) => {

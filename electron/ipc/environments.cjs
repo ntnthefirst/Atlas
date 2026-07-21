@@ -15,10 +15,17 @@
 // reference instead: it's a `function` declaration in main.cjs that is never
 // reassigned, so unlike `db` there is no stale-capture risk in holding onto
 // it directly.
+//
+// `environment:switch` (WP-0.5) is new, not extracted: environment selection
+// is renderer-only local state (see App.tsx's "remember the active
+// environment" effect) with no prior main-process signal at all, so there was
+// no existing call site to hang the event log off of for it. This channel is
+// a fire-and-forget notification that exists purely to feed the event log --
+// it has no other side effect and changes no existing behaviour.
 // ---------------------------------------------------------------------------
 
 function register(ipcMain, deps) {
-	const { getDb, openPrimaryWindowByEnvironmentState } = deps;
+	const { getDb, openPrimaryWindowByEnvironmentState, getEventLog } = deps;
 
 	ipcMain.handle("environment:list", () => getDb().listEnvironments());
 
@@ -64,6 +71,14 @@ function register(ipcMain, deps) {
 		const deleted = getDb().deleteEnvironment(environmentId);
 		openPrimaryWindowByEnvironmentState();
 		return deleted;
+	});
+
+	ipcMain.handle("environment:switch", (_event, environmentId) => {
+		if (!environmentId) {
+			return false;
+		}
+		getEventLog?.()?.record("environment.switch", { environmentId });
+		return true;
 	});
 }
 

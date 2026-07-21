@@ -211,6 +211,8 @@ function MainAtlasApp() {
 			} catch {
 				// Ignore storage failures; the notch falls back to the first environment.
 			}
+			// Fire-and-forget event-log signal (WP-0.5); never let this affect the UI.
+			void window.atlas.notifyEnvironmentSwitch(selectedEnvironmentId).catch(() => {});
 		}
 	}, [selectedEnvironmentId]);
 

@@ -17,6 +17,7 @@ const { autoUpdater } = require("electron-updater");
 
 const { AtlasDatabase } = require("./db.cjs");
 const { ActivityTracker } = require("./activity-tracker.cjs");
+const { EventLog } = require("./services/event-log.cjs");
 const { getSystemStats, listOpenApps } = require("./system-info.cjs");
 const { loadAiPreferences, getPublicAiConfig, setAiConfig, aiComplete } = require("./ai.cjs");
 const { compareVersionStrings, normalizeReleaseList } = require("./services/version.cjs");
@@ -70,6 +71,7 @@ let tray = null;
 let isQuitting = false;
 let db = null;
 let tracker = null;
+let eventLog = null;
 
 const isDev = !app.isPackaged;
 const isMac = process.platform === "darwin";
@@ -1002,15 +1004,24 @@ function ensureTray() {
 }
 
 function wireIpc() {
-	registerEnvironmentIpc(ipcMain, { getDb: () => db, openPrimaryWindowByEnvironmentState });
+	registerEnvironmentIpc(ipcMain, {
+		getDb: () => db,
+		openPrimaryWindowByEnvironmentState,
+		getEventLog: () => eventLog,
+	});
 
-	registerSessionIpc(ipcMain, { getDb: () => db, getTracker: () => tracker, getMiniWindow: () => miniWindow });
+	registerSessionIpc(ipcMain, {
+		getDb: () => db,
+		getTracker: () => tracker,
+		getMiniWindow: () => miniWindow,
+		getEventLog: () => eventLog,
+	});
 
 	registerActivityIpc(ipcMain, { getDb: () => db, getTracker: () => tracker });
 
-	registerTaskIpc(ipcMain, { getDb: () => db });
+	registerTaskIpc(ipcMain, { getDb: () => db, getEventLog: () => eventLog });
 
-	registerNoteIpc(ipcMain, { getDb: () => db });
+	registerNoteIpc(ipcMain, { getDb: () => db, getEventLog: () => eventLog });
 
 	registerInsightsIpc(ipcMain, { getDb: () => db });
 
@@ -1394,7 +1405,24 @@ app.whenReady().then(async () => {
 		console.log(`[Atlas] Finalized ${repairResults.finalized} stranded session(s) from previous crash.`);
 	}
 
-	tracker = new ActivityTracker(db);
+	// Event log (WP-0.5). Prune before anything can write, inside a
+	// transaction, so a database that's been sitting around across an update
+	// doesn't carry more history than the retention policy allows for even one
+	// extra boot. Start the writer's flush timer only after that.
+	eventLog = new EventLog(db);
+	try {
+		const pruned = eventLog.pruneNow();
+		if (pruned.deletedByAge > 0 || pruned.deletedByCap > 0) {
+			console.log(
+				`[Atlas] Event log retention: pruned ${pruned.deletedByAge} event(s) past the retention window and ${pruned.deletedByCap} over the row cap.`,
+			);
+		}
+	} catch (error) {
+		console.error("[Atlas] Event log retention prune failed:", error);
+	}
+	eventLog.start();
+
+	tracker = new ActivityTracker(db, eventLog);
 	tracker.start();
 
 	const activeSession = db.getActiveSession();
@@ -1488,5 +1516,12 @@ app.on("before-quit", () => {
 	isQuitting = true;
 	if (tracker) {
 		tracker.stop();
+	}
+	if (eventLog) {
+		// Nothing may be lost on a clean quit: stop the timer (no point letting
+		// it fire again) and flush whatever is still buffered, synchronously,
+		// before the process actually exits.
+		eventLog.stop();
+		eventLog.flushNow();
 	}
 });

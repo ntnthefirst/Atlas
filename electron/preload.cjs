@@ -6,6 +6,9 @@ contextBridge.exposeInMainWorld("atlas", {
 	renameEnvironment: (environmentId, name) => ipcRenderer.invoke("environment:rename", environmentId, name),
 	updateEnvironment: (environmentId, fields) => ipcRenderer.invoke("environment:update", environmentId, fields),
 	deleteEnvironment: (environmentId) => ipcRenderer.invoke("environment:delete", environmentId),
+	// Fire-and-forget: tells the main process which environment the user is now
+	// working in, purely so the event log (WP-0.5) can record `environment.switch`.
+	notifyEnvironmentSwitch: (environmentId) => ipcRenderer.invoke("environment:switch", environmentId),
 
 	getActiveSession: () => ipcRenderer.invoke("session:active"),
 	startSession: (environmentId) => ipcRenderer.invoke("session:start", environmentId),

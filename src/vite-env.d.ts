@@ -51,6 +51,7 @@ declare global {
 				fields: Partial<Pick<Environment, "name" | "icon" | "accent" | "preset">>,
 			) => Promise<Environment>;
 			deleteEnvironment: (environmentId: string) => Promise<boolean>;
+			notifyEnvironmentSwitch: (environmentId: string) => Promise<boolean>;
 
 			getActiveSession: () => Promise<Session | null>;
 			startSession: (environmentId: string) => Promise<Session>;

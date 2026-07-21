@@ -658,6 +658,10 @@ class AtlasDatabase {
 		).map(normalizeTask);
 	}
 
+	getTaskById(taskId) {
+		return normalizeTask(this.first("SELECT * FROM tasks WHERE id = ?", [taskId]));
+	}
+
 	createTask(environmentId, title, description = "", fields = {}) {
 		const task = {
 			id: randomUUID(),
