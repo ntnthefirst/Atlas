@@ -37,12 +37,12 @@ Last updated: 2026-07-21. Keep this current — it is what a fresh session reads
 | WP-0.2 Split main.cjs | **In progress.** 2455 → 1473 lines, 18 modules. Pure config, window geometry, three window factories and six IPC domains extracted. |
 | WP-0.3 Database engine swap | **Done.** `node-sqlite3-wasm` (see D9), migration framework, verified legacy import. |
 | WP-0.4 Secret vault | **Done.** Keys encrypted, legacy plaintext migrated. |
-| WP-0.5 Event log | Not started. Blocked on WP-0.3. |
+| WP-0.5 Event log | Not started. Unblocked — WP-0.3 is done. |
 | WP-0.6 Cross-platform adapter | Not started. |
-| WP-0.7 maps → environments | Not started. Blocked on WP-0.3. |
-| WP-0.8 Scoped data layer | Not started. Blocked on WP-0.5, WP-0.7. |
+| WP-0.7 maps → environments | **Done.** Migration 002, plus a localStorage key migration. |
+| WP-0.8 Scoped data layer | Not started. Blocked on WP-0.5 only. |
 
-**Suite: 373 tests, ~2s.** Verification commands now available:
+**Suite: 381 tests, ~5s.** Verification commands now available:
 
 ```
 npm test               # 370 unit/integration tests, ~2s
