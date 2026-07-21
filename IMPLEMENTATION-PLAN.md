@@ -158,11 +158,47 @@ seems to conflict with one, the decision wins and the package is wrong.
 | **D1** | **Windows and macOS in parallel.** | Every OS-touching package ships both implementations in the same PR. Sizes below already include this (+40–50% on affected work). A package is not done when it works on Windows. |
 | **D2** | **Atlas evolves; tracking becomes one module.** | Sessions, logbook, notebook, and task boards are preserved and reframed. `maps` become `environments`. The dashboard becomes the Statistics surface. No feature deletion. |
 | **D3** | **Real users exist; data must migrate cleanly.** | Every schema change needs a versioned, tested, reversible migration. Never ship a change that silently drops user data. Back up before migrating. |
+| **D9** | **Database engine is `node-sqlite3-wasm`, not `better-sqlite3`.** | Superseded the original WP-0.3 choice. See "D9 in detail" below — this changes how writes must be issued. |
 | **D4** | **The macro recorder is cut.** | No global input hooks, no native recorder, nothing in the plan. Smart Functions plus findings-generated automations cover the overlapping need. If this is ever revisited it is a new plan, not a phase here. |
 | **D5** | **Bursty schedule — heavy periods, then gaps.** | *The most structurally important decision here.* Every work package must leave `main` shippable. No long-lived refactor branches, no "half-migrated" states that span a gap. Packages are sized to fit inside one burst. |
 | **D6** | **Local LLM deferred.** | Keep the existing 3-provider cloud setup. Extend `smartParse.ts` as the on-device layer. Design the provider interface so a local model slots in later without redesign — but do not bundle one. |
 | **D7** | **Full file index from the start.** | The launcher gets a real crawler, watcher, and ranked index on both OSes. This is the single most expensive choice made — see the risk note in section 4. |
 | **D8** | **Plan is written as self-contained work packages.** | This document. Keep it that way when adding packages. |
+
+### D9 in detail: why the database engine changed
+
+`better-sqlite3` is a native module and **cannot be built on the developer
+machine**: Visual Studio 2026 is installed without the VC++ toolset, and no
+prebuilt binary exists for Electron 41's ABI. Both `npm install` and
+`@electron/rebuild` fail. Fixing that means a multi-GB Visual Studio workload
+install, and it would leave a permanent native-build burden on CI, on
+packaging, and on every future Electron upgrade — the plan's own risk register
+rated that failure "High likelihood, blocks Phase 0". It then happened.
+
+`node-sqlite3-wasm` is real SQLite with a filesystem VFS. It writes only
+changed pages, which is the actual requirement, and needs no compiler on any
+platform.
+
+**Measured, not assumed** (10k rows unless stated):
+
+| | per write |
+|---|---|
+| WASM, batched in one transaction | **0.016ms** |
+| WASM, unbatched, `synchronous=NORMAL` | **12.7ms** |
+| WASM, unbatched, `synchronous=OFF` | 1.9ms — *rejected, risks corruption* |
+| sql.js today, empty database | 1.1ms |
+| sql.js today, 80k rows | 4.3ms, **rewriting 4.5 MB per write** |
+
+**The consequence, which every future package must respect:** WASM SQLite is
+~800× faster batched than unbatched. A single write per user action (~13ms) is
+imperceptible and fine. Anything writing in bulk — the event log (WP-0.5)
+above all — **must** wrap its writes in a transaction, or it will be far
+slower than the sql.js it replaced. Multi-statement operations like
+`deleteMap` are wrapped for the same reason, which also fixes a pre-existing
+atomicity bug where a crash midway left orphaned rows.
+
+Settings: `journal_mode = WAL`, `synchronous = NORMAL`. Not `OFF` — the speed
+is tempting and the corruption risk is not acceptable for user data.
 
 ### A tension worth naming
 
