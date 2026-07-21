@@ -24,7 +24,27 @@ export type Environment = {
 	// not part of `EnvironmentConfig` below — see that type's comment for why
 	// keeping it separate matters.
 	isolation_mode: IsolationMode;
+	// WP-1.5: when this environment was archived (hidden from switching
+	// surfaces, but with every row it owns left untouched — never a soft
+	// delete), or null if it is currently visible. `listEnvironments` only
+	// ever returns rows where this is null; `listArchivedEnvironments` is the
+	// deliberate mirror image.
+	archived_at?: string | null;
 	created_at: string;
+};
+
+// WP-1.5: real per-category counts of everything deleting an environment
+// would destroy (electron/db.cjs#getEnvironmentContentCounts), shown by the
+// delete confirmation dialog instead of generic wording. `notes` counts the
+// individual nodes on the environment's notebook canvas (what a user thinks
+// of as "a note"), not the single database row that holds them all.
+export type EnvironmentContentCounts = {
+	tasks: number;
+	sessions: number;
+	notes: number;
+	activityBlocks: number;
+	events: number;
+	hasCustomNotchLayout: boolean;
 };
 
 // One entry from the WP-0.8 cross-environment allowlist

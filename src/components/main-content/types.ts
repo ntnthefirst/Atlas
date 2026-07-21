@@ -13,6 +13,7 @@ import type {
 	TaskUpdate,
 } from "../../types";
 import type { UseFocusReturn } from "../../hooks";
+import type { EnvironmentPresetTemplate } from "../../environments";
 
 export type MainContentViewsProps = {
 	view: AtlasView;
@@ -31,6 +32,26 @@ export type MainContentViewsProps = {
 	selectedEnvironment: Environment | null;
 	isolationAllowlist: IsolationAllowlistEntry[];
 	onChangeEnvironmentIsolationMode: (mode: IsolationMode) => void;
+	// WP-1.5 (environment management surface, Settings): the full visible
+	// list (never archived -- that's fetched separately, inside
+	// EnvironmentManagementCard itself) plus the create/edit/duplicate/
+	// archive/delete callbacks that card renders. Threaded through here
+	// rather than as bespoke SettingsView-only props for the same reason
+	// `isolationAllowlist` above already is -- one big props object every
+	// main-content view receives, so Settings isn't a special case.
+	environments: Environment[];
+	newEnvironmentName: string;
+	onNewEnvironmentNameChange: (value: string) => void;
+	onCreateEnvironment: () => Promise<void>;
+	onCreatePresetEnvironment: (preset: EnvironmentPresetTemplate) => Promise<void>;
+	onUpdateEnvironmentById: (
+		environmentId: string,
+		fields: Partial<Pick<Environment, "name" | "icon" | "accent" | "preset">>,
+	) => Promise<void>;
+	onDuplicateEnvironmentById: (environmentId: string) => Promise<void>;
+	onArchiveEnvironmentById: (environmentId: string) => Promise<void>;
+	onUnarchiveEnvironmentById: (environmentId: string) => Promise<void>;
+	onRequestDeleteEnvironmentRow: (environment: Environment) => void;
 	sessions: Session[];
 	selectedSession: Session | null;
 	onOpenSession: (sessionId: string) => void;

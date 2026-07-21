@@ -17,6 +17,7 @@ import type {
 	Environment,
 	EnvironmentActivatedBundle,
 	EnvironmentConfig,
+	EnvironmentContentCounts,
 	EnvironmentConfigPatch,
 	EnvironmentHotkeyBinding,
 	EnvironmentHotkeySetResult,
@@ -59,6 +60,12 @@ declare global {
 				fields: Partial<Pick<Environment, "name" | "icon" | "accent" | "preset">>,
 			) => Promise<Environment>;
 			deleteEnvironment: (environmentId: string) => Promise<boolean>;
+			// WP-1.5: full lifecycle beyond create/rename/update/delete above.
+			archiveEnvironment: (environmentId: string) => Promise<Environment>;
+			unarchiveEnvironment: (environmentId: string) => Promise<Environment>;
+			listArchivedEnvironments: () => Promise<Environment[]>;
+			getEnvironmentContentCounts: (environmentId: string) => Promise<EnvironmentContentCounts>;
+			duplicateEnvironment: (environmentId: string, name?: string) => Promise<Environment>;
 			notifyEnvironmentSwitch: (environmentId: string) => Promise<boolean>;
 			onEnvironmentActivated: (callback: (bundle: EnvironmentActivatedBundle) => void) => () => void;
 			onOpenEnvironmentSwitcher: (callback: () => void) => () => void;

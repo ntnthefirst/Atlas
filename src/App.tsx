@@ -20,6 +20,7 @@ import { NotchApp } from "./components/notch/NotchApp";
 import { ActionEditorWindowApp } from "./components/action-editor/ActionEditorWindowApp";
 import { NotchInputWindowApp } from "./components/notch-input/NotchInputWindowApp";
 import { SmartCapture } from "./components/SmartCapture";
+import { EnvironmentDeleteDialog } from "./components/EnvironmentDeleteDialog";
 import type { ParsedCapture } from "./utils/smartParse";
 import { switchIsolationMode } from "./utils/isolationMode";
 import logo from "./assets/logosmall.png";
@@ -628,41 +629,121 @@ function MainAtlasApp() {
 		await refreshEnvironmentData(environmentId);
 	};
 
-	const onDeleteEnvironment = async () => {
-		if (!selectedEnvironment) return;
-		if (activeSession && activeSession.environment_id === selectedEnvironment.id) {
-			setErrorMessage("Stop the active session in this map before deleting it.");
+	// WP-1.5: replaces the old instant `window.confirm(...)` -- a bare "Are you
+	// sure?" can't say what's actually about to be destroyed. Both this
+	// header-menu trigger and EnvironmentManagementCard's own per-row delete
+	// button (Settings) funnel into the SAME dialog and the SAME fallback
+	// logic below; neither duplicates the counts-fetching or confirmation
+	// flow. `deleteDialogEnvironment` holds the full row (not just an id) so
+	// the dialog works for an archived row too, which never appears in
+	// `environments` (App state only ever holds the visible list).
+	const [deleteDialogEnvironment, setDeleteDialogEnvironment] = useState<Environment | null>(null);
+
+	// Re-fetches the visible environment list after ANY mutation that could
+	// change its membership (delete, archive, unarchive, duplicate, create),
+	// and -- the part a naive "just update local state" version would miss --
+	// falls back to another environment (or the empty/first-launch state) the
+	// moment the currently SELECTED one is no longer in that fresh list,
+	// whether because it was deleted, archived, or (defensively) vanished for
+	// any other reason. This is the one place "what happens to the active
+	// environment" is decided, so every mutation path gets the same answer.
+	const refreshEnvironmentsAndFallback = async () => {
+		const fresh = await window.atlas.listEnvironments();
+		setEnvironments(fresh);
+		if (selectedEnvironmentId && fresh.some((environmentItem) => environmentItem.id === selectedEnvironmentId)) {
 			return;
 		}
-		const confirmed = window.confirm(
-			`Delete map "${selectedEnvironment.name}"? This removes all sessions, tasks, and notes in it.`,
-		);
-		if (!confirmed) return;
-		try {
-			await window.atlas.deleteEnvironment(selectedEnvironment.id);
-			const remainingEnvironments = environments.filter((environmentItem) => environmentItem.id !== selectedEnvironment.id);
-			const fallbackEnvironmentId = remainingEnvironments[0]?.id ?? "";
-			setEnvironments(remainingEnvironments);
-			setShowEnvironmentMenu(false);
-			setRenameEnvironmentName("");
-			setNewEnvironmentName("");
-			setSelectedEnvironmentId(fallbackEnvironmentId);
-			setSelectedSessionId("");
-			setNotebook(null);
-			setActivityBlocks([]);
-			setShowFirstLaunch(remainingEnvironments.length === 0);
-			setErrorMessage("");
-			if (fallbackEnvironmentId) {
-				await refreshEnvironmentData(fallbackEnvironmentId);
-				return;
-			}
-			setSessions([]);
-			setTasks([]);
-			setNotebook(null);
-			setDashboard(defaultDashboard);
-		} catch (error) {
-			setErrorMessage(error instanceof Error ? error.message : "Unable to delete map.");
+		const fallbackEnvironmentId = fresh[0]?.id ?? "";
+		setSelectedEnvironmentId(fallbackEnvironmentId);
+		setShowEnvironmentMenu(false);
+		setRenameEnvironmentName("");
+		setSelectedSessionId("");
+		setNotebook(null);
+		setActivityBlocks([]);
+		setShowFirstLaunch(fresh.length === 0);
+		setErrorMessage("");
+		if (fallbackEnvironmentId) {
+			await refreshEnvironmentData(fallbackEnvironmentId);
+			return;
 		}
+		setSessions([]);
+		setTasks([]);
+		setNotebook(null);
+		setDashboard(defaultDashboard);
+	};
+
+	// The header menu's quick "Delete environment" action: opens the shared
+	// dialog for the CURRENTLY selected environment, after the same
+	// active-session guard the old instant-delete flow already had (deleting
+	// out from under a running session is refused server-side too --
+	// db.cjs#deleteEnvironment -- but failing fast here avoids a round trip
+	// just to show the same message).
+	const onRequestDeleteEnvironment = () => {
+		if (!selectedEnvironment) return;
+		if (activeSession && activeSession.environment_id === selectedEnvironment.id) {
+			setErrorMessage("Stop the active session in this environment before deleting it.");
+			return;
+		}
+		setErrorMessage("");
+		setDeleteDialogEnvironment(selectedEnvironment);
+	};
+
+	// EnvironmentManagementCard's per-row delete button: same dialog, for an
+	// ARBITRARY row (active or archived), not just whatever happens to be
+	// selected right now.
+	const onRequestDeleteEnvironmentRow = (environment: Environment) => {
+		if (activeSession && activeSession.environment_id === environment.id) {
+			setErrorMessage("Stop the active session in this environment before deleting it.");
+			return;
+		}
+		setErrorMessage("");
+		setDeleteDialogEnvironment(environment);
+	};
+
+	// The dialog's two destructive-ish actions. Both let their error
+	// propagate (rather than catching it here) -- EnvironmentDeleteDialog
+	// itself catches and displays it inline, so swallowing it here would just
+	// mean the dialog appears to do nothing on failure.
+	const onConfirmDeleteEnvironmentDialog = async (environmentId: string) => {
+		await window.atlas.deleteEnvironment(environmentId);
+		setDeleteDialogEnvironment(null);
+		await refreshEnvironmentsAndFallback();
+	};
+
+	const onArchiveEnvironmentFromDialog = async (environmentId: string) => {
+		await window.atlas.archiveEnvironment(environmentId);
+		setDeleteDialogEnvironment(null);
+		await refreshEnvironmentsAndFallback();
+	};
+
+	// The row-level actions EnvironmentManagementCard (Settings) offers
+	// directly, with no confirmation dialog -- archiving and duplicating are
+	// both reversible/non-destructive, so proportional confirmation (WP-1.5's
+	// whole point for delete) doesn't apply here the same way.
+	const onArchiveEnvironmentById = async (environmentId: string) => {
+		await window.atlas.archiveEnvironment(environmentId);
+		await refreshEnvironmentsAndFallback();
+	};
+
+	const onUnarchiveEnvironmentById = async (environmentId: string) => {
+		await window.atlas.unarchiveEnvironment(environmentId);
+		await refreshEnvironmentsAndFallback();
+	};
+
+	const onDuplicateEnvironmentById = async (environmentId: string) => {
+		await window.atlas.duplicateEnvironment(environmentId);
+		await refreshEnvironmentsAndFallback();
+	};
+
+	// The generalized counterpart to onUpdateEnvironment above: edits ANY
+	// environment by id (EnvironmentManagementCard can edit a row that isn't
+	// the currently selected one), not just selectedEnvironmentId.
+	const onUpdateEnvironmentById = async (
+		environmentId: string,
+		fields: Partial<Pick<Environment, "name" | "icon" | "accent" | "preset">>,
+	) => {
+		const updated = await window.atlas.updateEnvironment(environmentId, fields);
+		setEnvironments((current) => current.map((environmentItem) => (environmentItem.id === updated.id ? updated : environmentItem)));
 	};
 
 	// Session operations
@@ -1112,7 +1193,7 @@ function MainAtlasApp() {
 							onNewEnvironmentNameChange={setNewEnvironmentName}
 							onCreateEnvironment={onCreateEnvironment}
 							onRenameEnvironment={onRenameEnvironment}
-							onDeleteEnvironment={onDeleteEnvironment}
+							onDeleteEnvironment={onRequestDeleteEnvironment}
 							canDeleteEnvironment={
 								Boolean(selectedEnvironmentId) && !(activeSession && activeSession.environment_id === selectedEnvironmentId)
 							}
@@ -1150,6 +1231,16 @@ function MainAtlasApp() {
 								selectedEnvironment={selectedEnvironment}
 								isolationAllowlist={isolationAllowlist}
 								onChangeEnvironmentIsolationMode={onChangeEnvironmentIsolationMode}
+								environments={environments}
+								newEnvironmentName={newEnvironmentName}
+								onNewEnvironmentNameChange={setNewEnvironmentName}
+								onCreateEnvironment={onCreateEnvironment}
+								onCreatePresetEnvironment={onCreatePresetEnvironment}
+								onUpdateEnvironmentById={onUpdateEnvironmentById}
+								onDuplicateEnvironmentById={onDuplicateEnvironmentById}
+								onArchiveEnvironmentById={onArchiveEnvironmentById}
+								onUnarchiveEnvironmentById={onUnarchiveEnvironmentById}
+								onRequestDeleteEnvironmentRow={onRequestDeleteEnvironmentRow}
 								sessions={sessions}
 								selectedSession={selectedSession}
 								onOpenSession={openSession}
@@ -1259,6 +1350,13 @@ function MainAtlasApp() {
 					accent={selectedEnvironment?.accent || globalAccent}
 				/>
 			)}
+
+			<EnvironmentDeleteDialog
+				environment={deleteDialogEnvironment}
+				onCancel={() => setDeleteDialogEnvironment(null)}
+				onConfirmDelete={onConfirmDeleteEnvironmentDialog}
+				onArchiveInstead={onArchiveEnvironmentFromDialog}
+			/>
 		</div>
 	);
 }

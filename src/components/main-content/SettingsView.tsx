@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Select, ThemeModePicker, Toggle } from "../ui";
 import { EnvironmentAccessCard } from "./EnvironmentAccessCard";
+import { EnvironmentManagementCard } from "./EnvironmentManagementCard";
 import type { MainContentViewsProps } from "./types";
 
 type UpdateInfo = {
@@ -17,6 +18,16 @@ export function SettingsView({
 	selectedEnvironment,
 	isolationAllowlist,
 	onChangeEnvironmentIsolationMode,
+	environments,
+	newEnvironmentName,
+	onNewEnvironmentNameChange,
+	onCreateEnvironment,
+	onCreatePresetEnvironment,
+	onUpdateEnvironmentById,
+	onDuplicateEnvironmentById,
+	onArchiveEnvironmentById,
+	onUnarchiveEnvironmentById,
+	onRequestDeleteEnvironmentRow,
 }: MainContentViewsProps) {
 	const [timeFormat, setTimeFormat] = useState("24h");
 	const [startWeekOn, setStartWeekOn] = useState("monday");
@@ -137,6 +148,22 @@ export function SettingsView({
 					environment={selectedEnvironment}
 					allowlist={isolationAllowlist}
 					onChangeMode={onChangeEnvironmentIsolationMode}
+				/>
+			</div>
+
+			<div className="xl:col-span-2">
+				<EnvironmentManagementCard
+					environments={environments}
+					selectedEnvironmentId={selectedEnvironment?.id ?? ""}
+					newEnvironmentName={newEnvironmentName}
+					onNewEnvironmentNameChange={onNewEnvironmentNameChange}
+					onCreateEnvironment={onCreateEnvironment}
+					onCreatePresetEnvironment={onCreatePresetEnvironment}
+					onUpdateEnvironmentById={onUpdateEnvironmentById}
+					onDuplicateEnvironmentById={onDuplicateEnvironmentById}
+					onArchiveEnvironmentById={onArchiveEnvironmentById}
+					onUnarchiveEnvironmentById={onUnarchiveEnvironmentById}
+					onRequestDeleteEnvironmentRow={onRequestDeleteEnvironmentRow}
 				/>
 			</div>
 

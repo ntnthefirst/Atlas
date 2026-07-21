@@ -81,9 +81,80 @@ function register(ipcMain, deps) {
 		if (!environmentId) {
 			throw new Error("Environment id missing.");
 		}
+		// WP-1.5: deleteEnvironment now also clears this environment's rows out
+		// of the event log (WP-0.5). That log is written through a batched,
+		// in-memory buffer (event-log.cjs) rather than one INSERT per event, so
+		// flush it first -- otherwise an event recorded moments ago (e.g. this
+		// very `environment.switch`) could still be sitting in memory and land
+		// in the `events` table AFTER the DELETE has already run, orphaning a
+		// row against an environment id that no longer exists.
+		getEventLog?.()?.flushNow();
 		const deleted = getDb().deleteEnvironment(environmentId);
 		openPrimaryWindowByEnvironmentState();
 		return deleted;
+	});
+
+	// WP-1.5: hides an environment from every switching surface while leaving
+	// its data completely untouched -- see db.cjs#archiveEnvironment for the
+	// full reasoning (including why the LAST visible environment can't be
+	// archived this way). `openPrimaryWindowByEnvironmentState` is called for
+	// the same reason environment:create/delete already call it: archiving
+	// can reduce the visible count to zero (blocked at the db layer for the
+	// LAST one, but not for e.g. the second-to-last), which changes whether
+	// the main window or the welcome window should be showing.
+	ipcMain.handle("environment:archive", (_event, environmentId) => {
+		if (!environmentId) {
+			throw new Error("Environment id missing.");
+		}
+		getEventLog?.()?.flushNow();
+		const archived = getDb().archiveEnvironment(environmentId);
+		getEventLog?.()?.record("environment.archived", { environmentId });
+		openPrimaryWindowByEnvironmentState();
+		return archived;
+	});
+
+	// Reverses environment:archive. Always increases the visible count, so
+	// there is no "which window should be showing" question it could ever
+	// flip the wrong way -- openPrimaryWindowByEnvironmentState is still
+	// called for symmetry with archive/create/delete, not because unarchiving
+	// alone could ever need it to open the welcome window.
+	ipcMain.handle("environment:unarchive", (_event, environmentId) => {
+		if (!environmentId) {
+			throw new Error("Environment id missing.");
+		}
+		const unarchived = getDb().unarchiveEnvironment(environmentId);
+		getEventLog?.()?.record("environment.unarchived", { environmentId });
+		openPrimaryWindowByEnvironmentState();
+		return unarchived;
+	});
+
+	ipcMain.handle("environment:listArchived", () => getDb().listArchivedEnvironments());
+
+	// WP-1.5: real per-category counts for the delete confirmation dialog.
+	// Flushes the event log first for the same reason environment:delete
+	// does -- otherwise a just-recorded event sitting in the in-memory buffer
+	// wouldn't be reflected in the `events` count shown a moment before that
+	// same environment gets deleted.
+	ipcMain.handle("environment:getContentCounts", (_event, environmentId) => {
+		if (!environmentId) {
+			throw new Error("Environment id missing.");
+		}
+		getEventLog?.()?.flushNow();
+		return getDb().getEnvironmentContentCounts(environmentId);
+	});
+
+	// WP-1.5: copies an environment's setup (config + Notch layout, never its
+	// content) into a brand new environment -- see db.cjs#duplicateEnvironment.
+	// `name` is optional; a missing/blank name falls back to "<source> copy"
+	// (deduplicated against every existing name) inside the db layer itself.
+	ipcMain.handle("environment:duplicate", (_event, environmentId, name) => {
+		if (!environmentId) {
+			throw new Error("Environment id missing.");
+		}
+		const duplicated = getDb().duplicateEnvironment(environmentId, typeof name === "string" ? name : undefined);
+		getEventLog?.()?.record("environment.duplicated", { environmentId: duplicated.id, subject: environmentId });
+		openPrimaryWindowByEnvironmentState();
+		return duplicated;
 	});
 
 	ipcMain.handle("environment:switch", (_event, environmentId) => {

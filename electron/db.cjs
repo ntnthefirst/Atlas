@@ -324,15 +324,32 @@ class AtlasDatabase {
 	// separate round trip, and no way for the renderer's idea of an
 	// environment's mode to go stale relative to what electron/data/scoped.cjs
 	// actually enforces.
+	//
+	// WP-1.5: filters out archived environments, exactly as it always
+	// implicitly did before archiving existed (every environment used to be
+	// "visible"). This is the one change that makes archiving actually hide
+	// something -- every OTHER caller of this method (the switcher, the
+	// sidebar, `hasAnyEnvironments()` in main.cjs, ...) keeps behaving
+	// identically for a user who has never archived anything, since
+	// `archived_at` is NULL for every row until archiveEnvironment() sets it.
+	// See listArchivedEnvironments() below for the deliberate mirror image of
+	// this query.
 	listEnvironments() {
 		return this.all(
-			"SELECT id, name, icon, accent, preset, isolation_mode, created_at FROM environments ORDER BY created_at ASC",
+			"SELECT id, name, icon, accent, preset, isolation_mode, created_at FROM environments WHERE archived_at IS NULL ORDER BY created_at ASC",
 		);
 	}
 
+	// Deliberately NOT filtered by archived_at -- renaming, recoloring, or
+	// looking up a single environment by id must keep working on an archived
+	// one (the Settings surface's "Archived" section still needs to render
+	// its name/icon/accent, and unarchiving it has to read it first). Includes
+	// `archived_at` itself (unlike listEnvironments' column list, which is
+	// left exactly as it was pre-WP-1.5) so the renderer can tell an archived
+	// environment apart from a visible one wherever it fetches a single row.
 	getEnvironment(environmentId) {
 		return this.first(
-			"SELECT id, name, icon, accent, preset, isolation_mode, created_at FROM environments WHERE id = ?",
+			"SELECT id, name, icon, accent, preset, isolation_mode, archived_at, created_at FROM environments WHERE id = ?",
 			[environmentId],
 		);
 	}
@@ -439,6 +456,13 @@ class AtlasDatabase {
 
 			this.run("DELETE FROM tasks WHERE environment_id = ?", [environmentId]);
 			this.run("DELETE FROM notes WHERE environment_id = ?", [environmentId]);
+			// WP-1.5: the event log (WP-0.5) is per-environment content too --
+			// its `events.environment_id` column is exactly the same shape as
+			// tasks/notes/sessions above. Deleting an environment now takes its
+			// event history with it, matching the WP's own list of what
+			// deletion destroys. Global events (environment_id IS NULL, e.g.
+			// nothing today, but the column allows it) are never touched.
+			this.run("DELETE FROM events WHERE environment_id = ?", [environmentId]);
 			this.run("DELETE FROM environments WHERE id = ?", [environmentId]);
 			// Never delete GLOBAL_DEFAULT_NOTCH_LAYOUT_ID here -- it is shared
 			// across every other environment that has no override of its own.
@@ -448,6 +472,216 @@ class AtlasDatabase {
 				this.run("DELETE FROM notch_layouts WHERE id = ?", [config.notchLayoutId]);
 			}
 			return true;
+		});
+	}
+
+	// WP-1.5: real per-category counts of everything deleteEnvironment above
+	// would destroy, so the confirmation dialog can say "12 tasks, 40
+	// sessions, 3 notes..." instead of generic wording. Every query is
+	// filtered by this ONE environment id and nothing is ever aggregated
+	// across environments, so an enclosed environment's counts can never leak
+	// into another environment's confirmation dialog (WP-0.8) -- there is no
+	// cross-environment read here for electron/data/scoped.cjs to gate, only
+	// "how much does THIS environment itself hold", the same shape
+	// environment:getConfig already has no isolation policy question about.
+	getEnvironmentContentCounts(environmentId) {
+		const environment = this.first("SELECT id FROM environments WHERE id = ?", [environmentId]);
+		if (!environment) {
+			throw new Error("Environment not found.");
+		}
+
+		const countOf = (sql, params) => this.first(sql, params)?.count ?? 0;
+
+		const tasks = countOf("SELECT COUNT(*) AS count FROM tasks WHERE environment_id = ?", [environmentId]);
+		const sessions = countOf("SELECT COUNT(*) AS count FROM sessions WHERE environment_id = ?", [environmentId]);
+		const activityBlocks = countOf(
+			`SELECT COUNT(*) AS count FROM activity_blocks
+			 WHERE session_id IN (SELECT id FROM sessions WHERE environment_id = ?)`,
+			[environmentId],
+		);
+		const events = countOf("SELECT COUNT(*) AS count FROM events WHERE environment_id = ?", [environmentId]);
+
+		// The notebook is one row per environment holding a canvas document
+		// (createEmptyNotebookDocument's `nodes` array) -- "notes" here counts
+		// the individual nodes on that canvas, which is what a user actually
+		// thinks of as "a note", not the single database row that holds them
+		// all. A notebook that was never opened has no row at all yet
+		// (getNotebookByEnvironment creates one lazily on first read) -- read
+		// the raw row directly rather than going through that lazy accessor,
+		// since a COUNT must never itself create the thing it's counting.
+		const notebookRow = this.first("SELECT content FROM notes WHERE environment_id = ? LIMIT 1", [environmentId]);
+		let notes = 0;
+		if (notebookRow) {
+			try {
+				const parsed = JSON.parse(notebookRow.content);
+				notes = Array.isArray(parsed?.nodes) ? parsed.nodes.length : 0;
+			} catch {
+				notes = 0;
+			}
+		}
+
+		const config = this.getEnvironmentConfig(environmentId);
+		const hasCustomNotchLayout = Boolean(
+			config?.notchLayoutId && config.notchLayoutId !== GLOBAL_DEFAULT_NOTCH_LAYOUT_ID,
+		);
+
+		return { tasks, sessions, notes, activityBlocks, events, hasCustomNotchLayout };
+	}
+
+	// WP-1.5: hides `environmentId` from every switching surface
+	// (listEnvironments filters `archived_at IS NULL`) while leaving every
+	// row it owns -- tasks, notes, sessions, activity blocks, events, its own
+	// Notch layout, its config document -- completely untouched. Deliberately
+	// NOT a soft delete: this method never reads or writes any table but
+	// `environments.archived_at` itself.
+	archiveEnvironment(environmentId) {
+		const environment = this.getEnvironment(environmentId);
+		if (!environment) {
+			throw new Error("Environment not found.");
+		}
+		if (environment.archived_at) {
+			return environment;
+		}
+
+		// Mirrors deleteEnvironment's own guard: archiving an environment out
+		// from under a session that's actively running in it would hide the
+		// very surface (the switcher) someone needs to get back to it and
+		// stop that session.
+		const activeSession = this.getActiveSession();
+		if (activeSession && activeSession.environment_id === environmentId) {
+			throw new Error("Stop the active session in this environment before archiving it.");
+		}
+
+		// Never let the last VISIBLE environment disappear this way. Archiving
+		// is meant to be the low-stakes, reversible alternative to deleting --
+		// but the one surface that can undo it (Settings, WP-1.5's own
+		// environment management card) lives inside the main app window, and
+		// main.cjs only opens that window when at least one non-archived
+		// environment exists (hasAnyEnvironments/openPrimaryWindowByEnvironmentState);
+		// with zero left it opens the welcome window instead, which has no
+		// "unarchive" control at all. Archiving the only remaining environment
+		// would therefore strand its data behind a window that no longer
+		// opens -- a worse outcome than doing nothing, which archiving must
+		// never produce. Deleting the last environment is still permitted
+		// (see deleteEnvironment): that is a fully-confirmed, final, explicit
+		// action with its own established "show the welcome window" fallback,
+		// not something this method needs to also guard against.
+		const visibleCount = this.first(
+			"SELECT COUNT(*) AS count FROM environments WHERE archived_at IS NULL",
+		).count;
+		if (visibleCount <= 1) {
+			throw new Error(
+				"Cannot archive the only environment. Create another environment first, or delete this one instead.",
+			);
+		}
+
+		this.run("UPDATE environments SET archived_at = ? WHERE id = ?", [nowIso(), environmentId]);
+		return this.getEnvironment(environmentId);
+	}
+
+	// Reverses archiveEnvironment. No guard beyond "does it exist" -- unlike
+	// archiving, there is no state unarchiving could ever strand anyone in.
+	unarchiveEnvironment(environmentId) {
+		const environment = this.getEnvironment(environmentId);
+		if (!environment) {
+			throw new Error("Environment not found.");
+		}
+		if (!environment.archived_at) {
+			return environment;
+		}
+		this.run("UPDATE environments SET archived_at = NULL WHERE id = ?", [environmentId]);
+		return this.getEnvironment(environmentId);
+	}
+
+	// The archived counterpart to listEnvironments -- everything that list
+	// deliberately excludes. Ordered by archived_at DESC (most recently
+	// hidden first), since that's the order someone hunting for "the thing I
+	// just archived" wants to scan.
+	listArchivedEnvironments() {
+		return this.all(
+			`SELECT id, name, icon, accent, preset, isolation_mode, archived_at, created_at
+			 FROM environments
+			 WHERE archived_at IS NOT NULL
+			 ORDER BY archived_at DESC`,
+		);
+	}
+
+	// Appends " 2", " 3", ... until `baseName` doesn't collide (case/
+	// whitespace-insensitively) with any EXISTING environment, archived or
+	// not -- names are meant to be unique enough to tell environments apart
+	// wherever they might be listed, not just in the currently-visible set.
+	uniqueEnvironmentName(baseName) {
+		const trimmedBase = baseName.trim();
+		const existingNames = new Set(this.all("SELECT name FROM environments").map((row) => row.name.trim().toLowerCase()));
+		if (!existingNames.has(trimmedBase.toLowerCase())) {
+			return trimmedBase;
+		}
+		let attempt = 2;
+		while (existingNames.has(`${trimmedBase} ${attempt}`.toLowerCase())) {
+			attempt += 1;
+		}
+		return `${trimmedBase} ${attempt}`;
+	}
+
+	// WP-1.5: copies `environmentId`'s SETUP into a brand new environment --
+	// icon/accent/preset, isolation mode, its full config document (WP-1.1),
+	// and its own Notch layout if it has one (WP-1.3). Deliberately copies
+	// NOTHING from any content table (tasks/notes/sessions/activity_blocks/
+	// events): duplicating a setup is the point, copying someone's data would
+	// be surprising and wrong. `isolation_mode` is copied too even though it
+	// is NOT part of `config` (see environment-config.cjs's header for why
+	// those stay separate columns) -- it is still part of an environment's
+	// SETUP, not its content, so a duplicated "Enclosed" work environment
+	// starts out Enclosed as well rather than silently downgrading to the
+	// default the moment it's copied.
+	duplicateEnvironment(environmentId, name) {
+		const source = this.getEnvironment(environmentId);
+		if (!source) {
+			throw new Error("Environment not found.");
+		}
+
+		const sourceConfig = this.getEnvironmentConfig(environmentId);
+		const requestedName = typeof name === "string" && name.trim() ? name.trim() : `${source.name} copy`;
+		const finalName = this.uniqueEnvironmentName(requestedName);
+
+		return this.transaction(() => {
+			const created = this.createEnvironment(finalName, {
+				icon: source.icon,
+				accent: source.accent,
+				preset: source.preset,
+			});
+
+			if (source.isolation_mode && source.isolation_mode !== DEFAULT_ISOLATION_MODE) {
+				this.setEnvironmentIsolationMode(created.id, source.isolation_mode);
+			}
+
+			// Copies every config section EXCEPT notchLayoutId, which is
+			// resolved separately below: "copy the layout" (WP-1.3) means
+			// giving the duplicate its OWN row when the source has a genuine
+			// override, never pointing two environments at the same mutable
+			// row (editing one would silently edit the other; deleting either
+			// environment would orphan or destroy the other's layout).
+			this.setEnvironmentConfig(created.id, {
+				appearance: sourceConfig.appearance,
+				ai: sourceConfig.ai,
+				integrations: sourceConfig.integrations,
+				startupBehaviour: sourceConfig.startupBehaviour,
+			});
+
+			if (sourceConfig.notchLayoutId && sourceConfig.notchLayoutId !== GLOBAL_DEFAULT_NOTCH_LAYOUT_ID) {
+				const sourcePreferences = this.getEffectiveNotchPreferences(environmentId).preferences;
+				// Passing the FULL preferences document as the patch means
+				// every key is overwritten, not shallow-merged onto whatever
+				// the brand-new environment's own (still-default) effective
+				// layout happened to be -- the result is an exact copy,
+				// forked into its own fresh row.
+				this.setEnvironmentNotchLayout(created.id, sourcePreferences);
+			}
+			// else: the source has no override of its own, so the duplicate
+			// simply keeps pointing at the shared global default too --
+			// nothing to fork.
+
+			return this.getEnvironment(created.id);
 		});
 	}
 

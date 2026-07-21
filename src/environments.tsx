@@ -59,6 +59,15 @@ export type EnvironmentPresetTemplate = {
 
 // Starter templates the user can spawn an environment from. Each carries its own
 // icon + accent so switching environments instantly changes the whole vibe.
+//
+// WP-1.5: added "custom" -- the `EnvironmentPreset` type (src/types.ts) has
+// reserved this id since WP-0 (App.tsx's plain-name creation flow already
+// passes `preset: "custom"` for a typed name with no template), but it never
+// had a tile of its own here, so the full environment management surface
+// (EnvironmentManagementCard) had no way to offer "start blank" alongside
+// the themed presets. Neutral gray on purpose -- every other preset's accent
+// says something about the environment's vibe; this one deliberately says
+// nothing, since the whole point is that the user decides that later.
 export const ENVIRONMENT_PRESETS: EnvironmentPresetTemplate[] = [
 	{ id: "work", name: "Work", icon: "briefcase", accent: "#3b82f6", description: "Focused work sessions" },
 	{ id: "coding", name: "Coding", icon: "code-bracket", accent: "#7d53de", description: "Build and ship code" },
@@ -67,6 +76,7 @@ export const ENVIRONMENT_PRESETS: EnvironmentPresetTemplate[] = [
 	{ id: "study", name: "Study", icon: "academic-cap", accent: "#10b981", description: "Learn and revise" },
 	{ id: "design", name: "Design", icon: "paint-brush", accent: "#ec4899", description: "Craft and create" },
 	{ id: "writing", name: "Writing", icon: "pencil-square", accent: "#0ea5e9", description: "Write and draft" },
+	{ id: "custom", name: "Custom", icon: "squares-2x2", accent: "#6b7280", description: "Start blank and make it your own" },
 ];
 
 export const getPresetById = (id?: string | null): EnvironmentPresetTemplate | undefined =>

@@ -6,6 +6,22 @@ contextBridge.exposeInMainWorld("atlas", {
 	renameEnvironment: (environmentId, name) => ipcRenderer.invoke("environment:rename", environmentId, name),
 	updateEnvironment: (environmentId, fields) => ipcRenderer.invoke("environment:update", environmentId, fields),
 	deleteEnvironment: (environmentId) => ipcRenderer.invoke("environment:delete", environmentId),
+	// WP-1.5: the full environment lifecycle beyond create/rename/update/
+	// delete above. Archiving hides an environment from switching surfaces
+	// while keeping every row it owns untouched (never a soft delete) --
+	// see electron/db.cjs#archiveEnvironment/unarchiveEnvironment for the
+	// guards (an active session in it, or it being the last visible one).
+	archiveEnvironment: (environmentId) => ipcRenderer.invoke("environment:archive", environmentId),
+	unarchiveEnvironment: (environmentId) => ipcRenderer.invoke("environment:unarchive", environmentId),
+	listArchivedEnvironments: () => ipcRenderer.invoke("environment:listArchived"),
+	// Real per-category counts (tasks/sessions/notes/activity blocks/events/
+	// whether it has its own Notch layout) for the delete confirmation dialog
+	// -- see db.cjs#getEnvironmentContentCounts.
+	getEnvironmentContentCounts: (environmentId) => ipcRenderer.invoke("environment:getContentCounts", environmentId),
+	// Copies an environment's config + Notch layout (never its content) into
+	// a brand new environment -- see db.cjs#duplicateEnvironment. `name` is
+	// optional.
+	duplicateEnvironment: (environmentId, name) => ipcRenderer.invoke("environment:duplicate", environmentId, name),
 	// Tells the main process which environment the user is now working in.
 	// Records `environment.switch` in the event log (WP-0.5) and, as of
 	// WP-1.4, is also what makes the switch atomic and live everywhere: the
