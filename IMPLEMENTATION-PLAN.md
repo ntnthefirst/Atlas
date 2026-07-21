@@ -34,7 +34,7 @@ Last updated: 2026-07-21. Keep this current — it is what a fresh session reads
 | Package | State |
 |---|---|
 | WP-0.1 Test harness | **Done.** Vitest + 3-OS CI matrix. |
-| WP-0.2 Split main.cjs | **In progress.** 2455 → 1757 lines. Pure extractions done; stateful half not started. |
+| WP-0.2 Split main.cjs | **In progress.** 2455 → 1549 lines. Pure config, window geometry, three window factories and the data-domain IPC handlers all extracted. |
 | WP-0.3 Database engine swap | Not started. |
 | WP-0.4 Secret vault | **Done.** Keys encrypted, legacy plaintext migrated. |
 | WP-0.5 Event log | Not started. Blocked on WP-0.3. |
@@ -42,7 +42,7 @@ Last updated: 2026-07-21. Keep this current — it is what a fresh session reads
 | WP-0.7 maps → environments | Not started. Blocked on WP-0.3. |
 | WP-0.8 Scoped data layer | Not started. Blocked on WP-0.5, WP-0.7. |
 
-**Suite: 349 tests, ~2s.** Verification commands now available:
+**Suite: 373 tests, ~2s.** Verification commands now available:
 
 ```
 npm test               # 370 unit/integration tests, ~2s
@@ -65,10 +65,25 @@ mechanical cut-and-verify approach was safe:
 `config/dashboard-prefs.cjs`, `config/focus-prefs.cjs`,
 `config/update-prefs.cjs`, `config/prefs-utils.cjs`.
 
-Still in main.cjs, all **stateful** — window factories (~450), notch window
-management (~220), tray, and `wireIpc` (~620, ~75 handlers). These mutate
-shared module-level refs (`mainWindow`, `notchWindows`, `db`, `tracker`,
-`isQuitting`).
+Then the **stateful** work began, guarded by the two smoke tests and the IPC
+contract test: `windows/notch-geometry.cjs`, the three secondary window
+factories (`settings-window`, `action-editor-window`, `notch-input-window`),
+and the first three IPC domains (`ipc/tasks`, `ipc/notes`,
+`ipc/environments`).
+
+**Still in main.cjs (~1549 lines):**
+
+- `wireIpc` — 56 of the original 72 handlers remain. Extract them domain by
+  domain following `ipc/tasks.cjs`: each module exports
+  `register(ipcMain, deps)`. **Pass `db` and `tracker` as getters**, never
+  values — they are assigned during `app.whenReady()`, after the modules are
+  required, so a value capture freezes them at `null`. Plain function
+  declarations that are never reassigned can be passed directly.
+- `createMainWindow`, `createWelcomeWindow`, `createMiniWindow` — entangled
+  with the tray and session lifecycle.
+- `syncNotchWindows`, `applyNotchPreferences`, `createNotchWindowForDisplay`,
+  `shouldNotchBeActive` — own the `notchWindows` map.
+- `ensureTray`, and the focus engine runtime (timers, broadcast).
 
 **The state-sharing question is now decided. Follow this for every window
 module.** A shared mutable `registry` module was rejected: it would rewrite
