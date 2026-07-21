@@ -21,11 +21,23 @@
 // is assigned during app.whenReady(), after this module is required, so a
 // value capture would freeze it at `null`.
 //
-// `applyNativeTheme`, `createMiniWindow`, `createSettingsWindow`,
-// `createActionEditorWindow`, `createNotchInputWindow`, and `showMainWindow`
-// are passed as plain values: each is a `function` declaration in main.cjs
-// that is never reassigned, so there's no stale-capture risk in holding onto
-// them directly (unlike the window variables above).
+// `createMiniWindow`, `createSettingsWindow`, `createActionEditorWindow`,
+// `createNotchInputWindow`, and `showMainWindow` are passed as plain values:
+// each is a `function` declaration in main.cjs that is never reassigned, so
+// there's no stale-capture risk in holding onto them directly (unlike the
+// window variables above).
+//
+// `setGlobalTheme` (WP-1.4) is what `window:setTheme` actually calls -- it is
+// main.cjs's own wrapper around `applyNativeTheme` that ALSO remembers the
+// value as the user's global theme preference (`globalThemePreference`),
+// which is what an environment switch falls back to for any environment
+// whose own theme is "system" (no opinion). It is named differently from
+// `applyNativeTheme` on purpose: this channel is the one and only place a
+// GENUINE user preference change comes from (this hook fires on mount and on
+// every manual toggle), as opposed to main.cjs's other internal calls to the
+// raw `applyNativeTheme` (re-asserting the current native theme on a newly
+// created window, or applying an environment's OWN override on switch),
+// neither of which should overwrite what "system" means for next time.
 // ---------------------------------------------------------------------------
 
 const { BrowserWindow } = require("electron");
@@ -36,7 +48,7 @@ function register(ipcMain, deps) {
 		getWelcomeWindow,
 		getMiniWindow,
 		getDb,
-		applyNativeTheme,
+		setGlobalTheme,
 		createMiniWindow,
 		createSettingsWindow,
 		createActionEditorWindow,
@@ -53,7 +65,7 @@ function register(ipcMain, deps) {
 	});
 
 	ipcMain.handle("window:setTheme", (_event, theme) => {
-		applyNativeTheme(theme);
+		setGlobalTheme(theme);
 		return true;
 	});
 

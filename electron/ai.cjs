@@ -55,6 +55,43 @@ const defaultAiPreferences = () => ({
 
 let aiPreferences = defaultAiPreferences();
 
+// WP-1.4: which provider "wins" when a caller doesn't name one explicitly.
+// Set on every environment switch (main.cjs's setActiveEnvironment) to that
+// environment's own `ai.defaultProvider` override, or null when it has none
+// -- see environment-config.cjs's defaultEnvironmentConfig(), which ships
+// every environment with `null` until a future package adds a UI to set it.
+// `null` here means exactly what it means there: "no opinion, fall through
+// to the app-wide default", never "no provider at all". In-memory only,
+// same as `currentEnvironmentId`/`notchPreferences` in main.cjs -- it is
+// re-derived on every switch, never persisted, and never survives a
+// restart on its own.
+//
+// Pure and side-effect free (no vault/network access) on purpose: unlike
+// nearly everything else in this file, that makes it testable without a
+// running Electron process. See resolveRequestedProvider below.
+let activeEnvironmentProvider = null;
+
+function setActiveEnvironmentProvider(provider) {
+	activeEnvironmentProvider = AI_PROVIDERS.includes(provider) ? provider : null;
+	return activeEnvironmentProvider;
+}
+
+function getActiveEnvironmentProvider() {
+	return activeEnvironmentProvider;
+}
+
+// The actual precedence: an explicit request always wins (e.g. Settings'
+// "test connection" button always names a provider); failing that, the
+// active environment's own override; failing that, the app-wide default.
+// Exported on its own (rather than inlined into aiComplete) so the
+// precedence itself is unit-testable without touching the vault or network.
+function resolveRequestedProvider(requestedProvider) {
+	if (AI_PROVIDERS.includes(requestedProvider)) {
+		return requestedProvider;
+	}
+	return activeEnvironmentProvider || aiPreferences.defaultProvider;
+}
+
 function normalizeAiPreferences(raw) {
 	const base = defaultAiPreferences();
 	if (!raw || typeof raw !== "object") return base;
@@ -282,7 +319,7 @@ async function completeOpenai(key, model, system, prompt) {
 // locally stored key. Throws a friendly error if no key is configured.
 async function aiComplete(args) {
 	const request = args && typeof args === "object" ? args : {};
-	const provider = AI_PROVIDERS.includes(request.provider) ? request.provider : aiPreferences.defaultProvider;
+	const provider = resolveRequestedProvider(request.provider);
 	const config = aiPreferences.providers[provider];
 	const apiKey = resolveKey(provider);
 	if (!config || !apiKey) {
@@ -308,4 +345,7 @@ module.exports = {
 	getPublicAiConfig,
 	setAiConfig,
 	aiComplete,
+	setActiveEnvironmentProvider,
+	getActiveEnvironmentProvider,
+	resolveRequestedProvider,
 };

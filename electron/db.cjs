@@ -381,9 +381,30 @@ class AtlasDatabase {
 				values.push(fields[key]);
 			}
 		}
-		if (updates.length > 0) {
-			this.run(`UPDATE environments SET ${updates.join(", ")} WHERE id = ?`, [...values, environmentId]);
-		}
+
+		// WP-1.4: `environments.accent` and `environments.config.appearance.accent`
+		// are deliberately the same value living in two places (see
+		// environment-config.cjs's header comment for why) -- the atomic
+		// environment-switch bundle reads accent from the config document, so a
+		// plain recolor through this method must keep that document in sync,
+		// never leave it silently stale. Wrapped in one transaction with the row
+		// update itself (D9: multi-statement writes must not risk a crash
+		// leaving the two out of sync); guarded on the environment actually
+		// existing so a bad id keeps this method's existing no-throw, no-op
+		// contract for a missing row.
+		const touchesAccent = Object.prototype.hasOwnProperty.call(fields, "accent");
+		this.transaction(() => {
+			if (updates.length > 0) {
+				this.run(`UPDATE environments SET ${updates.join(", ")} WHERE id = ?`, [...values, environmentId]);
+			}
+			if (touchesAccent) {
+				const exists = this.first("SELECT id FROM environments WHERE id = ?", [environmentId]);
+				if (exists) {
+					this.setEnvironmentConfig(environmentId, { appearance: { accent: fields.accent } });
+				}
+			}
+		});
+
 		return this.getEnvironment(environmentId);
 	}
 

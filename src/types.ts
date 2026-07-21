@@ -105,6 +105,32 @@ export type EnvironmentConfigPatch = {
 	startupBehaviour?: Partial<EnvironmentStartupBehaviour>;
 };
 
+// WP-1.4: what `environment:activated` broadcasts to every window whenever
+// any surface (the Notch, the main app's own switcher, or the global
+// hotkey's switcher) switches the active environment. Mirrors
+// electron/services/environment-switch.cjs#resolveEnvironmentBundle plus the
+// Notch layout resolution main.cjs adds alongside it -- see that module's
+// header for why "resolve everything, then apply" is what keeps a switch
+// atomic.
+export type EnvironmentActivatedBundle = {
+	environmentId: string | null;
+	appearance: EnvironmentAppearanceConfig;
+	ai: EnvironmentAiConfig;
+};
+
+// The rebindable global hotkey that opens the environment switcher (WP-1.4).
+// `registered` is false when the accelerator could not be claimed --
+// typically another application already holds it -- so Settings can show
+// that plainly instead of a silently dead key.
+export type EnvironmentHotkeyBinding = {
+	accelerator: string;
+	registered: boolean;
+};
+
+export type EnvironmentHotkeySetResult =
+	| { ok: true; accelerator: string; registered: true }
+	| { ok: false; accelerator: string; registered: boolean; error: string };
+
 export type Session = {
 	id: string;
 	environment_id: string;

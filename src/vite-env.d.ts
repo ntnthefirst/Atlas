@@ -15,8 +15,11 @@ import type {
 	FocusConfig,
 	FocusState,
 	Environment,
+	EnvironmentActivatedBundle,
 	EnvironmentConfig,
 	EnvironmentConfigPatch,
+	EnvironmentHotkeyBinding,
+	EnvironmentHotkeySetResult,
 	IsolationAllowlistEntry,
 	IsolationMode,
 	NoteItem,
@@ -57,6 +60,8 @@ declare global {
 			) => Promise<Environment>;
 			deleteEnvironment: (environmentId: string) => Promise<boolean>;
 			notifyEnvironmentSwitch: (environmentId: string) => Promise<boolean>;
+			onEnvironmentActivated: (callback: (bundle: EnvironmentActivatedBundle) => void) => () => void;
+			onOpenEnvironmentSwitcher: (callback: () => void) => () => void;
 			getEnvironmentConfig: (environmentId: string) => Promise<EnvironmentConfig | null>;
 			setEnvironmentConfig: (environmentId: string, patch: EnvironmentConfigPatch) => Promise<EnvironmentConfig>;
 			setEnvironmentIsolationMode: (environmentId: string, mode: IsolationMode) => Promise<Environment>;
@@ -98,6 +103,8 @@ declare global {
 			setNativeTheme: (theme: "dark" | "light" | "system") => Promise<boolean>;
 			setAccent: (value: string) => Promise<boolean>;
 			onAccentChanged: (callback: (value: string) => void) => () => void;
+			getEnvironmentHotkey: () => Promise<EnvironmentHotkeyBinding>;
+			setEnvironmentHotkey: (accelerator: string) => Promise<EnvironmentHotkeySetResult>;
 
 			getNotchPreferences: () => Promise<NotchPreferences>;
 			setNotchPreferences: (preferences: Partial<NotchPreferences>) => Promise<NotchPreferences>;

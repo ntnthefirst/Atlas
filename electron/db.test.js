@@ -130,6 +130,31 @@ describe("AtlasDatabase — environment CRUD", () => {
 		expect(updated).toMatchObject({ icon: "target", accent: "#00ff00", preset: "custom" });
 	});
 
+	// WP-1.4: environments.accent and environments.config.appearance.accent are
+	// deliberately the same value living in two places (see
+	// environment-config.cjs's header comment) -- the atomic environment-switch
+	// bundle reads accent from the config document, so a plain recolor through
+	// updateEnvironment must keep that document in sync rather than leaving it
+	// stale.
+	it("keeps config.appearance.accent in sync when accent changes via updateEnvironment", async () => {
+		const db = await AtlasDatabase.create(createTempDbPath());
+		const environment = db.createEnvironment("Focus", { accent: "#00ff00" });
+		expect(db.getEnvironmentConfig(environment.id).appearance.accent).toBe("#00ff00");
+
+		db.updateEnvironment(environment.id, { accent: "#ff0000" });
+
+		expect(db.getEnvironmentConfig(environment.id).appearance.accent).toBe("#ff0000");
+	});
+
+	it("does not touch config.appearance.accent when accent isn't part of the update", async () => {
+		const db = await AtlasDatabase.create(createTempDbPath());
+		const environment = db.createEnvironment("Focus", { accent: "#00ff00" });
+
+		db.updateEnvironment(environment.id, { icon: "target" });
+
+		expect(db.getEnvironmentConfig(environment.id).appearance.accent).toBe("#00ff00");
+	});
+
 	it("ignores fields that aren't in the allowed list", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
 		const environment = db.createEnvironment("Focus", { icon: "target" });

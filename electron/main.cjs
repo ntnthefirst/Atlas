@@ -6,10 +6,18 @@ const { autoUpdater } = require("electron-updater");
 const { AtlasDatabase } = require("./db.cjs");
 const { ActivityTracker } = require("./activity-tracker.cjs");
 const { EventLog } = require("./services/event-log.cjs");
-const { loadAiPreferences } = require("./ai.cjs");
+const { loadAiPreferences, setActiveEnvironmentProvider } = require("./ai.cjs");
 const { NOTCH_PREFS_FILE, defaultNotchPreferences, normalizeNotchPreferences } = require("./config/notch-prefs.cjs");
 const { GLOBAL_DEFAULT_NOTCH_LAYOUT_ID } = require("./config/notch-layouts.cjs");
 const { createNotchWindowManager } = require("./windows/notch-windows.cjs");
+const platform = require("./platform/index.cjs");
+const {
+	resolveEnvironmentBundle,
+	resolveEffectiveTheme,
+	applyStartupBehaviour,
+} = require("./services/environment-switch.cjs");
+const { createEnvironmentHotkeyManager } = require("./services/environment-hotkey.cjs");
+const { register: registerHotkeyIpc } = require("./ipc/hotkey.cjs");
 const { createTrayManager } = require("./services/tray.cjs");
 const { createSettingsWindow: createSettingsWindowModule } = require("./windows/settings-window.cjs");
 const {
@@ -106,6 +114,28 @@ let currentEnvironmentId = null;
 // tray's "Toggle Smart Notch") writes back to the SAME row the in-memory
 // value was resolved from, rather than always writing the default.
 let activeNotchLayoutId = GLOBAL_DEFAULT_NOTCH_LAYOUT_ID;
+
+// WP-1.4: the user's own global theme choice ("light"/"dark"/"system"),
+// mirrored here purely so an environment switch can always recompute what
+// "system" (no override) falls back to -- see setGlobalThemePreference and
+// services/environment-switch.cjs#resolveEffectiveTheme. Updated ONLY by
+// setGlobalThemePreference (the renderer's own theme toggle, via
+// window:setTheme), never by setActiveEnvironment -- otherwise an
+// environment's override would permanently overwrite what the next
+// "system" environment should revert to.
+let globalThemePreference = "system";
+
+function setGlobalThemePreference(theme) {
+	globalThemePreference = theme === "light" || theme === "dark" ? theme : "system";
+	applyNativeTheme(globalThemePreference);
+	return globalThemePreference;
+}
+
+// WP-1.4: the global hotkey that opens the environment switcher from
+// anywhere, even when no Atlas window has focus. Created once here (a
+// singleton, like `trayManager`/`notchWindowManager` below); loaded and
+// registered during app.whenReady(), unregistered on quit.
+const environmentHotkeyManager = createEnvironmentHotkeyManager();
 
 if (isDev) {
 	// Keep development state fully isolated from the installed production app.
@@ -413,6 +443,22 @@ function showMainWindow() {
 	mainWindow.focus();
 }
 
+// WP-1.4: what the global hotkey actually does. Reuses the main window's
+// EXISTING environment switcher (AtlasEnvironmentMenu.tsx, opened via
+// App.tsx's `showEnvironmentMenu` state) rather than building a second,
+// standalone switcher UI -- this brings up (or creates) the main window
+// exactly like showMainWindow() always has, then tells it to open that
+// switcher. If there is no main window yet (fresh install, no environments),
+// showMainWindow() falls through to the welcome window, same as ever; there
+// is nothing to open a switcher onto in that case, so the follow-up send is
+// skipped.
+function openEnvironmentSwitcher() {
+	showMainWindow();
+	if (mainWindow && !mainWindow.isDestroyed()) {
+		mainWindow.webContents.send("environment:open-switcher");
+	}
+}
+
 function createMiniWindow() {
 	if (miniWindow) {
 		miniWindow.show();
@@ -536,15 +582,57 @@ function refreshActiveNotchPreferences() {
 	return resolved;
 }
 
-// The live-switching wire-up (WP-1.3): called from the `environment:switch`
-// IPC handler whenever the renderer (App.tsx, or the Notch's own environment
-// switcher -- see NotchApp.tsx's onSwitchEnvironment) reports the active
-// environment changed. Updates which environment Notch resolution follows,
-// then immediately re-resolves and re-renders -- no restart, matching this
-// package's acceptance criteria.
+// The live-switching wire-up (WP-1.3, made atomic in WP-1.4): called from the
+// `environment:switch` IPC handler whenever ANY of the three switch surfaces
+// -- the Notch's own switcher (NotchApp.tsx's onSwitchEnvironment), the main
+// app's own switcher (App.tsx), or the global hotkey's switcher
+// (openEnvironmentSwitcher above, which just opens that same main-app
+// switcher) -- reports the active environment changed.
+//
+// Ordering is what makes this atomic (see services/environment-switch.cjs's
+// header for the full reasoning): resolve the ENTIRE target-environment
+// bundle first (both `refreshActiveNotchPreferences` and
+// `resolveEnvironmentBundle` are pure reads keyed only on
+// `currentEnvironmentId`, so neither can return anything left over from
+// whichever environment was active a moment ago), THEN apply every piece,
+// synchronously, with no `await` between any two of them:
+//   1. Notch layout -- re-renders every notch window immediately (WP-1.3).
+//   2. Native theme -- this environment's own override, or (on "system") the
+//      user's actual global preference, never a stale native-theme value.
+//   3. AI default-provider override -- in-memory, read by ai:complete.
+//   4. One broadcast, every field in a single payload, to every window, so a
+//      renderer applies theme + accent together in one state update instead
+//      of two effects landing in separate frames.
+// `startupBehaviour` (5) is deliberately LAST and never awaited -- both
+// sub-features are opt-in and off by default, and must never add latency to
+// the perceived switch that steps 1-4 make up.
 function setActiveEnvironment(environmentId) {
 	currentEnvironmentId = environmentId || null;
-	return refreshActiveNotchPreferences();
+
+	const notchResolved = refreshActiveNotchPreferences();
+	const configBundle = resolveEnvironmentBundle(db, currentEnvironmentId);
+	const bundle = { ...configBundle, notch: notchResolved };
+
+	applyNativeTheme(resolveEffectiveTheme(bundle.appearance.theme, globalThemePreference));
+
+	setActiveEnvironmentProvider(bundle.ai.defaultProvider);
+
+	for (const browserWindow of BrowserWindow.getAllWindows()) {
+		if (!browserWindow.isDestroyed()) {
+			browserWindow.webContents.send("environment:activated", bundle);
+		}
+	}
+
+	void applyStartupBehaviour({
+		db,
+		environmentId: currentEnvironmentId,
+		startupBehaviour: bundle.startupBehaviour,
+		getTracker: () => tracker,
+		getEventLog: () => eventLog,
+		platform,
+	});
+
+	return bundle;
 }
 
 function loadDashboardPreferences() {
@@ -607,7 +695,7 @@ function wireIpc() {
 		getWelcomeWindow: () => welcomeWindow,
 		getMiniWindow: () => miniWindow,
 		getDb: () => db,
-		applyNativeTheme,
+		setGlobalTheme: setGlobalThemePreference,
 		createMiniWindow,
 		createSettingsWindow,
 		createActionEditorWindow,
@@ -653,6 +741,11 @@ function wireIpc() {
 	registerAiIpc(ipcMain);
 
 	registerIsolationIpc(ipcMain);
+
+	registerHotkeyIpc(ipcMain, {
+		getBinding: environmentHotkeyManager.getBinding,
+		setBinding: environmentHotkeyManager.setAccelerator,
+	});
 }
 
 app.whenReady().then(async () => {
@@ -663,6 +756,14 @@ app.whenReady().then(async () => {
 	startFocusEngine();
 	autoUpdater.autoDownload = false;
 	autoUpdater.autoInstallOnAppQuit = true;
+
+	// WP-1.4: the environment-switcher global hotkey. Registration can fail
+	// (another application already holds the persisted combination) --
+	// register() itself logs that to the console; getBinding() (surfaced in
+	// Settings -> Keybindings) is how the user finds out and rebinds it,
+	// rather than this being a silent dead key.
+	environmentHotkeyManager.load();
+	environmentHotkeyManager.register(openEnvironmentSwitcher);
 
 	const iconPath = isDev
 		? path.join(__dirname, "..", "src", "assets", "logosmall.png")
@@ -826,4 +927,9 @@ app.on("before-quit", () => {
 		eventLog.stop();
 		eventLog.flushNow();
 	}
+	// WP-1.4: release the global hotkey explicitly rather than relying on
+	// Electron's own on-quit cleanup, so nothing stays registered while this
+	// process is shutting down (matters for smoke:windows, which boots and
+	// tears down a real Electron process every run).
+	environmentHotkeyManager.unregisterAll();
 });

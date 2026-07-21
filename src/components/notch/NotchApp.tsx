@@ -406,6 +406,18 @@ export function NotchApp() {
 	const [themeValue, setThemeValue] = useState<"dark" | "light" | "system">(() =>
 		readStorage(THEME_KEY, "light"),
 	);
+	// The plain resolved (light/dark) theme, before any environment override --
+	// tracked as its own state (rather than writing the DOM class straight out
+	// of `applyTheme`/`onToggleTheme`) so the environment-override effect below
+	// has a single, current value to layer on top of. See that effect's
+	// comment for why (WP-1.4).
+	const [baseResolvedTheme, setBaseResolvedTheme] = useState<"dark" | "light">("light");
+	// WP-1.4: this environment's own theme override, if it has one. Applied on
+	// top of `baseResolvedTheme` without ever touching localStorage/THEME_KEY
+	// -- exactly like App.tsx's identical layering -- so a "system"
+	// (no-opinion) environment can't get stuck on a previous environment's
+	// override.
+	const [environmentThemeOverride, setEnvironmentThemeOverride] = useState<"light" | "dark" | null>(null);
 	const [systemStats, setSystemStats] = useState({ cpuPercent: 0, memoryPercent: 0 });
 	const [cpuHistory, setCpuHistory] = useState<number[]>([]);
 	const [memoryHistory, setMemoryHistory] = useState<number[]>([]);
@@ -422,7 +434,10 @@ export function NotchApp() {
 			setThemeValue(stored);
 			const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
 			const resolved = stored === "system" ? (prefersDark ? "dark" : "light") : stored;
-			html.classList.toggle("dark", resolved === "dark");
+			// Recorded rather than written straight to the DOM: the effect below
+			// layers any environment override on top of this, and needs a single
+			// current value to fall back to when the override clears (WP-1.4).
+			setBaseResolvedTheme(resolved);
 		};
 		applyTheme();
 
@@ -435,6 +450,27 @@ export function NotchApp() {
 			window.removeEventListener("storage", applyTheme);
 		};
 	}, []);
+
+	// Populated by the `environment:activated` broadcast (main.cjs's
+	// setActiveEnvironment), which fires from every switch surface -- this
+	// notch's own switcher, the main window, and the global hotkey -- since all
+	// three funnel through the same `environment:switch` IPC call (WP-1.4).
+	useEffect(() => {
+		const unsubscribe = window.atlas.onEnvironmentActivated?.((bundle) => {
+			const nextTheme = bundle?.appearance?.theme;
+			setEnvironmentThemeOverride(nextTheme === "light" || nextTheme === "dark" ? nextTheme : null);
+		});
+		return () => unsubscribe?.();
+	}, []);
+
+	// The environment's override wins when it has one; otherwise the ordinary
+	// resolved theme applies. Deliberately never writes THEME_KEY, so switching
+	// to a "system" (no-opinion) environment falls back cleanly instead of
+	// inheriting whatever the previous environment overrode to.
+	useEffect(() => {
+		const effectiveTheme = environmentThemeOverride ?? baseResolvedTheme;
+		document.documentElement.classList.toggle("dark", effectiveTheme === "dark");
+	}, [environmentThemeOverride, baseResolvedTheme]);
 
 	// Preferences + live updates from settings.
 	useEffect(() => {

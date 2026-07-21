@@ -130,7 +130,7 @@ function MainAtlasApp() {
 	const { notebook, setNotebook } = useNotebookManagement();
 	const { dashboard, setDashboard } = useDashboardManagement();
 	const { activityBlocks, setActivityBlocks } = useActivityManagement();
-	const { theme, setTheme } = useThemeManagement();
+	const { theme, resolvedTheme, setTheme } = useThemeManagement();
 	const {
 		showEnvironmentMenu,
 		setShowEnvironmentMenu,
@@ -219,6 +219,42 @@ function MainAtlasApp() {
 		applyAccent(selectedEnvironment?.accent || globalAccent);
 	}, [selectedEnvironment?.accent, globalAccent]);
 
+	// WP-1.4: the environment's own theme override (if any), applied on top of
+	// the DOM without ever going through setTheme/localStorage -- exactly like
+	// the accent effect above, and for the same reason: writing THROUGH the
+	// persisted global preference would mean a "system" (no-opinion)
+	// environment could get stuck on whatever the previous environment last
+	// overrode to, since there would be no separate memory of what "system"
+	// should fall back to. `null` here means "no override", in which case the
+	// effect below this one just re-applies the ordinary resolved theme.
+	const [environmentThemeOverride, setEnvironmentThemeOverride] = useState<"light" | "dark" | null>(null);
+
+	// Populated by the `environment:activated` broadcast (main.cjs's
+	// setActiveEnvironment), which fires from EVERY switch surface -- the
+	// Notch, this window's own switcher, and the global hotkey's switcher --
+	// since all three funnel through the same `environment:switch` IPC call.
+	useEffect(() => {
+		const unsubscribe = window.atlas.onEnvironmentActivated?.((bundle) => {
+			const nextTheme = bundle?.appearance?.theme;
+			setEnvironmentThemeOverride(nextTheme === "light" || nextTheme === "dark" ? nextTheme : null);
+		});
+		return () => unsubscribe?.();
+	}, []);
+
+	useEffect(() => {
+		const effectiveTheme = environmentThemeOverride ?? resolvedTheme;
+		document.documentElement.dataset.theme = effectiveTheme;
+		document.documentElement.classList.toggle("dark", effectiveTheme === "dark");
+	}, [environmentThemeOverride, resolvedTheme]);
+
+	// WP-1.4: the global hotkey brings the main window forward and fires this
+	// so it opens the SAME environment switcher the header button already
+	// opens, rather than a second, standalone switcher UI.
+	useEffect(() => {
+		const unsubscribe = window.atlas.onOpenEnvironmentSwitcher?.(() => setShowEnvironmentMenu(true));
+		return () => unsubscribe?.();
+	}, [setShowEnvironmentMenu]);
+
 	// Remember the active environment so the notch can start a session in it.
 	useEffect(() => {
 		if (selectedEnvironmentId) {
@@ -227,7 +263,12 @@ function MainAtlasApp() {
 			} catch {
 				// Ignore storage failures; the notch falls back to the first environment.
 			}
-			// Fire-and-forget event-log signal (WP-0.5); never let this affect the UI.
+			// Tells main.cjs which environment is now active. WP-0.5: records
+			// `environment.switch` in the event log. WP-1.4: also this is what
+			// makes the switch atomic -- main.cjs resolves this environment's
+			// whole appearance/AI/notch bundle and applies it (native theme, AI
+			// provider override, Notch re-render) before broadcasting
+			// `environment:activated` back to every window, including this one.
 			void window.atlas.notifyEnvironmentSwitch(selectedEnvironmentId).catch(() => {});
 		}
 	}, [selectedEnvironmentId]);

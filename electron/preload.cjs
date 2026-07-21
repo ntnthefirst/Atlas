@@ -6,9 +6,30 @@ contextBridge.exposeInMainWorld("atlas", {
 	renameEnvironment: (environmentId, name) => ipcRenderer.invoke("environment:rename", environmentId, name),
 	updateEnvironment: (environmentId, fields) => ipcRenderer.invoke("environment:update", environmentId, fields),
 	deleteEnvironment: (environmentId) => ipcRenderer.invoke("environment:delete", environmentId),
-	// Fire-and-forget: tells the main process which environment the user is now
-	// working in, purely so the event log (WP-0.5) can record `environment.switch`.
+	// Tells the main process which environment the user is now working in.
+	// Records `environment.switch` in the event log (WP-0.5) and, as of
+	// WP-1.4, is also what makes the switch atomic and live everywhere: the
+	// resolved promise carries the target environment's whole
+	// appearance/AI/notch bundle, and main.cjs separately broadcasts the same
+	// bundle to every window via `environment:activated` below.
 	notifyEnvironmentSwitch: (environmentId) => ipcRenderer.invoke("environment:switch", environmentId),
+	// WP-1.4: fires in every window whenever ANY surface (the Notch, the main
+	// app's own switcher, or the global hotkey's switcher) switches the active
+	// environment -- see main.cjs's setActiveEnvironment.
+	onEnvironmentActivated: (callback) => {
+		const listener = (_event, bundle) => callback(bundle);
+		ipcRenderer.on("environment:activated", listener);
+		return () => ipcRenderer.removeListener("environment:activated", listener);
+	},
+	// WP-1.4: the global hotkey opens the main window (creating/restoring it
+	// like showMainWindow always has) and then fires this so it opens its
+	// existing environment switcher (AtlasEnvironmentMenu.tsx) instead of a
+	// second, standalone switcher UI.
+	onOpenEnvironmentSwitcher: (callback) => {
+		const listener = () => callback();
+		ipcRenderer.on("environment:open-switcher", listener);
+		return () => ipcRenderer.removeListener("environment:open-switcher", listener);
+	},
 	getEnvironmentConfig: (environmentId) => ipcRenderer.invoke("environment:getConfig", environmentId),
 	setEnvironmentConfig: (environmentId, patch) => ipcRenderer.invoke("environment:setConfig", environmentId, patch),
 	// WP-1.2: switch an environment's isolation mode. Takes effect immediately
@@ -60,6 +81,12 @@ contextBridge.exposeInMainWorld("atlas", {
 		ipcRenderer.on("accent:changed", listener);
 		return () => ipcRenderer.removeListener("accent:changed", listener);
 	},
+	// WP-1.4: the rebindable global hotkey that opens the environment switcher.
+	// `setEnvironmentHotkey` resolves to `{ ok: false, error }` on a conflict
+	// (the chosen combination is already held by another application) --
+	// callers must show that inline rather than assuming success.
+	getEnvironmentHotkey: () => ipcRenderer.invoke("hotkey:getBinding"),
+	setEnvironmentHotkey: (accelerator) => ipcRenderer.invoke("hotkey:setBinding", accelerator),
 	getAppVersion: () => ipcRenderer.invoke("app:version"),
 	checkForUpdates: (options) => ipcRenderer.invoke("app:checkUpdates", options),
 	listReleaseHistory: (options) => ipcRenderer.invoke("app:releaseHistory", options),
