@@ -45,7 +45,7 @@ Last updated: 2026-07-21. Keep this current — it is what a fresh session reads
 **Suite: 381 tests, ~5s.** Verification commands now available:
 
 ```
-npm test               # 370 unit/integration tests, ~2s
+npm test               # 381 unit/integration tests, ~5s
 npm run lint           # now covers electron/ and scripts/ too
 npm run smoke          # boots the real Electron main process, fails on crash
 npm run smoke:windows  # opens every window type, fails if any does not
