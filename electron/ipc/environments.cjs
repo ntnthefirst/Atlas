@@ -80,6 +80,29 @@ function register(ipcMain, deps) {
 		getEventLog?.()?.record("environment.switch", { environmentId });
 		return true;
 	});
+
+	// WP-1.1: the environment configuration document (appearance, Notch
+	// layout reference, AI defaults, integration enablement, startup
+	// behaviour). Not routed through electron/data/scoped.cjs -- that
+	// accessor exists to gate CROSS-environment reads of tasks/notes/
+	// sessions/events (see its file header), and a config read/write is
+	// always addressed by its own environment id, exactly like
+	// environment:update above. There is no "am I allowed to see this" policy
+	// question here, only "does this environment exist" -- the same shape
+	// db.cjs's methods already enforce.
+	ipcMain.handle("environment:getConfig", (_event, environmentId) => {
+		if (!environmentId) {
+			throw new Error("Environment id missing.");
+		}
+		return getDb().getEnvironmentConfig(environmentId);
+	});
+
+	ipcMain.handle("environment:setConfig", (_event, environmentId, patch = {}) => {
+		if (!environmentId) {
+			throw new Error("Environment id missing.");
+		}
+		return getDb().setEnvironmentConfig(environmentId, patch ?? {});
+	});
 }
 
 module.exports = { register };

@@ -54,3 +54,69 @@ describe("environment:switch — event log recording (WP-0.5)", () => {
 		expect(() => ipcMain.invoke("environment:switch", "env-123")).not.toThrow();
 	});
 });
+
+describe("environment:getConfig / environment:setConfig (WP-1.1)", () => {
+	function createFakeDb() {
+		const configs = new Map();
+		return {
+			getEnvironmentConfig: (environmentId) => configs.get(environmentId) ?? null,
+			setEnvironmentConfig: (environmentId, patch) => {
+				if (!configs.has(environmentId) && environmentId !== "known-env") {
+					throw new Error("Environment not found.");
+				}
+				const next = { ...(configs.get(environmentId) ?? {}), ...patch };
+				configs.set(environmentId, next);
+				return next;
+			},
+		};
+	}
+
+	it("environment:getConfig passes the environment id straight through to the db", () => {
+		const db = createFakeDb();
+		db.setEnvironmentConfig("known-env", { notchLayoutId: "layout-1" });
+		const ipcMain = createFakeIpcMain();
+		register(ipcMain, { getDb: () => db, openPrimaryWindowByEnvironmentState: () => {} });
+
+		expect(ipcMain.invoke("environment:getConfig", "known-env")).toEqual({ notchLayoutId: "layout-1" });
+	});
+
+	it("environment:getConfig throws when no environment id is given", () => {
+		const ipcMain = createFakeIpcMain();
+		register(ipcMain, { getDb: () => createFakeDb(), openPrimaryWindowByEnvironmentState: () => {} });
+
+		expect(() => ipcMain.invoke("environment:getConfig", null)).toThrow(/id missing/i);
+	});
+
+	it("environment:setConfig forwards the patch to the db and returns the resolved config", () => {
+		const db = createFakeDb();
+		const ipcMain = createFakeIpcMain();
+		register(ipcMain, { getDb: () => db, openPrimaryWindowByEnvironmentState: () => {} });
+
+		const result = ipcMain.invoke("environment:setConfig", "known-env", { notchLayoutId: "layout-2" });
+
+		expect(result).toEqual({ notchLayoutId: "layout-2" });
+		expect(ipcMain.invoke("environment:getConfig", "known-env")).toEqual({ notchLayoutId: "layout-2" });
+	});
+
+	it("environment:setConfig throws when no environment id is given", () => {
+		const ipcMain = createFakeIpcMain();
+		register(ipcMain, { getDb: () => createFakeDb(), openPrimaryWindowByEnvironmentState: () => {} });
+
+		expect(() => ipcMain.invoke("environment:setConfig", null, {})).toThrow(/id missing/i);
+	});
+
+	it("environment:setConfig defaults a missing/undefined patch to an empty object rather than passing undefined through", () => {
+		const db = createFakeDb();
+		let receivedPatch;
+		db.setEnvironmentConfig = (environmentId, patch) => {
+			receivedPatch = patch;
+			return {};
+		};
+		const ipcMain = createFakeIpcMain();
+		register(ipcMain, { getDb: () => db, openPrimaryWindowByEnvironmentState: () => {} });
+
+		ipcMain.invoke("environment:setConfig", "known-env");
+
+		expect(receivedPatch).toEqual({});
+	});
+});

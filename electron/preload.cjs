@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld("atlas", {
 	// Fire-and-forget: tells the main process which environment the user is now
 	// working in, purely so the event log (WP-0.5) can record `environment.switch`.
 	notifyEnvironmentSwitch: (environmentId) => ipcRenderer.invoke("environment:switch", environmentId),
+	getEnvironmentConfig: (environmentId) => ipcRenderer.invoke("environment:getConfig", environmentId),
+	setEnvironmentConfig: (environmentId, patch) => ipcRenderer.invoke("environment:setConfig", environmentId, patch),
 
 	getActiveSession: () => ipcRenderer.invoke("session:active"),
 	startSession: (environmentId) => ipcRenderer.invoke("session:start", environmentId),

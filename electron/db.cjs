@@ -4,6 +4,11 @@ const { wrapDatabase } = require("./migrations/sqlite-helpers.cjs");
 const { runMigrations } = require("./migrations/index.cjs");
 const { importLegacyDatabaseIfNeeded } = require("./migrations/legacy-import.cjs");
 const { isValidIsolationMode } = require("./data/isolation.cjs");
+const {
+	parseEnvironmentConfig,
+	serializeEnvironmentConfig,
+	applyConfigPatch,
+} = require("./config/environment-config.cjs");
 
 // Requests WAL (so readers don't block the writer) and synchronous=NORMAL
 // (fsyncs at commit/checkpoint, so a hard crash can't corrupt the database —
@@ -418,6 +423,39 @@ class AtlasDatabase {
 		}
 		this.run("UPDATE environments SET isolation_mode = ? WHERE id = ?", [mode, environmentId]);
 		return this.getEnvironmentIsolationMode(environmentId);
+	}
+
+	// WP-1.1: an environment's own settings document -- appearance, Notch
+	// layout reference, AI defaults, integration enablement, startup
+	// behaviour. See electron/config/environment-config.cjs for the schema
+	// and defensive parser. `icon`/`accent`/`preset` are pulled in alongside
+	// the raw `config` column so a NULL/absent config (every environment
+	// created before this column existed) resolves to defaults seeded from
+	// that row's own existing data, rather than a generic blank -- in
+	// particular so an existing user's accent is never silently reset.
+	getEnvironmentConfig(environmentId) {
+		const row = this.first("SELECT icon, accent, preset, config FROM environments WHERE id = ?", [environmentId]);
+		if (!row) {
+			return null;
+		}
+		return parseEnvironmentConfig(row.config, { icon: row.icon, accent: row.accent, preset: row.preset });
+	}
+
+	// Applies a partial patch on top of the environment's current (already
+	// defensively-resolved) config, re-normalizes the merged result, and
+	// persists it. Throws for an environment that doesn't exist, matching
+	// setEnvironmentIsolationMode's contract; re-reads via
+	// getEnvironmentConfig afterward so the return value is exactly what a
+	// fresh load would produce, not just what this call assembled in memory.
+	setEnvironmentConfig(environmentId, patch) {
+		const row = this.first("SELECT icon, accent, preset, config FROM environments WHERE id = ?", [environmentId]);
+		if (!row) {
+			throw new Error("Environment not found.");
+		}
+		const current = parseEnvironmentConfig(row.config, { icon: row.icon, accent: row.accent, preset: row.preset });
+		const next = applyConfigPatch(current, patch);
+		this.run("UPDATE environments SET config = ? WHERE id = ?", [serializeEnvironmentConfig(next), environmentId]);
+		return this.getEnvironmentConfig(environmentId);
 	}
 
 	getSessionById(sessionId) {

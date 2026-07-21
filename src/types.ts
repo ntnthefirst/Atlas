@@ -17,6 +17,71 @@ export type Environment = {
 	created_at: string;
 };
 
+// The per-environment settings document (WP-1.1). Mirrors
+// electron/config/environment-config.cjs's schema exactly — that module is
+// the source of truth (defaults, defensive parsing, the version upgrade
+// path); this type just describes the shape a fully-resolved document
+// always has by the time it reaches the renderer.
+//
+// `isolation_mode` is NOT part of this type, on purpose: it is already a
+// first-class field on `Environment` itself (WP-0.8), and duplicating a
+// security-relevant setting into two places is exactly the kind of drift
+// this schema exists to avoid elsewhere.
+export type EnvironmentThemePreference = "light" | "dark" | "system";
+
+export type EnvironmentAppearanceConfig = {
+	// Mirrors `Environment.accent` for a newly-created environment, but is
+	// its own value once set — see environment-config.cjs's header comment
+	// for why the two are allowed to exist side by side.
+	accent: string | null;
+	theme: EnvironmentThemePreference;
+};
+
+export type EnvironmentAiConfig = {
+	// `null` means "inherit the app-wide default provider" (ai:getConfig),
+	// not "no provider chosen".
+	defaultProvider: AiProvider | null;
+	systemPrompt: string;
+};
+
+// What happens when this environment is activated. Consumed starting with
+// WP-1.4 ("environment switching"); this package only defines the shape and
+// makes sure it round-trips.
+export type EnvironmentStartupBehaviour = {
+	autoStartSession: boolean;
+	// Launch commands, in the same format as `window.atlas.launchApp` expects
+	// (see NotchSceneConfig.apps in src/scenes.ts).
+	launchApps: string[];
+};
+
+// An integration-enablement map, `{ [integrationId]: enabled }`. Empty until
+// WP-5.x introduces the first integrations.
+export type EnvironmentIntegrationsConfig = Record<string, boolean>;
+
+export type EnvironmentConfig = {
+	version: number;
+	appearance: EnvironmentAppearanceConfig;
+	// Which Notch layout this environment uses; consumed starting with
+	// WP-1.3. `null` means "no layout chosen yet / use the default".
+	notchLayoutId: string | null;
+	ai: EnvironmentAiConfig;
+	integrations: EnvironmentIntegrationsConfig;
+	startupBehaviour: EnvironmentStartupBehaviour;
+};
+
+// A partial update to an environment's config — each present section is
+// shallow-merged onto the current one, field by field (see
+// environment-config.cjs#applyConfigPatch), so passing only `{ appearance:
+// { theme: "dark" } }` leaves `appearance.accent` and every other section
+// untouched.
+export type EnvironmentConfigPatch = {
+	appearance?: Partial<EnvironmentAppearanceConfig>;
+	notchLayoutId?: string | null;
+	ai?: Partial<EnvironmentAiConfig>;
+	integrations?: EnvironmentIntegrationsConfig;
+	startupBehaviour?: Partial<EnvironmentStartupBehaviour>;
+};
+
 export type Session = {
 	id: string;
 	environment_id: string;

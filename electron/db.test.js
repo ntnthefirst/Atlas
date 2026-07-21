@@ -169,6 +169,98 @@ describe("AtlasDatabase — environment CRUD", () => {
 	});
 });
 
+describe("AtlasDatabase — environment configuration (WP-1.1)", () => {
+	it("returns null for a config lookup on an environment that does not exist", async () => {
+		const db = await AtlasDatabase.create(createTempDbPath());
+
+		expect(db.getEnvironmentConfig("nonexistent-id")).toBeNull();
+	});
+
+	it("seeds defaults from the environment's own accent for a brand-new environment with no config saved yet", async () => {
+		const db = await AtlasDatabase.create(createTempDbPath());
+		const environment = db.createEnvironment("Study", { icon: "book", accent: "#10b981", preset: "school" });
+
+		const config = db.getEnvironmentConfig(environment.id);
+
+		expect(config.version).toBe(1);
+		expect(config.appearance).toEqual({ accent: "#10b981", theme: "system" });
+		expect(config.notchLayoutId).toBeNull();
+		expect(config.ai).toEqual({ defaultProvider: null, systemPrompt: "" });
+		expect(config.integrations).toEqual({});
+		expect(config.startupBehaviour).toEqual({ autoStartSession: false, launchApps: [] });
+	});
+
+	it("does not invent an accent for an environment that never had one", async () => {
+		const db = await AtlasDatabase.create(createTempDbPath());
+		const environment = db.createEnvironment("Deep Work");
+
+		expect(db.getEnvironmentConfig(environment.id).appearance.accent).toBeNull();
+	});
+
+	it("throws when setting config on an environment that does not exist", async () => {
+		const db = await AtlasDatabase.create(createTempDbPath());
+
+		expect(() => db.setEnvironmentConfig("nonexistent-id", { notchLayoutId: "layout-1" })).toThrow(/not found/i);
+	});
+
+	it("persists a partial patch and returns the fully-resolved config", async () => {
+		const db = await AtlasDatabase.create(createTempDbPath());
+		const environment = db.createEnvironment("Coding", { accent: "#7d53de" });
+
+		const updated = db.setEnvironmentConfig(environment.id, {
+			notchLayoutId: "layout-42",
+			ai: { defaultProvider: "anthropic", systemPrompt: "Be concise." },
+		});
+
+		expect(updated.notchLayoutId).toBe("layout-42");
+		expect(updated.ai).toEqual({ defaultProvider: "anthropic", systemPrompt: "Be concise." });
+		// Untouched by the patch, and not reset by it.
+		expect(updated.appearance.accent).toBe("#7d53de");
+
+		expect(db.getEnvironmentConfig(environment.id)).toEqual(updated);
+	});
+
+	it("round-trips a full config through setEnvironmentConfig/getEnvironmentConfig and across a reopen", async () => {
+		const dbPath = createTempDbPath();
+		const original = await AtlasDatabase.create(dbPath);
+		const environment = original.createEnvironment("Full config env", { accent: "#3b82f6" });
+
+		const fullPatch = {
+			appearance: { accent: "#f43f5e", theme: "dark" },
+			notchLayoutId: "layout-9",
+			ai: { defaultProvider: "google", systemPrompt: "Answer briefly." },
+			integrations: { calendar: true, email: false },
+			startupBehaviour: { autoStartSession: true, launchApps: ["code .", "notepad.exe"] },
+		};
+		original.setEnvironmentConfig(environment.id, fullPatch);
+
+		const reopened = await AtlasDatabase.create(dbPath);
+		const config = reopened.getEnvironmentConfig(environment.id);
+
+		expect(config).toEqual({
+			version: 1,
+			appearance: { accent: "#f43f5e", theme: "dark" },
+			notchLayoutId: "layout-9",
+			ai: { defaultProvider: "google", systemPrompt: "Answer briefly." },
+			integrations: { calendar: true, email: false },
+			startupBehaviour: { autoStartSession: true, launchApps: ["code .", "notepad.exe"] },
+		});
+	});
+
+	it("never resets icon/accent/preset on the environment row itself -- config is additive, not a replacement", async () => {
+		const db = await AtlasDatabase.create(createTempDbPath());
+		const environment = db.createEnvironment("Writing", { icon: "pencil-square", accent: "#0ea5e9", preset: "writing" });
+
+		db.setEnvironmentConfig(environment.id, { appearance: { theme: "dark" } });
+
+		expect(db.getEnvironment(environment.id)).toMatchObject({
+			icon: "pencil-square",
+			accent: "#0ea5e9",
+			preset: "writing",
+		});
+	});
+});
+
 describe("AtlasDatabase — session lifecycle", () => {
 	it("starts a session for an environment", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());

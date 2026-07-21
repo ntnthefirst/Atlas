@@ -15,6 +15,8 @@ import type {
 	FocusConfig,
 	FocusState,
 	Environment,
+	EnvironmentConfig,
+	EnvironmentConfigPatch,
 	NoteItem,
 	NotchInputPayload,
 	NotchPreferences,
@@ -52,6 +54,8 @@ declare global {
 			) => Promise<Environment>;
 			deleteEnvironment: (environmentId: string) => Promise<boolean>;
 			notifyEnvironmentSwitch: (environmentId: string) => Promise<boolean>;
+			getEnvironmentConfig: (environmentId: string) => Promise<EnvironmentConfig | null>;
+			setEnvironmentConfig: (environmentId: string, patch: EnvironmentConfigPatch) => Promise<EnvironmentConfig>;
 
 			getActiveSession: () => Promise<Session | null>;
 			startSession: (environmentId: string) => Promise<Session>;
