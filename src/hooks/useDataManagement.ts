@@ -1,21 +1,21 @@
 import { useState } from "react";
-import type { MapItem, Session, ActivityBlock, TaskItem, TaskColumn, DashboardOverview, NoteItem } from "../types";
+import type { Environment, Session, ActivityBlock, TaskItem, TaskColumn, DashboardOverview, NoteItem } from "../types";
 import { TASK_ORDER_KEY, TASK_COLUMNS_KEY, defaultDashboard, defaultTaskColumns } from "../constants";
 import { readStorage } from "../utils/storage";
 import { normalizeColumns } from "../utils/taskHelpers";
 
-export const useMapManagement = () => {
-	const [maps, setMaps] = useState<MapItem[]>([]);
-	const [selectedMapId, setSelectedMapId] = useState("");
+export const useEnvironmentManagement = () => {
+	const [environments, setEnvironments] = useState<Environment[]>([]);
+	const [selectedEnvironmentId, setSelectedEnvironmentId] = useState("");
 
-	const selectedMap = maps.find((mapItem) => mapItem.id === selectedMapId) ?? null;
+	const selectedEnvironment = environments.find((environmentItem) => environmentItem.id === selectedEnvironmentId) ?? null;
 
 	return {
-		maps,
-		setMaps,
-		selectedMapId,
-		setSelectedMapId,
-		selectedMap,
+		environments,
+		setEnvironments,
+		selectedEnvironmentId,
+		setSelectedEnvironmentId,
+		selectedEnvironment,
 	};
 };
 
@@ -37,28 +37,28 @@ export const useSessionManagement = () => {
 	};
 };
 
-export const useTaskManagement = (selectedMapId: string) => {
+export const useTaskManagement = (selectedEnvironmentId: string) => {
 	const [tasks, setTasks] = useState<TaskItem[]>([]);
-	const [taskOrderByMap, setTaskOrderByMap] = useState<Record<string, string[]>>(() =>
+	const [taskOrderByEnvironment, setTaskOrderByEnvironment] = useState<Record<string, string[]>>(() =>
 		readStorage(TASK_ORDER_KEY, {} as Record<string, string[]>),
 	);
-	const [taskColumnsByMap, setTaskColumnsByMap] = useState<Record<string, TaskColumn[]>>(() =>
+	const [taskColumnsByEnvironment, setTaskColumnsByEnvironment] = useState<Record<string, TaskColumn[]>>(() =>
 		readStorage(TASK_COLUMNS_KEY, {} as Record<string, TaskColumn[]>),
 	);
 	const [draggedTaskId, setDraggedTaskId] = useState<string>("");
 	const [dropStatus, setDropStatus] = useState<string | null>(null);
 
-	const statusColumns = selectedMapId
-		? normalizeColumns(taskColumnsByMap[selectedMapId] ?? defaultTaskColumns, defaultTaskColumns)
+	const statusColumns = selectedEnvironmentId
+		? normalizeColumns(taskColumnsByEnvironment[selectedEnvironmentId] ?? defaultTaskColumns, defaultTaskColumns)
 		: defaultTaskColumns;
 
 	return {
 		tasks,
 		setTasks,
-		taskOrderByMap,
-		setTaskOrderByMap,
-		taskColumnsByMap,
-		setTaskColumnsByMap,
+		taskOrderByEnvironment,
+		setTaskOrderByEnvironment,
+		taskColumnsByEnvironment,
+		setTaskColumnsByEnvironment,
 		draggedTaskId,
 		setDraggedTaskId,
 		dropStatus,

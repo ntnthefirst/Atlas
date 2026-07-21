@@ -2,7 +2,7 @@ import { useState } from "react";
 import { FolderOpenIcon, PlusIcon, Squares2X2Icon, TrashIcon } from "@heroicons/react/24/outline";
 import { TAB_ICON_MAP } from "./tabIconMap";
 import { defaultTaskColumns } from "../../constants";
-import { getActiveMapTaskColumns } from "../../utils";
+import { getActiveEnvironmentTaskColumns } from "../../utils";
 import { NOTCH_TAB_ICONS } from "../../types";
 import type { NotchTabIcon } from "../../types";
 import { parseSceneConfig, serializeSceneConfig, type NotchSceneConfig } from "../../scenes";
@@ -37,14 +37,14 @@ export function SceneConfigEditor({
 
 	const update = (patch: Partial<NotchSceneConfig>) => onChange(serializeSceneConfig({ ...scene, ...patch }));
 
-	const taskColumns = getActiveMapTaskColumns(lastEnvironmentId(), defaultTaskColumns);
+	const taskColumns = getActiveEnvironmentTaskColumns(lastEnvironmentId(), defaultTaskColumns);
 	const SelectedIcon = TAB_ICON_MAP[scene.icon] ?? Squares2X2Icon;
 
 	const loadEnvironments = () => {
 		if (environments.length > 0) return;
 		window.atlas
-			.listMaps()
-			.then((maps) => setEnvironments(maps.map((map) => ({ id: map.id, name: map.name }))))
+			.listEnvironments()
+			.then((environments) => setEnvironments(environments.map((map) => ({ id: map.id, name: map.name }))))
 			.catch(() => setEnvironments([]));
 	};
 

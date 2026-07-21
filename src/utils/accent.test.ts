@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ACCENT_PRESETS, accentVars, DEFAULT_ACCENT, isValidHexColor } from "./accent";
 
 describe("accentVars", () => {
-	it("maps the input value straight through to --primary", () => {
+	it("environments the input value straight through to --primary", () => {
 		expect(accentVars("#7d53de")["--primary"]).toBe("#7d53de");
 	});
 

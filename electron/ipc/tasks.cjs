@@ -11,18 +11,18 @@
 function register(ipcMain, deps) {
 	const { getDb } = deps;
 
-	ipcMain.handle("task:listByMap", (_event, mapId) => {
-		if (!mapId) {
+	ipcMain.handle("task:listByEnvironment", (_event, environmentId) => {
+		if (!environmentId) {
 			return [];
 		}
-		return getDb().listTasksByMap(mapId);
+		return getDb().listTasksByEnvironment(environmentId);
 	});
 
-	ipcMain.handle("task:create", (_event, mapId, title, description, fields) => {
-		if (!mapId || !title || !title.trim()) {
-			throw new Error("Task map and title are required.");
+	ipcMain.handle("task:create", (_event, environmentId, title, description, fields) => {
+		if (!environmentId || !title || !title.trim()) {
+			throw new Error("Task environment and title are required.");
 		}
-		return getDb().createTask(mapId, title.trim(), (description || "").trim(), fields || {});
+		return getDb().createTask(environmentId, title.trim(), (description || "").trim(), fields || {});
 	});
 
 	ipcMain.handle("task:updateStatus", (_event, taskId, status) => {

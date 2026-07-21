@@ -12,7 +12,7 @@ const MINUTE = 60_000;
 
 const session = (overrides: Partial<Session> = {}): Session => ({
 	id: "session-1",
-	map_id: "map-1",
+	environment_id: "map-1",
 	started_at: STARTED_AT,
 	ended_at: null,
 	total_duration: 0,

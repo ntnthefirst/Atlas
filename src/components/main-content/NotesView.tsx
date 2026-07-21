@@ -167,7 +167,7 @@ const parseNotebook = (content: string): NotebookDocument => {
 
 const stringifyNotebook = (doc: NotebookDocument) => JSON.stringify(doc);
 
-export function NotesView({ notebook, onUpdateNotebookByMap }: MainContentViewsProps) {
+export function NotesView({ notebook, onUpdateNotebookByEnvironment }: MainContentViewsProps) {
 	const [doc, setDoc] = useState<NotebookDocument>(() => parseNotebook(notebook?.content ?? ""));
 	const [selectedNodeId, setSelectedNodeId] = useState("");
 	const [editingNodeId, setEditingNodeId] = useState("");
@@ -295,7 +295,7 @@ export function NotesView({ notebook, onUpdateNotebookByMap }: MainContentViewsP
 			return;
 		}
 		const timeout = window.setTimeout(() => {
-			onUpdateNotebookByMap(stringifyNotebook(doc))
+			onUpdateNotebookByEnvironment(stringifyNotebook(doc))
 				.then(() => {
 					setSaveState("saved");
 					setIsDirty(false);
@@ -303,7 +303,7 @@ export function NotesView({ notebook, onUpdateNotebookByMap }: MainContentViewsP
 				.catch(() => setSaveState("error"));
 		}, 450);
 		return () => window.clearTimeout(timeout);
-	}, [doc, isDirty, notebook, onUpdateNotebookByMap]);
+	}, [doc, isDirty, notebook, onUpdateNotebookByEnvironment]);
 
 	const updateNode = useCallback(
 		(id: string, updater: (node: NotebookNode) => NotebookNode) => {

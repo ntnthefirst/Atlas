@@ -1,38 +1,39 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("atlas", {
-	listMaps: () => ipcRenderer.invoke("map:list"),
-	createMap: (name, options) => ipcRenderer.invoke("map:create", name, options),
-	renameMap: (mapId, name) => ipcRenderer.invoke("map:rename", mapId, name),
-	updateMap: (mapId, fields) => ipcRenderer.invoke("map:update", mapId, fields),
-	deleteMap: (mapId) => ipcRenderer.invoke("map:delete", mapId),
+	listEnvironments: () => ipcRenderer.invoke("environment:list"),
+	createEnvironment: (name, options) => ipcRenderer.invoke("environment:create", name, options),
+	renameEnvironment: (environmentId, name) => ipcRenderer.invoke("environment:rename", environmentId, name),
+	updateEnvironment: (environmentId, fields) => ipcRenderer.invoke("environment:update", environmentId, fields),
+	deleteEnvironment: (environmentId) => ipcRenderer.invoke("environment:delete", environmentId),
 
 	getActiveSession: () => ipcRenderer.invoke("session:active"),
-	startSession: (mapId) => ipcRenderer.invoke("session:start", mapId),
+	startSession: (environmentId) => ipcRenderer.invoke("session:start", environmentId),
 	pauseSession: (sessionId) => ipcRenderer.invoke("session:pause", sessionId),
 	resumeSession: (sessionId) => ipcRenderer.invoke("session:resume", sessionId),
 	stopSession: (sessionId) => ipcRenderer.invoke("session:stop", sessionId),
 	deleteSession: (sessionId) => ipcRenderer.invoke("session:delete", sessionId),
-	listSessionsByMap: (mapId) => ipcRenderer.invoke("session:listByMap", mapId),
+	listSessionsByEnvironment: (environmentId) => ipcRenderer.invoke("session:listByEnvironment", environmentId),
 
 	listActivityBySession: (sessionId) => ipcRenderer.invoke("activity:listBySession", sessionId),
 	getCurrentApp: () => ipcRenderer.invoke("activity:current-app"),
 
-	listTasksByMap: (mapId) => ipcRenderer.invoke("task:listByMap", mapId),
-	createTask: (mapId, title, description, fields) =>
-		ipcRenderer.invoke("task:create", mapId, title, description, fields),
+	listTasksByEnvironment: (environmentId) => ipcRenderer.invoke("task:listByEnvironment", environmentId),
+	createTask: (environmentId, title, description, fields) =>
+		ipcRenderer.invoke("task:create", environmentId, title, description, fields),
 	updateTaskStatus: (taskId, status) => ipcRenderer.invoke("task:updateStatus", taskId, status),
 	updateTask: (taskId, fields) => ipcRenderer.invoke("task:update", taskId, fields),
 	deleteTask: (taskId) => ipcRenderer.invoke("task:delete", taskId),
 
-	listNotesByMap: (mapId) => ipcRenderer.invoke("note:listByMap", mapId),
-	createNote: (mapId, content) => ipcRenderer.invoke("note:create", mapId, content),
+	listNotesByEnvironment: (environmentId) => ipcRenderer.invoke("note:listByEnvironment", environmentId),
+	createNote: (environmentId, content) => ipcRenderer.invoke("note:create", environmentId, content),
 	updateNote: (noteId, content) => ipcRenderer.invoke("note:update", noteId, content),
 	deleteNote: (noteId) => ipcRenderer.invoke("note:delete", noteId),
-	getNotebookByMap: (mapId) => ipcRenderer.invoke("notebook:getByMap", mapId),
-	updateNotebookByMap: (mapId, content) => ipcRenderer.invoke("notebook:updateByMap", mapId, content),
+	getNotebookByEnvironment: (environmentId) => ipcRenderer.invoke("notebook:getByEnvironment", environmentId),
+	updateNotebookByEnvironment: (environmentId, content) =>
+		ipcRenderer.invoke("notebook:updateByEnvironment", environmentId, content),
 
-	getDashboardOverview: (mapId) => ipcRenderer.invoke("dashboard:overview", mapId),
+	getDashboardOverview: (environmentId) => ipcRenderer.invoke("dashboard:overview", environmentId),
 	repairCorruptedSessions: () => ipcRenderer.invoke("data:repairCorruptedSessions"),
 
 	launchApp: (command) => ipcRenderer.invoke("app:launch", command),

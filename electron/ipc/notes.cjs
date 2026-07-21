@@ -11,18 +11,18 @@
 function register(ipcMain, deps) {
 	const { getDb } = deps;
 
-	ipcMain.handle("note:listByMap", (_event, mapId) => {
-		if (!mapId) {
+	ipcMain.handle("note:listByEnvironment", (_event, environmentId) => {
+		if (!environmentId) {
 			return [];
 		}
-		return getDb().listNotesByMap(mapId);
+		return getDb().listNotesByEnvironment(environmentId);
 	});
 
-	ipcMain.handle("note:create", (_event, mapId, content) => {
-		if (!mapId) {
-			throw new Error("Map id is required.");
+	ipcMain.handle("note:create", (_event, environmentId, content) => {
+		if (!environmentId) {
+			throw new Error("Environment id is required.");
 		}
-		return getDb().createNote(mapId, (content || "").trim());
+		return getDb().createNote(environmentId, (content || "").trim());
 	});
 
 	ipcMain.handle("note:update", (_event, noteId, content) => {
@@ -40,21 +40,21 @@ function register(ipcMain, deps) {
 		return true;
 	});
 
-	ipcMain.handle("notebook:getByMap", (_event, mapId) => {
-		if (!mapId) {
-			throw new Error("Map id is required.");
+	ipcMain.handle("notebook:getByEnvironment", (_event, environmentId) => {
+		if (!environmentId) {
+			throw new Error("Environment id is required.");
 		}
-		return getDb().getNotebookByMap(mapId);
+		return getDb().getNotebookByEnvironment(environmentId);
 	});
 
-	ipcMain.handle("notebook:updateByMap", (_event, mapId, content) => {
-		if (!mapId) {
-			throw new Error("Map id is required.");
+	ipcMain.handle("notebook:updateByEnvironment", (_event, environmentId, content) => {
+		if (!environmentId) {
+			throw new Error("Environment id is required.");
 		}
 		if (typeof content !== "string") {
 			throw new Error("Notebook content must be a string.");
 		}
-		return getDb().updateNotebookByMap(mapId, content);
+		return getDb().updateNotebookByEnvironment(environmentId, content);
 	});
 }
 

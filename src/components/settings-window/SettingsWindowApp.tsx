@@ -166,8 +166,8 @@ export function SettingsWindowApp() {
 	const [highlightSession, setHighlightSession] = useState(() =>
 		readStorage("atlas.settings.highlightSession", true),
 	);
-	const [pinMapSwitcher, setPinMapSwitcher] = useState(() =>
-		readStorage("atlas.settings.pinMapSwitcher", false),
+	const [pinEnvironmentSwitcher, setPinEnvironmentSwitcher] = useState(() =>
+		readStorage("atlas.settings.pinEnvironmentSwitcher", false),
 	);
 	const [vimMode, setVimMode] = useState(() => readStorage("atlas.settings.vimMode", false));
 	const [commandPalette, setCommandPalette] = useState(() =>
@@ -380,7 +380,7 @@ export function SettingsWindowApp() {
 		localStorage.setItem("atlas.settings.density", JSON.stringify(density));
 		localStorage.setItem("atlas.settings.softAnimations", JSON.stringify(softAnimations));
 		localStorage.setItem("atlas.settings.highlightSession", JSON.stringify(highlightSession));
-		localStorage.setItem("atlas.settings.pinMapSwitcher", JSON.stringify(pinMapSwitcher));
+		localStorage.setItem("atlas.settings.pinEnvironmentSwitcher", JSON.stringify(pinEnvironmentSwitcher));
 		localStorage.setItem("atlas.settings.vimMode", JSON.stringify(vimMode));
 		localStorage.setItem("atlas.settings.commandPalette", JSON.stringify(commandPalette));
 	}, [
@@ -389,7 +389,7 @@ export function SettingsWindowApp() {
 		density,
 		softAnimations,
 		highlightSession,
-		pinMapSwitcher,
+		pinEnvironmentSwitcher,
 		vimMode,
 		commandPalette,
 	]);
@@ -688,8 +688,8 @@ export function SettingsWindowApp() {
 										<Toggle
 											label="Pin map switcher"
 											description="Always keep current map visible in titlebar"
-											checked={pinMapSwitcher}
-											onChange={setPinMapSwitcher}
+											checked={pinEnvironmentSwitcher}
+											onChange={setPinEnvironmentSwitcher}
 										/>
 									</div>
 								)}

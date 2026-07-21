@@ -302,16 +302,18 @@ class AtlasDatabase {
 		return session;
 	}
 
-	listMaps() {
-		return this.all("SELECT id, name, icon, accent, preset, created_at FROM maps ORDER BY created_at ASC");
+	listEnvironments() {
+		return this.all("SELECT id, name, icon, accent, preset, created_at FROM environments ORDER BY created_at ASC");
 	}
 
-	getMap(mapId) {
-		return this.first("SELECT id, name, icon, accent, preset, created_at FROM maps WHERE id = ?", [mapId]);
+	getEnvironment(environmentId) {
+		return this.first("SELECT id, name, icon, accent, preset, created_at FROM environments WHERE id = ?", [
+			environmentId,
+		]);
 	}
 
-	createMap(name, options = {}) {
-		const map = {
+	createEnvironment(name, options = {}) {
+		const environment = {
 			id: randomUUID(),
 			name,
 			icon: options.icon ?? null,
@@ -320,24 +322,24 @@ class AtlasDatabase {
 			created_at: nowIso(),
 		};
 
-		this.run("INSERT INTO maps (id, name, icon, accent, preset, created_at) VALUES (?, ?, ?, ?, ?, ?)", [
-			map.id,
-			map.name,
-			map.icon,
-			map.accent,
-			map.preset,
-			map.created_at,
+		this.run("INSERT INTO environments (id, name, icon, accent, preset, created_at) VALUES (?, ?, ?, ?, ?, ?)", [
+			environment.id,
+			environment.name,
+			environment.icon,
+			environment.accent,
+			environment.preset,
+			environment.created_at,
 		]);
 
-		return map;
+		return environment;
 	}
 
-	renameMap(mapId, name) {
-		this.run("UPDATE maps SET name = ? WHERE id = ?", [name, mapId]);
-		return this.getMap(mapId);
+	renameEnvironment(environmentId, name) {
+		this.run("UPDATE environments SET name = ? WHERE id = ?", [name, environmentId]);
+		return this.getEnvironment(environmentId);
 	}
 
-	updateMap(mapId, fields = {}) {
+	updateEnvironment(environmentId, fields = {}) {
 		const allowed = ["name", "icon", "accent", "preset"];
 		const updates = [];
 		const values = [];
@@ -348,24 +350,26 @@ class AtlasDatabase {
 			}
 		}
 		if (updates.length > 0) {
-			this.run(`UPDATE maps SET ${updates.join(", ")} WHERE id = ?`, [...values, mapId]);
+			this.run(`UPDATE environments SET ${updates.join(", ")} WHERE id = ?`, [...values, environmentId]);
 		}
-		return this.getMap(mapId);
+		return this.getEnvironment(environmentId);
 	}
 
-	deleteMap(mapId) {
-		const map = this.first("SELECT id FROM maps WHERE id = ?", [mapId]);
-		if (!map) {
-			throw new Error("Map not found.");
+	deleteEnvironment(environmentId) {
+		const environment = this.first("SELECT id FROM environments WHERE id = ?", [environmentId]);
+		if (!environment) {
+			throw new Error("Environment not found.");
 		}
 
 		const activeSession = this.getActiveSession();
-		if (activeSession && activeSession.map_id === mapId) {
-			throw new Error("Stop the active session in this map before deleting it.");
+		if (activeSession && activeSession.environment_id === environmentId) {
+			throw new Error("Stop the active session in this environment before deleting it.");
 		}
 
 		return this.transaction(() => {
-			const sessionIds = this.all("SELECT id FROM sessions WHERE map_id = ?", [mapId]).map((row) => row.id);
+			const sessionIds = this.all("SELECT id FROM sessions WHERE environment_id = ?", [environmentId]).map(
+				(row) => row.id,
+			);
 			if (sessionIds.length > 0) {
 				const placeholders = sessionIds.map(() => "?").join(", ");
 				this.run(`DELETE FROM pauses WHERE session_id IN (${placeholders})`, sessionIds);
@@ -373,9 +377,9 @@ class AtlasDatabase {
 				this.run(`DELETE FROM sessions WHERE id IN (${placeholders})`, sessionIds);
 			}
 
-			this.run("DELETE FROM tasks WHERE map_id = ?", [mapId]);
-			this.run("DELETE FROM notes WHERE map_id = ?", [mapId]);
-			this.run("DELETE FROM maps WHERE id = ?", [mapId]);
+			this.run("DELETE FROM tasks WHERE environment_id = ?", [environmentId]);
+			this.run("DELETE FROM notes WHERE environment_id = ?", [environmentId]);
+			this.run("DELETE FROM environments WHERE id = ?", [environmentId]);
 			return true;
 		});
 	}
@@ -390,30 +394,30 @@ class AtlasDatabase {
 		);
 	}
 
-	startSession(mapId) {
+	startSession(environmentId) {
 		const active = this.getActiveSession();
 		if (active) {
 			throw new Error("A session is already active.");
 		}
 
-		const map = this.first("SELECT id FROM maps WHERE id = ?", [mapId]);
-		if (!map) {
-			throw new Error("Map not found.");
+		const environment = this.first("SELECT id FROM environments WHERE id = ?", [environmentId]);
+		if (!environment) {
+			throw new Error("Environment not found.");
 		}
 
 		const session = {
 			id: randomUUID(),
-			map_id: mapId,
+			environment_id: environmentId,
 			started_at: nowIso(),
 			created_at: nowIso(),
 		};
 
 		this.run(
 			`INSERT INTO sessions (
-        id, map_id, started_at, created_at, is_active, is_paused,
+        id, environment_id, started_at, created_at, is_active, is_paused,
         paused_duration, total_duration
       ) VALUES (?, ?, ?, ?, 1, 0, 0, 0)`,
-			[session.id, session.map_id, session.started_at, session.created_at],
+			[session.id, session.environment_id, session.started_at, session.created_at],
 		);
 
 		return this.getSessionById(session.id);
@@ -523,12 +527,12 @@ class AtlasDatabase {
 		return this.getSessionById(sessionId);
 	}
 
-	listSessionsByMap(mapId) {
+	listSessionsByEnvironment(environmentId) {
 		return this.all(
 			`SELECT * FROM sessions
-       WHERE map_id = ?
+       WHERE environment_id = ?
        ORDER BY created_at DESC`,
-			[mapId],
+			[environmentId],
 		).map(normalizeSession);
 	}
 
@@ -553,9 +557,9 @@ class AtlasDatabase {
 
 	listSessionsInRange(startIso, endIso) {
 		return this.all(
-			`SELECT s.*, m.name AS map_name
+			`SELECT s.*, e.name AS environment_name
        FROM sessions s
-       LEFT JOIN maps m ON m.id = s.map_id
+       LEFT JOIN environments e ON e.id = s.environment_id
        WHERE s.started_at >= ? AND s.started_at < ?
        ORDER BY s.started_at DESC`,
 			[startIso, endIso],
@@ -644,20 +648,20 @@ class AtlasDatabase {
 		return block;
 	}
 
-	listTasksByMap(mapId) {
+	listTasksByEnvironment(environmentId) {
 		return this.all(
-			`SELECT id, map_id, title, description, status, priority, tags, due_date, created_at, updated_at
+			`SELECT id, environment_id, title, description, status, priority, tags, due_date, created_at, updated_at
        FROM tasks
-       WHERE map_id = ?
+       WHERE environment_id = ?
        ORDER BY created_at DESC`,
-			[mapId],
+			[environmentId],
 		).map(normalizeTask);
 	}
 
-	createTask(mapId, title, description = "", fields = {}) {
+	createTask(environmentId, title, description = "", fields = {}) {
 		const task = {
 			id: randomUUID(),
-			map_id: mapId,
+			environment_id: environmentId,
 			title,
 			description,
 			status: typeof fields.status === "string" && fields.status ? fields.status : "todo",
@@ -669,11 +673,11 @@ class AtlasDatabase {
 		};
 
 		this.run(
-			`INSERT INTO tasks (id, map_id, title, description, status, priority, tags, due_date, created_at, updated_at)
+			`INSERT INTO tasks (id, environment_id, title, description, status, priority, tags, due_date, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			[
 				task.id,
-				task.map_id,
+				task.environment_id,
 				task.title,
 				task.description,
 				task.status,
@@ -720,45 +724,45 @@ class AtlasDatabase {
 		return true;
 	}
 
-	listNotesByMap(mapId) {
-		if (!mapId) {
+	listNotesByEnvironment(environmentId) {
+		if (!environmentId) {
 			return [];
 		}
-		return [this.getNotebookByMap(mapId)];
+		return [this.getNotebookByEnvironment(environmentId)];
 	}
 
-	createNote(mapId, content = "") {
-		if (!mapId) {
-			throw new Error("Map id is required.");
+	createNote(environmentId, content = "") {
+		if (!environmentId) {
+			throw new Error("Environment id is required.");
 		}
 
 		const existing = this.first(
-			`SELECT id, map_id, content, created_at, updated_at
+			`SELECT id, environment_id, content, created_at, updated_at
        FROM notes
-       WHERE map_id = ?
+       WHERE environment_id = ?
        LIMIT 1`,
-			[mapId],
+			[environmentId],
 		);
 
 		if (existing) {
 			const nextContent = content || existing.content;
 			this.run("UPDATE notes SET content = ?, updated_at = ? WHERE id = ?", [nextContent, nowIso(), existing.id]);
-			return this.first("SELECT id, map_id, content, created_at, updated_at FROM notes WHERE id = ?", [
+			return this.first("SELECT id, environment_id, content, created_at, updated_at FROM notes WHERE id = ?", [
 				existing.id,
 			]);
 		}
 
 		const note = {
 			id: randomUUID(),
-			map_id: mapId,
+			environment_id: environmentId,
 			content: content || createEmptyNotebookDocument(),
 			created_at: nowIso(),
 			updated_at: nowIso(),
 		};
 
-		this.run("INSERT INTO notes (id, map_id, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?)", [
+		this.run("INSERT INTO notes (id, environment_id, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?)", [
 			note.id,
-			note.map_id,
+			note.environment_id,
 			note.content,
 			note.created_at,
 			note.updated_at,
@@ -776,41 +780,41 @@ class AtlasDatabase {
 		this.run("DELETE FROM notes WHERE id = ?", [noteId]);
 	}
 
-	getNotebookByMap(mapId) {
-		if (!mapId) {
-			throw new Error("Map id is required.");
+	getNotebookByEnvironment(environmentId) {
+		if (!environmentId) {
+			throw new Error("Environment id is required.");
 		}
 
 		const existing = this.first(
-			`SELECT id, map_id, content, created_at, updated_at
+			`SELECT id, environment_id, content, created_at, updated_at
        FROM notes
-       WHERE map_id = ?
+       WHERE environment_id = ?
        LIMIT 1`,
-			[mapId],
+			[environmentId],
 		);
 
 		if (existing) {
 			return existing;
 		}
 
-		return this.createNote(mapId, createEmptyNotebookDocument());
+		return this.createNote(environmentId, createEmptyNotebookDocument());
 	}
 
-	updateNotebookByMap(mapId, content) {
-		if (!mapId) {
-			throw new Error("Map id is required.");
+	updateNotebookByEnvironment(environmentId, content) {
+		if (!environmentId) {
+			throw new Error("Environment id is required.");
 		}
 
 		return this.transaction(() => {
-			const notebook = this.getNotebookByMap(mapId);
+			const notebook = this.getNotebookByEnvironment(environmentId);
 			this.run("UPDATE notes SET content = ?, updated_at = ? WHERE id = ?", [content, nowIso(), notebook.id]);
-			return this.first("SELECT id, map_id, content, created_at, updated_at FROM notes WHERE id = ?", [
+			return this.first("SELECT id, environment_id, content, created_at, updated_at FROM notes WHERE id = ?", [
 				notebook.id,
 			]);
 		});
 	}
 
-	getDashboardOverview(mapId) {
+	getDashboardOverview(environmentId) {
 		const start = new Date();
 		start.setHours(0, 0, 0, 0);
 		const end = new Date(start);
@@ -819,9 +823,9 @@ class AtlasDatabase {
 		const endIso = end.toISOString();
 
 		const todaySessions = this.listSessionsInRange(startIso, endIso);
-		const mapSessions = todaySessions.filter((session) => session.map_id === mapId);
+		const environmentSessions = todaySessions.filter((session) => session.environment_id === environmentId);
 
-		const totalTodayMs = mapSessions.reduce((acc, session) => {
+		const totalTodayMs = environmentSessions.reduce((acc, session) => {
 			if (session.is_active) {
 				const pausedExtra =
 					session.is_paused && session.pause_started_at
@@ -834,7 +838,7 @@ class AtlasDatabase {
 		}, 0);
 
 		const appTotals = {};
-		for (const session of mapSessions) {
+		for (const session of environmentSessions) {
 			const blocks = this.listActivityBlocksBySession(session.id);
 			for (const block of blocks) {
 				// For completed sessions: always use block.duration, never recalculate from now
@@ -853,29 +857,30 @@ class AtlasDatabase {
 			.sort((a, b) => b.duration - a.duration)
 			.slice(0, 8);
 
-		const mapTotals = {};
+		const environmentTotals = {};
 		for (const session of todaySessions) {
-			const key = session.map_name || "Untitled map";
+			const key = session.environment_name || "Untitled environment";
 			const amount = session.is_active
 				? Math.max(0, toDurationMs(session.started_at, nowIso()) - session.paused_duration)
 				: session.total_duration;
-			mapTotals[key] = (mapTotals[key] ?? 0) + amount;
+			environmentTotals[key] = (environmentTotals[key] ?? 0) + amount;
 		}
 
-		const timePerMap = Object.entries(mapTotals)
-			.map(([mapName, duration]) => ({ mapName, duration }))
+		const timePerEnvironment = Object.entries(environmentTotals)
+			.map(([environmentName, duration]) => ({ environmentName, duration }))
 			.sort((a, b) => b.duration - a.duration);
 
-		const taskRow = this.first("SELECT COUNT(*) AS count FROM tasks WHERE map_id = ? AND status != 'done'", [
-			mapId,
-		]);
+		const taskRow = this.first(
+			"SELECT COUNT(*) AS count FROM tasks WHERE environment_id = ? AND status != 'done'",
+			[environmentId],
+		);
 
 		return {
 			totalTodayMs,
 			timePerApp,
-			timePerMap,
+			timePerEnvironment,
 			quickStats: {
-				sessionsToday: mapSessions.length,
+				sessionsToday: environmentSessions.length,
 				openTasks: taskRow?.count ?? 0,
 			},
 		};

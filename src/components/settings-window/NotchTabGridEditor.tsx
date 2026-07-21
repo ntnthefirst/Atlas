@@ -24,7 +24,7 @@ import {
 } from "@heroicons/react/24/outline";
 import type { NotchTab, NotchWidgetId, NotchWidgetPlacement } from "../../types";
 import { defaultTaskColumns } from "../../constants";
-import { getActiveMapTaskColumns } from "../../utils";
+import { getActiveEnvironmentTaskColumns } from "../../utils";
 import { parseSceneConfig } from "../../scenes";
 import { TAB_ICON_MAP } from "./tabIconMap";
 import { SceneConfigEditor } from "./SceneConfigEditor";
@@ -876,7 +876,7 @@ export function NotchTabGridEditor({ tab, onChange }: { tab: NotchTab; onChange:
 	const isLaunchAppButton = selectedPlacement?.widget === "launchAppButton";
 	const isScene = selectedPlacement?.widget === "scene";
 	const isColumnWidget = selectedPlacement ? COLUMN_CONFIG_WIDGETS.has(selectedPlacement.widget) : false;
-	const taskColumns = getActiveMapTaskColumns(lastEnvironmentId(), defaultTaskColumns);
+	const taskColumns = getActiveEnvironmentTaskColumns(lastEnvironmentId(), defaultTaskColumns);
 
 	const setSelectedConfig = (config: string) => {
 		if (!selectedPlacement) return;

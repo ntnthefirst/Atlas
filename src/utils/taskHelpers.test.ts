@@ -4,7 +4,7 @@ import type { TaskColumn, TaskItem } from "../types";
 
 const task = (overrides: Partial<TaskItem> = {}): TaskItem => ({
 	id: "t-1",
-	map_id: "map-1",
+	environment_id: "map-1",
 	title: "Untitled",
 	description: "",
 	status: "todo",

@@ -14,7 +14,7 @@ import type {
 	DashboardOverview,
 	FocusConfig,
 	FocusState,
-	MapItem,
+	Environment,
 	NoteItem,
 	NotchInputPayload,
 	NotchPreferences,
@@ -40,32 +40,32 @@ declare global {
 			downloadAndInstallUpdate: (options?: {
 				includePrerelease?: boolean;
 			}) => Promise<DownloadAndInstallResult>;
-			listMaps: () => Promise<MapItem[]>;
-			createMap: (
+			listEnvironments: () => Promise<Environment[]>;
+			createEnvironment: (
 				name: string,
 				options?: { icon?: string | null; accent?: string | null; preset?: string | null },
-			) => Promise<MapItem>;
-			renameMap: (mapId: string, name: string) => Promise<MapItem>;
-			updateMap: (
-				mapId: string,
-				fields: Partial<Pick<MapItem, "name" | "icon" | "accent" | "preset">>,
-			) => Promise<MapItem>;
-			deleteMap: (mapId: string) => Promise<boolean>;
+			) => Promise<Environment>;
+			renameEnvironment: (environmentId: string, name: string) => Promise<Environment>;
+			updateEnvironment: (
+				environmentId: string,
+				fields: Partial<Pick<Environment, "name" | "icon" | "accent" | "preset">>,
+			) => Promise<Environment>;
+			deleteEnvironment: (environmentId: string) => Promise<boolean>;
 
 			getActiveSession: () => Promise<Session | null>;
-			startSession: (mapId: string) => Promise<Session>;
+			startSession: (environmentId: string) => Promise<Session>;
 			pauseSession: (sessionId: string) => Promise<Session>;
 			resumeSession: (sessionId: string) => Promise<Session>;
 			stopSession: (sessionId: string) => Promise<Session>;
 			deleteSession: (sessionId: string) => Promise<boolean>;
-			listSessionsByMap: (mapId: string) => Promise<Session[]>;
+			listSessionsByEnvironment: (environmentId: string) => Promise<Session[]>;
 
 			listActivityBySession: (sessionId: string) => Promise<ActivityBlock[]>;
 			getCurrentApp: () => Promise<string>;
 
-			listTasksByMap: (mapId: string) => Promise<TaskItem[]>;
+			listTasksByEnvironment: (environmentId: string) => Promise<TaskItem[]>;
 			createTask: (
-				mapId: string,
+				environmentId: string,
 				title: string,
 				description?: string,
 				fields?: TaskUpdate,
@@ -74,14 +74,14 @@ declare global {
 			updateTask: (taskId: string, fields: TaskUpdate) => Promise<TaskItem>;
 			deleteTask: (taskId: string) => Promise<boolean>;
 
-			listNotesByMap: (mapId: string) => Promise<NoteItem[]>;
-			createNote: (mapId: string, content?: string) => Promise<NoteItem>;
+			listNotesByEnvironment: (environmentId: string) => Promise<NoteItem[]>;
+			createNote: (environmentId: string, content?: string) => Promise<NoteItem>;
 			updateNote: (noteId: string, content: string) => Promise<NoteItem>;
 			deleteNote: (noteId: string) => Promise<boolean>;
-			getNotebookByMap: (mapId: string) => Promise<NoteItem>;
-			updateNotebookByMap: (mapId: string, content: string) => Promise<NoteItem>;
+			getNotebookByEnvironment: (environmentId: string) => Promise<NoteItem>;
+			updateNotebookByEnvironment: (environmentId: string, content: string) => Promise<NoteItem>;
 
-			getDashboardOverview: (mapId: string) => Promise<DashboardOverview>;
+			getDashboardOverview: (environmentId: string) => Promise<DashboardOverview>;
 
 			launchApp: (command: string) => Promise<boolean>;
 			getPlatform: () => Promise<string>;

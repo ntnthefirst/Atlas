@@ -1,18 +1,18 @@
 import { useState } from "react";
 
-export const useMapMenuManagement = () => {
-	const [showMapMenu, setShowMapMenu] = useState(false);
-	const [renameMapName, setRenameMapName] = useState("");
-	const [newMapName, setNewMapName] = useState("");
+export const useEnvironmentMenuManagement = () => {
+	const [showEnvironmentMenu, setShowEnvironmentMenu] = useState(false);
+	const [renameEnvironmentName, setRenameEnvironmentName] = useState("");
+	const [newEnvironmentName, setNewEnvironmentName] = useState("");
 	const [showFirstLaunch, setShowFirstLaunch] = useState(false);
 
 	return {
-		showMapMenu,
-		setShowMapMenu,
-		renameMapName,
-		setRenameMapName,
-		newMapName,
-		setNewMapName,
+		showEnvironmentMenu,
+		setShowEnvironmentMenu,
+		renameEnvironmentName,
+		setRenameEnvironmentName,
+		newEnvironmentName,
+		setNewEnvironmentName,
 		showFirstLaunch,
 		setShowFirstLaunch,
 	};

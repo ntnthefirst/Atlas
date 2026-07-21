@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeftIcon, PencilIcon, PlusIcon, SwatchIcon, TrashIcon } from "@heroicons/react/24/outline";
-import type { MapItem } from "../types";
+import type { Environment } from "../types";
 import { AccentPicker } from "./ui";
 import {
 	ENVIRONMENT_ICON_KEYS,
@@ -11,75 +11,75 @@ import {
 } from "../environments";
 import { DEFAULT_ACCENT } from "../utils/accent";
 
-type AtlasMapMenuProps = {
-	showMapMenu: boolean;
-	selectedMapId: string;
-	maps: MapItem[];
-	renameMapName: string;
-	newMapName: string;
-	canDeleteMap: boolean;
+type AtlasEnvironmentMenuProps = {
+	showEnvironmentMenu: boolean;
+	selectedEnvironmentId: string;
+	environments: Environment[];
+	renameEnvironmentName: string;
+	newEnvironmentName: string;
+	canDeleteEnvironment: boolean;
 	triggerRef: RefObject<HTMLButtonElement | null>;
-	onCloseMapMenu: () => void;
-	onSelectMap: (mapId: string) => void;
-	onRenameMapNameChange: (nextValue: string) => void;
-	onNewMapNameChange: (nextValue: string) => void;
-	onCreateMap: () => void;
-	onRenameMap: () => void;
-	onDeleteMap: () => void;
+	onCloseEnvironmentMenu: () => void;
+	onSelectEnvironment: (environmentId: string) => void;
+	onRenameEnvironmentNameChange: (nextValue: string) => void;
+	onNewEnvironmentNameChange: (nextValue: string) => void;
+	onCreateEnvironment: () => void;
+	onRenameEnvironment: () => void;
+	onDeleteEnvironment: () => void;
 	onCreatePresetEnvironment: (preset: EnvironmentPresetTemplate) => void;
-	onUpdateEnvironment: (fields: Partial<Pick<MapItem, "name" | "icon" | "accent" | "preset">>) => void;
+	onUpdateEnvironment: (fields: Partial<Pick<Environment, "name" | "icon" | "accent" | "preset">>) => void;
 };
 
 type MenuScreen = "default" | "create-map" | "rename-current" | "customize";
 type DefaultAction = "rename" | "customize" | "delete" | "create";
-type DefaultNavItem = { kind: "action"; action: DefaultAction } | { kind: "map"; mapId: string };
+type DefaultNavItem = { kind: "action"; action: DefaultAction } | { kind: "map"; environmentId: string };
 
 const menuInputClassName =
 	"h-8 w-full rounded-md border border-neutral-300 bg-neutral-50 pl-8 pr-2.5 text-[13px] text-neutral-700 outline-none transition focus:border-neutral-500 dark:border-neutral-500 dark:bg-neutral-700 dark:text-neutral-50";
 
-export function AtlasMapMenu({
-	showMapMenu,
-	selectedMapId,
-	maps,
-	renameMapName,
-	newMapName,
-	canDeleteMap,
+export function AtlasEnvironmentMenu({
+	showEnvironmentMenu,
+	selectedEnvironmentId,
+	environments,
+	renameEnvironmentName,
+	newEnvironmentName,
+	canDeleteEnvironment,
 	triggerRef,
-	onCloseMapMenu,
-	onSelectMap,
-	onRenameMapNameChange,
-	onNewMapNameChange,
-	onCreateMap,
-	onRenameMap,
-	onDeleteMap,
+	onCloseEnvironmentMenu,
+	onSelectEnvironment,
+	onRenameEnvironmentNameChange,
+	onNewEnvironmentNameChange,
+	onCreateEnvironment,
+	onRenameEnvironment,
+	onDeleteEnvironment,
 	onCreatePresetEnvironment,
 	onUpdateEnvironment,
-}: AtlasMapMenuProps) {
-	const selectedMap = maps.find((mapItem) => mapItem.id === selectedMapId) ?? null;
+}: AtlasEnvironmentMenuProps) {
+	const selectedEnvironment = environments.find((environmentItem) => environmentItem.id === selectedEnvironmentId) ?? null;
 	const menuRef = useRef<HTMLDivElement | null>(null);
 	const searchInputRef = useRef<HTMLInputElement | null>(null);
 	const editorInputRef = useRef<HTMLInputElement | null>(null);
 	const [menuScreen, setMenuScreen] = useState<MenuScreen>("default");
 	const [activeItemIndex, setActiveItemIndex] = useState(0);
-	const [mapSearch, setMapSearch] = useState("");
-	const [createMapError, setCreateMapError] = useState("");
-	const [renameMapError, setRenameMapError] = useState("");
+	const [environmentSearch, setEnvironmentSearch] = useState("");
+	const [createEnvironmentError, setCreateEnvironmentError] = useState("");
+	const [renameEnvironmentError, setRenameEnvironmentError] = useState("");
 
-	const otherMaps = useMemo(() => maps.filter((mapItem) => mapItem.id !== selectedMapId), [maps, selectedMapId]);
-	const filteredMaps = useMemo(() => {
-		const query = mapSearch.trim().toLowerCase();
+	const otherEnvironments = useMemo(() => environments.filter((environmentItem) => environmentItem.id !== selectedEnvironmentId), [environments, selectedEnvironmentId]);
+	const filteredEnvironments = useMemo(() => {
+		const query = environmentSearch.trim().toLowerCase();
 		if (!query) {
-			return otherMaps;
+			return otherEnvironments;
 		}
-		return otherMaps.filter((mapItem) => mapItem.name.toLowerCase().includes(query));
-	}, [mapSearch, otherMaps]);
+		return otherEnvironments.filter((environmentItem) => environmentItem.name.toLowerCase().includes(query));
+	}, [environmentSearch, otherEnvironments]);
 
 	const filteredActions = useMemo(() => {
-		const query = mapSearch.trim().toLowerCase();
+		const query = environmentSearch.trim().toLowerCase();
 		const actions: Array<{ action: DefaultAction; label: string; disabled?: boolean }> = [
 			{ action: "rename", label: "rename environment" },
 			{ action: "customize", label: "customize environment icon color" },
-			{ action: "delete", label: "delete environment", disabled: !canDeleteMap },
+			{ action: "delete", label: "delete environment", disabled: !canDeleteEnvironment },
 			{ action: "create", label: "new environment" },
 		];
 
@@ -88,7 +88,7 @@ export function AtlasMapMenu({
 		}
 
 		return actions.filter((item) => item.label.includes(query));
-	}, [canDeleteMap, mapSearch]);
+	}, [canDeleteEnvironment, environmentSearch]);
 
 	const defaultNavItems = useMemo(() => {
 		const items: DefaultNavItem[] = [];
@@ -100,21 +100,21 @@ export function AtlasMapMenu({
 			items.push({ kind: "action", action: action.action });
 		}
 
-		for (const mapItem of filteredMaps) {
-			items.push({ kind: "map", mapId: mapItem.id });
+		for (const environmentItem of filteredEnvironments) {
+			items.push({ kind: "map", environmentId: environmentItem.id });
 		}
 
 		return items;
-	}, [filteredActions, filteredMaps]);
+	}, [filteredActions, filteredEnvironments]);
 
 	useEffect(() => {
-		if (!showMapMenu) {
+		if (!showEnvironmentMenu) {
 			const frameId = window.requestAnimationFrame(() => {
 				setMenuScreen("default");
 				setActiveItemIndex(0);
-				setMapSearch("");
-				setCreateMapError("");
-				setRenameMapError("");
+				setEnvironmentSearch("");
+				setCreateEnvironmentError("");
+				setRenameEnvironmentError("");
 			});
 			return () => window.cancelAnimationFrame(frameId);
 		}
@@ -134,10 +134,10 @@ export function AtlasMapMenu({
 		});
 
 		return () => window.cancelAnimationFrame(frameId);
-	}, [menuScreen, showMapMenu]);
+	}, [menuScreen, showEnvironmentMenu]);
 
 	useEffect(() => {
-		if (!showMapMenu) {
+		if (!showEnvironmentMenu) {
 			return;
 		}
 
@@ -146,12 +146,12 @@ export function AtlasMapMenu({
 			if (menuRef.current?.contains(targetNode) || triggerRef.current?.contains(targetNode)) {
 				return;
 			}
-			onCloseMapMenu();
+			onCloseEnvironmentMenu();
 		};
 
 		document.addEventListener("mousedown", handlePointerDown);
 		return () => document.removeEventListener("mousedown", handlePointerDown);
-	}, [onCloseMapMenu, showMapMenu, triggerRef]);
+	}, [onCloseEnvironmentMenu, showEnvironmentMenu, triggerRef]);
 
 	useEffect(() => {
 		if (menuScreen !== "default") {
@@ -173,8 +173,8 @@ export function AtlasMapMenu({
 	const getActionNavIndex = (action: DefaultAction) =>
 		defaultNavItems.findIndex((item) => item.kind === "action" && item.action === action);
 
-	const getMapNavIndex = (mapId: string) =>
-		defaultNavItems.findIndex((item) => item.kind === "map" && item.mapId === mapId);
+	const getEnvironmentNavIndex = (environmentId: string) =>
+		defaultNavItems.findIndex((item) => item.kind === "map" && item.environmentId === environmentId);
 
 	const moveActiveItem = (direction: 1 | -1) => {
 		setActiveItemIndex((current) => {
@@ -192,53 +192,53 @@ export function AtlasMapMenu({
 		});
 	};
 
-	const openCreateMapScreen = () => {
+	const openCreateEnvironmentScreen = () => {
 		setMenuScreen("create-map");
-		setCreateMapError("");
-		onNewMapNameChange("");
+		setCreateEnvironmentError("");
+		onNewEnvironmentNameChange("");
 	};
 
 	const openRenameCurrentScreen = () => {
 		setMenuScreen("rename-current");
-		setRenameMapError("");
-		onRenameMapNameChange("");
+		setRenameEnvironmentError("");
+		onRenameEnvironmentNameChange("");
 	};
 
-	const submitCreateMap = () => {
-		const candidate = newMapName.trim();
+	const submitCreateEnvironment = () => {
+		const candidate = newEnvironmentName.trim();
 		if (!candidate) {
-			setCreateMapError("Name can't be empty.");
+			setCreateEnvironmentError("Name can't be empty.");
 			return;
 		}
 
-		const exists = maps.some((mapItem) => mapItem.name.trim().toLowerCase() === candidate.toLowerCase());
+		const exists = environments.some((environmentItem) => environmentItem.name.trim().toLowerCase() === candidate.toLowerCase());
 		if (exists) {
-			setCreateMapError("That environment name already exists.");
+			setCreateEnvironmentError("That environment name already exists.");
 			return;
 		}
 
-		setCreateMapError("");
-		onCreateMap();
+		setCreateEnvironmentError("");
+		onCreateEnvironment();
 		setMenuScreen("default");
 	};
 
-	const submitRenameCurrentMap = () => {
-		const candidate = renameMapName.trim();
+	const submitRenameCurrentEnvironment = () => {
+		const candidate = renameEnvironmentName.trim();
 		if (!candidate) {
-			setRenameMapError("Name can't be empty.");
+			setRenameEnvironmentError("Name can't be empty.");
 			return;
 		}
 
-		const exists = maps.some(
-			(mapItem) => mapItem.id !== selectedMapId && mapItem.name.trim().toLowerCase() === candidate.toLowerCase(),
+		const exists = environments.some(
+			(environmentItem) => environmentItem.id !== selectedEnvironmentId && environmentItem.name.trim().toLowerCase() === candidate.toLowerCase(),
 		);
 		if (exists) {
-			setRenameMapError("That environment name already exists.");
+			setRenameEnvironmentError("That environment name already exists.");
 			return;
 		}
 
-		setRenameMapError("");
-		onRenameMap();
+		setRenameEnvironmentError("");
+		onRenameEnvironment();
 		setMenuScreen("default");
 	};
 
@@ -249,7 +249,7 @@ export function AtlasMapMenu({
 		}
 
 		if (item.kind === "map") {
-			onSelectMap(item.mapId);
+			onSelectEnvironment(item.environmentId);
 			return;
 		}
 
@@ -264,15 +264,15 @@ export function AtlasMapMenu({
 		}
 
 		if (item.action === "create") {
-			openCreateMapScreen();
+			openCreateEnvironmentScreen();
 			return;
 		}
 
-		onDeleteMap();
+		onDeleteEnvironment();
 	};
 
 	const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-		if (!showMapMenu) {
+		if (!showEnvironmentMenu) {
 			return;
 		}
 
@@ -283,11 +283,11 @@ export function AtlasMapMenu({
 			event.preventDefault();
 			if (menuScreen !== "default") {
 				setMenuScreen("default");
-				setCreateMapError("");
-				setRenameMapError("");
+				setCreateEnvironmentError("");
+				setRenameEnvironmentError("");
 				return;
 			}
-			onCloseMapMenu();
+			onCloseEnvironmentMenu();
 			triggerRef.current?.focus();
 			return;
 		}
@@ -342,8 +342,8 @@ export function AtlasMapMenu({
 							if (event.key === "Escape") {
 								event.preventDefault();
 								setMenuScreen("default");
-								setCreateMapError("");
-								setRenameMapError("");
+								setCreateEnvironmentError("");
+								setRenameEnvironmentError("");
 							}
 						}}
 						className={menuInputClassName}
@@ -375,7 +375,7 @@ export function AtlasMapMenu({
 
 	return (
 		<AnimatePresence>
-			{showMapMenu && (
+			{showEnvironmentMenu && (
 				<motion.div
 					initial={{ opacity: 0, y: -6 }}
 					animate={{ opacity: 1, y: 0 }}
@@ -391,8 +391,8 @@ export function AtlasMapMenu({
 							<div className="relative px-1 pb-1.5 text-label-small text-xs">
 								<input
 									ref={searchInputRef}
-									value={mapSearch}
-									onChange={(event) => setMapSearch(event.target.value)}
+									value={environmentSearch}
+									onChange={(event) => setEnvironmentSearch(event.target.value)}
 									onKeyDown={(event) => {
 										if (event.key === "ArrowDown" || event.key === "ArrowUp") {
 											event.preventDefault();
@@ -491,8 +491,8 @@ export function AtlasMapMenu({
 														onFocus={() =>
 															deleteIndex >= 0 && setActiveItemIndex(deleteIndex)
 														}
-														onClick={onDeleteMap}
-														disabled={!canDeleteMap}
+														onClick={onDeleteEnvironment}
+														disabled={!canDeleteEnvironment}
 													>
 														<TrashIcon className="h-3.5 w-3.5 text-red-500 dark:text-red-300" />
 														<span className="truncate text-[13px]">
@@ -520,7 +520,7 @@ export function AtlasMapMenu({
 														onFocus={() =>
 															createIndex >= 0 && setActiveItemIndex(createIndex)
 														}
-														onClick={openCreateMapScreen}
+														onClick={openCreateEnvironmentScreen}
 													>
 														<PlusIcon className="h-3.5 w-3.5 text-neutral-400 dark:text-neutral-500" />
 														<span className="truncate text-[13px]">New environment</span>
@@ -544,21 +544,21 @@ export function AtlasMapMenu({
 											No result for this search.
 										</p>
 									)}
-									{filteredMaps.length === 0 && (
+									{filteredEnvironments.length === 0 && (
 										<p className="rounded-md px-2 py-1.5 text-[13px] text-neutral-500 dark:text-neutral-300">
-											{mapSearch
+											{environmentSearch
 											? "No environment matches this search."
 											: "No other environments yet."}
 										</p>
 									)}
-									{filteredMaps.map((mapItem) => {
-										const navIndex = getMapNavIndex(mapItem.id);
+									{filteredEnvironments.map((environmentItem) => {
+										const navIndex = getEnvironmentNavIndex(environmentItem.id);
 										const isActiveKeyboard = navIndex >= 0 && activeItemIndex === navIndex;
-										const ItemIcon = getEnvironmentIcon(mapItem.icon);
+										const ItemIcon = getEnvironmentIcon(environmentItem.icon);
 
 										return (
 											<button
-												key={mapItem.id}
+												key={environmentItem.id}
 												type="button"
 												role="option"
 												data-nav-index={navIndex >= 0 ? navIndex : undefined}
@@ -569,13 +569,13 @@ export function AtlasMapMenu({
 												}`}
 												onMouseEnter={() => navIndex >= 0 && setActiveItemIndex(navIndex)}
 												onFocus={() => navIndex >= 0 && setActiveItemIndex(navIndex)}
-												onClick={() => onSelectMap(mapItem.id)}
+												onClick={() => onSelectEnvironment(environmentItem.id)}
 											>
 												<ItemIcon
 													className="h-3.5 w-3.5 shrink-0"
-													style={{ color: mapItem.accent ?? undefined }}
+													style={{ color: environmentItem.accent ?? undefined }}
 												/>
-												<span className="truncate text-[13px]">{mapItem.name}</span>
+												<span className="truncate text-[13px]">{environmentItem.name}</span>
 												<span
 													className={`text-[10px] uppercase tracking-[0.12em] ${
 														isActiveKeyboard
@@ -593,14 +593,14 @@ export function AtlasMapMenu({
 						</div>
 					) : menuScreen === "create-map" ? (
 						renderEditorScreen({
-							value: newMapName,
+							value: newEnvironmentName,
 							onChange: (next) => {
-								setCreateMapError("");
-								onNewMapNameChange(next);
+								setCreateEnvironmentError("");
+								onNewEnvironmentNameChange(next);
 							},
-							onSubmit: submitCreateMap,
+							onSubmit: submitCreateEnvironment,
 							placeholder: "New environment name",
-							error: createMapError,
+							error: createEnvironmentError,
 							submitLabel: "Create environment",
 							footer: (
 								<div className="px-1 pt-1.5">
@@ -636,14 +636,14 @@ export function AtlasMapMenu({
 						})
 					) : menuScreen === "rename-current" ? (
 						renderEditorScreen({
-							value: renameMapName,
+							value: renameEnvironmentName,
 							onChange: (next) => {
-								setRenameMapError("");
-								onRenameMapNameChange(next);
+								setRenameEnvironmentError("");
+								onRenameEnvironmentNameChange(next);
 							},
-							onSubmit: submitRenameCurrentMap,
+							onSubmit: submitRenameCurrentEnvironment,
 							placeholder: "New environment name",
-							error: renameMapError,
+							error: renameEnvironmentError,
 							submitLabel: "Rename environment",
 						})
 					) : (
@@ -658,7 +658,7 @@ export function AtlasMapMenu({
 									<ArrowLeftIcon className="h-4 w-4" />
 								</button>
 								<span className="truncate text-[13px] font-medium">
-									Customize {selectedMap?.name ?? "environment"}
+									Customize {selectedEnvironment?.name ?? "environment"}
 								</span>
 							</div>
 
@@ -668,7 +668,7 @@ export function AtlasMapMenu({
 							<div className="grid grid-cols-6 gap-1 px-1 pb-3">
 								{ENVIRONMENT_ICON_KEYS.map((key) => {
 									const Icon = getEnvironmentIcon(key);
-									const active = (selectedMap?.icon ?? "") === key;
+									const active = (selectedEnvironment?.icon ?? "") === key;
 									return (
 										<button
 											key={key}
@@ -689,7 +689,7 @@ export function AtlasMapMenu({
 
 							<div className="px-1">
 								<AccentPicker
-									value={selectedMap?.accent || DEFAULT_ACCENT}
+									value={selectedEnvironment?.accent || DEFAULT_ACCENT}
 									onChange={(value) => onUpdateEnvironment({ accent: value })}
 								/>
 							</div>

@@ -19,7 +19,7 @@ export function MainContentViews(props: MainContentViewsProps) {
 	if (props.view === "notes") {
 		return (
 			<NotesView
-				key={props.notebook?.id ?? props.selectedMapName}
+				key={props.notebook?.id ?? props.selectedEnvironmentName}
 				{...props}
 			/>
 		);

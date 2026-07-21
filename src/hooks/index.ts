@@ -1,5 +1,5 @@
 export {
-	useMapManagement,
+	useEnvironmentManagement,
 	useSessionManagement,
 	useTaskManagement,
 	useNotebookManagement,
@@ -11,7 +11,7 @@ export { useFocus, formatCountdown, FOCUS_PHASE_LABELS } from "./useFocus";
 export type { UseFocusReturn } from "./useFocus";
 export { useAccent } from "./useAccent";
 export {
-	useMapMenuManagement,
+	useEnvironmentMenuManagement,
 	useErrorManagement,
 	useTimeManagement,
 	usePlatformManagement,

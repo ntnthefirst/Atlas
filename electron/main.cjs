@@ -601,12 +601,12 @@ function createNotchInputWindow(payload) {
 	return notchInputWindow;
 }
 
-function hasAnyMaps() {
-	return Boolean(db && db.listMaps().length > 0);
+function hasAnyEnvironments() {
+	return Boolean(db && db.listEnvironments().length > 0);
 }
 
-function openPrimaryWindowByMapState() {
-	if (hasAnyMaps()) {
+function openPrimaryWindowByEnvironmentState() {
+	if (hasAnyEnvironments()) {
 		createMainWindow();
 	} else {
 		createWelcomeWindow();
@@ -666,7 +666,7 @@ function getTrayIcon() {
 }
 
 function showMainWindow() {
-	if (!hasAnyMaps()) {
+	if (!hasAnyEnvironments()) {
 		createWelcomeWindow();
 		return;
 	}
@@ -1002,7 +1002,7 @@ function ensureTray() {
 }
 
 function wireIpc() {
-	registerEnvironmentIpc(ipcMain, { getDb: () => db, openPrimaryWindowByMapState });
+	registerEnvironmentIpc(ipcMain, { getDb: () => db, openPrimaryWindowByEnvironmentState });
 
 	registerSessionIpc(ipcMain, { getDb: () => db, getTracker: () => tracker, getMiniWindow: () => miniWindow });
 
@@ -1410,7 +1410,7 @@ app.whenReady().then(async () => {
 	}
 
 	wireIpc();
-	openPrimaryWindowByMapState();
+	openPrimaryWindowByEnvironmentState();
 	if (updatePreferences.autoCheck) {
 		void checkLatestGitHubVersion(updatePreferences.includeBeta);
 	}
@@ -1422,9 +1422,9 @@ app.whenReady().then(async () => {
 
 	app.on("activate", () => {
 		if (BrowserWindow.getAllWindows().length === 0) {
-			openPrimaryWindowByMapState();
+			openPrimaryWindowByEnvironmentState();
 		} else {
-			openPrimaryWindowByMapState();
+			openPrimaryWindowByEnvironmentState();
 		}
 	});
 

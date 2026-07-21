@@ -8,7 +8,7 @@ export type EnvironmentPreset =
 	| "writing"
 	| "custom";
 
-export type MapItem = {
+export type Environment = {
 	id: string;
 	name: string;
 	icon?: string | null;
@@ -19,7 +19,7 @@ export type MapItem = {
 
 export type Session = {
 	id: string;
-	map_id: string;
+	environment_id: string;
 	started_at: string;
 	ended_at: string | null;
 	total_duration: number;
@@ -52,7 +52,7 @@ export const TASK_PRIORITIES: TaskPriority[] = ["none", "low", "medium", "high",
 
 export type TaskItem = {
 	id: string;
-	map_id: string;
+	environment_id: string;
 	title: string;
 	description: string;
 	status: TaskStatus;
@@ -71,7 +71,7 @@ export type TaskUpdate = Partial<
 
 export type NoteItem = {
 	id: string;
-	map_id: string;
+	environment_id: string;
 	content: string;
 	created_at: string;
 	updated_at: string;
@@ -154,7 +154,7 @@ export type NotebookDocument = {
 export type DashboardOverview = {
 	totalTodayMs: number;
 	timePerApp: Array<{ appName: string; duration: number }>;
-	timePerMap: Array<{ mapName: string; duration: number }>;
+	timePerEnvironment: Array<{ environmentName: string; duration: number }>;
 	quickStats: {
 		sessionsToday: number;
 		openTasks: number;

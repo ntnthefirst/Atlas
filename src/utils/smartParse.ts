@@ -1,4 +1,4 @@
-import type { MapItem, TaskColumn, TaskPriority } from "../types";
+import type { Environment, TaskColumn, TaskPriority } from "../types";
 
 // ---------------------------------------------------------------------------
 // Atlas' local "understanding" engine.
@@ -16,7 +16,7 @@ export type CaptureKind = "task" | "note";
 
 export interface CaptureContext {
 	now?: number;
-	environments: MapItem[];
+	environments: Environment[];
 	currentEnvironmentId: string | null;
 	// Columns for a given environment id, so routing can resolve a real column
 	// on whichever environment the text targets (not just the current one).
@@ -100,11 +100,11 @@ const normalizeName = (value: string): string => value.toLowerCase().replace(/[^
 
 // Resolve an `@token` against the known environments: exact-ish first, then a
 // leading-substring match, then any word that starts with the token.
-const matchEnvironment = (token: string, environments: MapItem[]): MapItem | null => {
+const matchEnvironment = (token: string, environments: Environment[]): Environment | null => {
 	const needle = normalizeName(token);
 	if (!needle) return null;
-	let starts: MapItem | null = null;
-	let word: MapItem | null = null;
+	let starts: Environment | null = null;
+	let word: Environment | null = null;
 	for (const env of environments) {
 		const name = normalizeName(env.name);
 		if (name === needle) return env;
@@ -134,7 +134,7 @@ export function parseCapture(raw: string, context: CaptureContext): ParsedCaptur
 	let working = ` ${raw} `;
 
 	// --- Environment (@name) --------------------------------------------------
-	let environment: MapItem | null = null;
+	let environment: Environment | null = null;
 	working = working.replace(/(^|\s)@([a-z0-9_-]+)/gi, (_match, pre: string, token: string) => {
 		const found = matchEnvironment(token, context.environments);
 		if (found && !environment) {
@@ -143,9 +143,9 @@ export function parseCapture(raw: string, context: CaptureContext): ParsedCaptur
 		}
 		return `${pre}@${token}`;
 	});
-	if (environment) reasons.push(`Environment · ${(environment as MapItem).name}`);
+	if (environment) reasons.push(`Environment · ${(environment as Environment).name}`);
 
-	const targetEnvId = (environment as MapItem | null)?.id ?? context.currentEnvironmentId;
+	const targetEnvId = (environment as Environment | null)?.id ?? context.currentEnvironmentId;
 	const columns = targetEnvId ? context.columnsFor(targetEnvId) : [];
 
 	// --- Tags (#tag) ----------------------------------------------------------
@@ -337,7 +337,7 @@ export function parseCapture(raw: string, context: CaptureContext): ParsedCaptur
 		columnStatus: kind === "task" ? (column?.status ?? null) : null,
 		columnLabel: kind === "task" ? (column?.label ?? null) : null,
 		environmentId: targetEnvId ?? null,
-		environmentName: (environment as MapItem | null)?.name ?? null,
+		environmentName: (environment as Environment | null)?.name ?? null,
 		reasons,
 	};
 }

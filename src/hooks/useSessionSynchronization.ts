@@ -3,7 +3,7 @@ import { normalizeTrackedAppName } from "../utils";
 import type { ActivityBlock, DashboardOverview, Session } from "../types";
 
 interface UseSessionSynchronizationProps {
-	selectedMapId: string;
+	selectedEnvironmentId: string;
 	selectedSessionId: string;
 	setActiveSession: (session: Session | null) => void;
 	setCurrentAppName: (name: string) => void;
@@ -12,7 +12,7 @@ interface UseSessionSynchronizationProps {
 }
 
 export const useSessionSynchronization = ({
-	selectedMapId,
+	selectedEnvironmentId,
 	selectedSessionId,
 	setActiveSession,
 	setCurrentAppName,
@@ -30,11 +30,11 @@ export const useSessionSynchronization = ({
 		}, 500);
 
 		const dataSync = window.setInterval(async () => {
-			if (selectedMapId) {
-				setDashboard(await window.atlas.getDashboardOverview(selectedMapId));
+			if (selectedEnvironmentId) {
+				setDashboard(await window.atlas.getDashboardOverview(selectedEnvironmentId));
 			}
 			const active = await window.atlas.getActiveSession();
-			if (active && (active.map_id === selectedMapId || active.id === selectedSessionId)) {
+			if (active && (active.environment_id === selectedEnvironmentId || active.id === selectedSessionId)) {
 				const blocks = await window.atlas.listActivityBySession(active.id);
 				setActivityBlocks(blocks);
 			}
@@ -44,5 +44,5 @@ export const useSessionSynchronization = ({
 			window.clearInterval(sessionSync);
 			window.clearInterval(dataSync);
 		};
-	}, [selectedMapId, selectedSessionId, setActiveSession, setCurrentAppName, setDashboard, setActivityBlocks]);
+	}, [selectedEnvironmentId, selectedSessionId, setActiveSession, setCurrentAppName, setDashboard, setActivityBlocks]);
 };

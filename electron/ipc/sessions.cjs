@@ -11,8 +11,8 @@
 // and `tracker` are both assigned during app startup, after this module is
 // required -- capturing either by value here would freeze it at `null` and
 // break every handler. `getMiniWindow` is a getter for the same reason: unlike
-// `openPrimaryWindowByMapState` (a `function` declaration that's never
-// reassigned), `miniWindow` is a `let` binding that main.cjs reassigns
+// `openPrimaryWindowByEnvironmentState` (a `function` declaration that's
+// never reassigned), `miniWindow` is a `let` binding that main.cjs reassigns
 // throughout the window's lifecycle (created, closed, destroyed), so holding
 // a value captured at require time would go stale.
 // ---------------------------------------------------------------------------
@@ -22,12 +22,12 @@ function register(ipcMain, deps) {
 
 	ipcMain.handle("session:active", () => getDb().getActiveSession());
 
-	ipcMain.handle("session:start", (_event, mapId) => {
-		if (!mapId) {
-			throw new Error("Map id missing.");
+	ipcMain.handle("session:start", (_event, environmentId) => {
+		if (!environmentId) {
+			throw new Error("Environment id missing.");
 		}
 
-		const session = getDb().startSession(mapId);
+		const session = getDb().startSession(environmentId);
 		getTracker().setCurrentSession(session.id);
 		return session;
 	});
@@ -61,11 +61,11 @@ function register(ipcMain, deps) {
 		return session;
 	});
 
-	ipcMain.handle("session:listByMap", (_event, mapId) => {
-		if (!mapId) {
+	ipcMain.handle("session:listByEnvironment", (_event, environmentId) => {
+		if (!environmentId) {
 			return [];
 		}
-		return getDb().listSessionsByMap(mapId);
+		return getDb().listSessionsByEnvironment(environmentId);
 	});
 
 	ipcMain.handle("session:delete", (_event, sessionId) => {

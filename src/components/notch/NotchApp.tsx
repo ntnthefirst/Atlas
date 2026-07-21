@@ -85,7 +85,7 @@ import { LockClosedIcon as LockClosedIconSolid, PlayCircleIcon as PlayCircleIcon
 import * as HeroIconsSolid from "@heroicons/react/24/solid";
 import type {
 	DashboardOverview,
-	MapItem,
+	Environment,
 	NoteItem,
 	NotchPosition,
 	NotchPreferences,
@@ -383,7 +383,7 @@ export function NotchApp() {
 			{ id: "todo", enabled: true },
 		],
 	});
-	const [environments, setEnvironments] = useState<MapItem[]>([]);
+	const [environments, setEnvironments] = useState<Environment[]>([]);
 	const [activeEnvId, setActiveEnvId] = useState<string | null>(() => lastEnvironmentId());
 	const [tasks, setTasks] = useState<TaskItem[]>([]);
 	const [activeSession, setActiveSession] = useState<Session | null>(null);
@@ -451,7 +451,7 @@ export function NotchApp() {
 	useEffect(() => {
 		const sync = () => {
 			window.atlas
-				.listMaps()
+				.listEnvironments()
 				.then(setEnvironments)
 				.catch(() => undefined);
 		};
@@ -480,7 +480,7 @@ export function NotchApp() {
 		}
 		const sync = () => {
 			window.atlas
-				.listTasksByMap(activeEnvId)
+				.listTasksByEnvironment(activeEnvId)
 				.then(setTasks)
 				.catch(() => undefined);
 		};
@@ -517,7 +517,7 @@ export function NotchApp() {
 		}
 		const sync = () => {
 			window.atlas
-				.listSessionsByMap(activeEnvId)
+				.listSessionsByEnvironment(activeEnvId)
 				.then((sessions) => {
 					const today = new Date();
 					setTodaySessions(sessions.filter((session) => isSameDay(session.started_at, today)));
@@ -589,7 +589,7 @@ export function NotchApp() {
 		}
 		const sync = () => {
 			window.atlas
-				.listNotesByMap(activeEnvId)
+				.listNotesByEnvironment(activeEnvId)
 				.then(setNotes)
 				.catch(() => undefined);
 		};

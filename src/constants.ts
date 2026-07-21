@@ -17,15 +17,15 @@ import {
 import type { AtlasNavItem } from "./components/atlas-layout.types";
 import type { DashboardOverview, TaskColumn } from "./types";
 
-export const TASK_ORDER_KEY = "atlas.taskOrderByMap";
-export const TASK_COLUMNS_KEY = "atlas.taskColumnsByMap";
+export const TASK_ORDER_KEY = "atlas.taskOrderByEnvironment";
+export const TASK_COLUMNS_KEY = "atlas.taskColumnsByEnvironment";
 export const THEME_KEY = "atlas.theme";
 export const SIDEBAR_HIDDEN_KEY = "atlas.sidebarHidden";
 
 export const defaultDashboard: DashboardOverview = {
 	totalTodayMs: 0,
 	timePerApp: [],
-	timePerMap: [],
+	timePerEnvironment: [],
 	quickStats: {
 		sessionsToday: 0,
 		openTasks: 0,

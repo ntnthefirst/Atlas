@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseCapture, type CaptureContext } from "./smartParse";
-import type { MapItem, TaskColumn } from "../types";
+import type { Environment, TaskColumn } from "../types";
 
 // A fixed "now" so every date assertion is deterministic: 15 June 2026, midday
 // local time. Weekday-dependent assertions derive the expected day from the
@@ -8,7 +8,7 @@ import type { MapItem, TaskColumn } from "../types";
 // regardless of the machine's locale or timezone.
 const NOW = new Date(2026, 5, 15, 12, 0, 0).getTime();
 
-const ENVIRONMENTS: MapItem[] = [
+const ENVIRONMENTS: Environment[] = [
 	{ id: "env-work", name: "Work", created_at: "2026-01-01T00:00:00.000Z" },
 	{ id: "env-school", name: "School Project", created_at: "2026-01-01T00:00:00.000Z" },
 	{ id: "env-personal", name: "Personal", created_at: "2026-01-01T00:00:00.000Z" },

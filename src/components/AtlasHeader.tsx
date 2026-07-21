@@ -15,32 +15,32 @@ import {
 	PlayIcon as PlayIconSolid,
 	StopIcon as StopIconSolid,
 } from "@heroicons/react/24/solid";
-import type { MapItem, Session } from "../types";
-import { AtlasMapMenu } from "./AtlasMapMenu";
+import type { Environment, Session } from "../types";
+import { AtlasEnvironmentMenu } from "./AtlasEnvironmentMenu";
 import { Tooltip } from "./ui";
 import { getEnvironmentIcon, type EnvironmentPresetTemplate } from "../environments";
 
 type AtlasHeaderProps = {
 	isMacPlatform: boolean;
-	selectedMapId: string;
-	selectedMapName: string;
-	selectedMapIcon?: string | null;
-	selectedMapAccent?: string | null;
-	maps: MapItem[];
+	selectedEnvironmentId: string;
+	selectedEnvironmentName: string;
+	selectedEnvironmentIcon?: string | null;
+	selectedEnvironmentAccent?: string | null;
+	environments: Environment[];
 	onCreatePresetEnvironment: (preset: EnvironmentPresetTemplate) => void;
-	onUpdateEnvironment: (fields: Partial<Pick<MapItem, "name" | "icon" | "accent" | "preset">>) => void;
-	showMapMenu: boolean;
-	renameMapName: string;
-	newMapName: string;
-	onToggleMapMenu: () => void;
-	onCloseMapMenu: () => void;
-	onSelectMap: (mapId: string) => void;
-	onRenameMapNameChange: (nextValue: string) => void;
-	onNewMapNameChange: (nextValue: string) => void;
-	onCreateMap: () => void;
-	onRenameMap: () => void;
-	onDeleteMap: () => void;
-	canDeleteMap: boolean;
+	onUpdateEnvironment: (fields: Partial<Pick<Environment, "name" | "icon" | "accent" | "preset">>) => void;
+	showEnvironmentMenu: boolean;
+	renameEnvironmentName: string;
+	newEnvironmentName: string;
+	onToggleEnvironmentMenu: () => void;
+	onCloseEnvironmentMenu: () => void;
+	onSelectEnvironment: (environmentId: string) => void;
+	onRenameEnvironmentNameChange: (nextValue: string) => void;
+	onNewEnvironmentNameChange: (nextValue: string) => void;
+	onCreateEnvironment: () => void;
+	onRenameEnvironment: () => void;
+	onDeleteEnvironment: () => void;
+	canDeleteEnvironment: boolean;
 	activeSession: Session | null;
 	activeElapsed: string;
 	canStartRecording: boolean;
@@ -53,25 +53,25 @@ type AtlasHeaderProps = {
 
 export function AtlasHeader({
 	isMacPlatform,
-	selectedMapId,
-	selectedMapName,
-	selectedMapIcon,
-	selectedMapAccent,
-	maps,
+	selectedEnvironmentId,
+	selectedEnvironmentName,
+	selectedEnvironmentIcon,
+	selectedEnvironmentAccent,
+	environments,
 	onCreatePresetEnvironment,
 	onUpdateEnvironment,
-	showMapMenu,
-	renameMapName,
-	newMapName,
-	onToggleMapMenu,
-	onCloseMapMenu,
-	onSelectMap,
-	onRenameMapNameChange,
-	onNewMapNameChange,
-	onCreateMap,
-	onRenameMap,
-	onDeleteMap,
-	canDeleteMap,
+	showEnvironmentMenu,
+	renameEnvironmentName,
+	newEnvironmentName,
+	onToggleEnvironmentMenu,
+	onCloseEnvironmentMenu,
+	onSelectEnvironment,
+	onRenameEnvironmentNameChange,
+	onNewEnvironmentNameChange,
+	onCreateEnvironment,
+	onRenameEnvironment,
+	onDeleteEnvironment,
+	canDeleteEnvironment,
 	activeSession,
 	activeElapsed,
 	canStartRecording,
@@ -116,36 +116,36 @@ export function AtlasHeader({
 					ref={triggerRef}
 					type="button"
 					className="atlas-map-switcher inline-flex h-6 w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-neutral-300 px-2.5 py-0.5 text-body-small text-neutral-700 transition hover:border-neutral-400 dark:border-neutral-500 dark:text-neutral-50"
-					onClick={onToggleMapMenu}
+					onClick={onToggleEnvironmentMenu}
 					onKeyDown={(event) => {
-						if (event.key === "ArrowDown" && !showMapMenu) {
+						if (event.key === "ArrowDown" && !showEnvironmentMenu) {
 							event.preventDefault();
-							onToggleMapMenu();
+							onToggleEnvironmentMenu();
 						}
 					}}
 					aria-haspopup="dialog"
 				>
-					{createElement(getEnvironmentIcon(selectedMapIcon), {
+					{createElement(getEnvironmentIcon(selectedEnvironmentIcon), {
 						className: "h-3.5 w-3.5 shrink-0",
-						style: { color: selectedMapAccent ?? undefined },
+						style: { color: selectedEnvironmentAccent ?? undefined },
 					})}
-					<span className="truncate text-neutral-800 dark:text-neutral-50">{selectedMapName}</span>
+					<span className="truncate text-neutral-800 dark:text-neutral-50">{selectedEnvironmentName}</span>
 				</button>
-				<AtlasMapMenu
-					showMapMenu={showMapMenu}
-					selectedMapId={selectedMapId}
-					maps={maps}
-					renameMapName={renameMapName}
-					newMapName={newMapName}
-					canDeleteMap={canDeleteMap}
+				<AtlasEnvironmentMenu
+					showEnvironmentMenu={showEnvironmentMenu}
+					selectedEnvironmentId={selectedEnvironmentId}
+					environments={environments}
+					renameEnvironmentName={renameEnvironmentName}
+					newEnvironmentName={newEnvironmentName}
+					canDeleteEnvironment={canDeleteEnvironment}
 					triggerRef={triggerRef}
-					onCloseMapMenu={onCloseMapMenu}
-					onSelectMap={onSelectMap}
-					onRenameMapNameChange={onRenameMapNameChange}
-					onNewMapNameChange={onNewMapNameChange}
-					onCreateMap={onCreateMap}
-					onRenameMap={onRenameMap}
-					onDeleteMap={onDeleteMap}
+					onCloseEnvironmentMenu={onCloseEnvironmentMenu}
+					onSelectEnvironment={onSelectEnvironment}
+					onRenameEnvironmentNameChange={onRenameEnvironmentNameChange}
+					onNewEnvironmentNameChange={onNewEnvironmentNameChange}
+					onCreateEnvironment={onCreateEnvironment}
+					onRenameEnvironment={onRenameEnvironment}
+					onDeleteEnvironment={onDeleteEnvironment}
 					onCreatePresetEnvironment={onCreatePresetEnvironment}
 					onUpdateEnvironment={onUpdateEnvironment}
 				/>

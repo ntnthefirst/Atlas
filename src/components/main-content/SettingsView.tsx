@@ -16,7 +16,7 @@ export function SettingsView({ theme, onThemeChange }: MainContentViewsProps) {
 	const [density, setDensity] = useState("comfortable");
 	const [useSoftAnimations, setUseSoftAnimations] = useState(true);
 	const [highlightCurrentSession, setHighlightCurrentSession] = useState(true);
-	const [pinMapSwitcher, setPinMapSwitcher] = useState(false);
+	const [pinEnvironmentSwitcher, setPinEnvironmentSwitcher] = useState(false);
 	const [autoUpdates, setAutoUpdates] = useState(() => {
 		const stored = localStorage.getItem("atlas.autoUpdates");
 		return stored !== null ? JSON.parse(stored) : true;
@@ -119,8 +119,8 @@ export function SettingsView({ theme, onThemeChange }: MainContentViewsProps) {
 					<Toggle
 						label="Pin environment switcher"
 						description="Always keep the current environment visible in the titlebar"
-						checked={pinMapSwitcher}
-						onChange={setPinMapSwitcher}
+						checked={pinEnvironmentSwitcher}
+						onChange={setPinEnvironmentSwitcher}
 					/>
 				</div>
 			</section>

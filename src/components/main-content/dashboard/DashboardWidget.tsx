@@ -12,7 +12,7 @@ export type DashboardWidgetData = {
 	activeSession: Session | null;
 	activeElapsed: string;
 	currentAppName: string;
-	selectedMapName: string;
+	selectedEnvironmentName: string;
 	sessions: Session[];
 	now: number;
 	formatDuration: (ms: number) => string;
@@ -206,7 +206,7 @@ export function DashboardWidget({
 						<div className="min-w-0">
 							<span className="text-data-small">Current environment</span>
 							<strong className="block truncate text-body-regular font-semibold">
-								{data.selectedMapName}
+								{data.selectedEnvironmentName}
 							</strong>
 						</div>
 					</div>
@@ -247,7 +247,7 @@ export function DashboardWidget({
 			return <Stat value={cleanAppLabel(data.currentAppName)} label="Current app" />;
 
 		case "currentEnvironment":
-			return <Stat value={data.selectedMapName} label="Environment" />;
+			return <Stat value={data.selectedEnvironmentName} label="Environment" />;
 
 		case "topApp": {
 			const top = [...dashboard.timePerApp].sort((a, b) => b.duration - a.duration)[0];
@@ -307,15 +307,15 @@ export function DashboardWidget({
 				<>
 					<CardHeader title="Time per environment" />
 					<ul className="simple-list">
-						{dashboard.timePerMap.map((entry) => (
-							<li key={entry.mapName}>
-								<span className="min-w-0 truncate text-body-small">{entry.mapName}</span>
+						{dashboard.timePerEnvironment.map((entry) => (
+							<li key={entry.environmentName}>
+								<span className="min-w-0 truncate text-body-small">{entry.environmentName}</span>
 								<strong className="shrink-0 text-body-small font-semibold">
 									{formatDuration(entry.duration)}
 								</strong>
 							</li>
 						))}
-						{!dashboard.timePerMap.length && <li className="empty">No environment totals yet.</li>}
+						{!dashboard.timePerEnvironment.length && <li className="empty">No environment totals yet.</li>}
 					</ul>
 				</>
 			);
@@ -503,7 +503,7 @@ export function DashboardWidget({
 						{part}
 					</span>
 					<span className="truncate text-body-small text-neutral-500 dark:text-neutral-300">
-						You're in {data.selectedMapName}
+						You're in {data.selectedEnvironmentName}
 					</span>
 				</div>
 			);

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { MinusIcon, XMarkIcon, PauseIcon, PlayIcon, StopIcon } from "@heroicons/react/24/outline";
-import type { AtlasView, TaskStatus, TaskItem, TaskColumn, TaskUpdate, MapItem } from "./types";
+import type { AtlasView, TaskStatus, TaskItem, TaskColumn, TaskUpdate, Environment } from "./types";
 import { AtlasHeader } from "./components/AtlasHeader";
 import { AtlasSidebar } from "./components/AtlasSidebar";
 import { AtlasMainContent } from "./components/AtlasMainContent";
@@ -14,7 +14,7 @@ import { SmartCapture } from "./components/SmartCapture";
 import type { ParsedCapture } from "./utils/smartParse";
 import logo from "./assets/logosmall.png";
 import {
-	useMapManagement,
+	useEnvironmentManagement,
 	useSessionManagement,
 	useTaskManagement,
 	useNotebookManagement,
@@ -22,7 +22,7 @@ import {
 	useActivityManagement,
 	useThemeManagement,
 	useFocus,
-	useMapMenuManagement,
+	useEnvironmentMenuManagement,
 	useErrorManagement,
 	useTimeManagement,
 	usePlatformManagement,
@@ -88,7 +88,7 @@ function MainAtlasApp() {
 		return () => window.removeEventListener("keydown", onKeyDown);
 	}, [isMiniMode, isWelcomeMode]);
 
-	const { maps, setMaps, selectedMapId, setSelectedMapId, selectedMap } = useMapManagement();
+	const { environments, setEnvironments, selectedEnvironmentId, setSelectedEnvironmentId, selectedEnvironment } = useEnvironmentManagement();
 	const {
 		activeSession,
 		setActiveSession,
@@ -101,30 +101,30 @@ function MainAtlasApp() {
 	const {
 		tasks,
 		setTasks,
-		taskOrderByMap,
-		setTaskOrderByMap,
-		taskColumnsByMap,
-		setTaskColumnsByMap,
+		taskOrderByEnvironment,
+		setTaskOrderByEnvironment,
+		taskColumnsByEnvironment,
+		setTaskColumnsByEnvironment,
 		draggedTaskId,
 		setDraggedTaskId,
 		dropStatus,
 		setDropStatus,
 		statusColumns,
-	} = useTaskManagement(selectedMapId);
+	} = useTaskManagement(selectedEnvironmentId);
 	const { notebook, setNotebook } = useNotebookManagement();
 	const { dashboard, setDashboard } = useDashboardManagement();
 	const { activityBlocks, setActivityBlocks } = useActivityManagement();
 	const { theme, setTheme } = useThemeManagement();
 	const {
-		showMapMenu,
-		setShowMapMenu,
-		renameMapName,
-		setRenameMapName,
-		newMapName,
-		setNewMapName,
+		showEnvironmentMenu,
+		setShowEnvironmentMenu,
+		renameEnvironmentName,
+		setRenameEnvironmentName,
+		newEnvironmentName,
+		setNewEnvironmentName,
 		showFirstLaunch,
 		setShowFirstLaunch,
-	} = useMapMenuManagement();
+	} = useEnvironmentMenuManagement();
 	const { errorMessage, setErrorMessage } = useErrorManagement();
 	const { now, setNow } = useTimeManagement();
 	const focus = useFocus(now);
@@ -176,12 +176,12 @@ function MainAtlasApp() {
 
 	// Store persistent state
 	useEffect(() => {
-		localStorage.setItem(TASK_ORDER_KEY, JSON.stringify(taskOrderByMap));
-	}, [taskOrderByMap]);
+		localStorage.setItem(TASK_ORDER_KEY, JSON.stringify(taskOrderByEnvironment));
+	}, [taskOrderByEnvironment]);
 
 	useEffect(() => {
-		localStorage.setItem(TASK_COLUMNS_KEY, JSON.stringify(taskColumnsByMap));
-	}, [taskColumnsByMap]);
+		localStorage.setItem(TASK_COLUMNS_KEY, JSON.stringify(taskColumnsByEnvironment));
+	}, [taskColumnsByEnvironment]);
 
 	useEffect(() => {
 		localStorage.setItem(SIDEBAR_HIDDEN_KEY, JSON.stringify(hiddenSidebarViews));
@@ -200,19 +200,19 @@ function MainAtlasApp() {
 	// Environment accent override: when the selected environment defines its own
 	// accent the whole app adopts it; otherwise it falls back to the global accent.
 	useEffect(() => {
-		applyAccent(selectedMap?.accent || globalAccent);
-	}, [selectedMap?.accent, globalAccent]);
+		applyAccent(selectedEnvironment?.accent || globalAccent);
+	}, [selectedEnvironment?.accent, globalAccent]);
 
 	// Remember the active environment so the notch can start a session in it.
 	useEffect(() => {
-		if (selectedMapId) {
+		if (selectedEnvironmentId) {
 			try {
-				localStorage.setItem("atlas.lastEnvironmentId", selectedMapId);
+				localStorage.setItem("atlas.lastEnvironmentId", selectedEnvironmentId);
 			} catch {
 				// Ignore storage failures; the notch falls back to the first environment.
 			}
 		}
-	}, [selectedMapId]);
+	}, [selectedEnvironmentId]);
 
 	// Platform detection
 	useEffect(() => {
@@ -254,11 +254,11 @@ function MainAtlasApp() {
 		}, 500);
 
 		const dataSync = window.setInterval(async () => {
-			if (selectedMapId) {
-				setDashboard(await window.atlas.getDashboardOverview(selectedMapId));
+			if (selectedEnvironmentId) {
+				setDashboard(await window.atlas.getDashboardOverview(selectedEnvironmentId));
 			}
 			const active = await window.atlas.getActiveSession();
-			if (active && (active.map_id === selectedMapId || active.id === selectedSessionId)) {
+			if (active && (active.environment_id === selectedEnvironmentId || active.id === selectedSessionId)) {
 				const blocks = await window.atlas.listActivityBySession(active.id);
 				setActivityBlocks(blocks);
 			}
@@ -269,7 +269,7 @@ function MainAtlasApp() {
 			window.clearInterval(dataSync);
 		};
 	}, [
-		selectedMapId,
+		selectedEnvironmentId,
 		selectedSessionId,
 		setActiveSession,
 		setCurrentAppName,
@@ -279,7 +279,7 @@ function MainAtlasApp() {
 
 	// Active session change
 	useEffect(() => {
-		if (isMiniMode || !selectedMapId) {
+		if (isMiniMode || !selectedEnvironmentId) {
 			previousActiveSessionIdRef.current = activeSession?.id ?? null;
 			return;
 		}
@@ -288,28 +288,28 @@ function MainAtlasApp() {
 		if (previousSessionId !== currentSessionId) {
 			void (async () => {
 				const [nextSessions, nextTasks, nextNotebook, nextDashboard] = await Promise.all([
-					window.atlas.listSessionsByMap(selectedMapId),
-					window.atlas.listTasksByMap(selectedMapId),
-					window.atlas.getNotebookByMap(selectedMapId),
-					window.atlas.getDashboardOverview(selectedMapId),
+					window.atlas.listSessionsByEnvironment(selectedEnvironmentId),
+					window.atlas.listTasksByEnvironment(selectedEnvironmentId),
+					window.atlas.getNotebookByEnvironment(selectedEnvironmentId),
+					window.atlas.getDashboardOverview(selectedEnvironmentId),
 				]);
-				setTaskColumnsByMap((current) => {
-					const existing = normalizeColumns(current[selectedMapId] ?? defaultTaskColumns, defaultTaskColumns);
+				setTaskColumnsByEnvironment((current) => {
+					const existing = normalizeColumns(current[selectedEnvironmentId] ?? defaultTaskColumns, defaultTaskColumns);
 					const knownStatuses = new Set(existing.map((column) => column.status));
 					const missingStatuses = nextTasks
 						.map((task) => task.status)
 						.filter((status, index, all) => all.indexOf(status) === index)
 						.filter((status) => !knownStatuses.has(status));
-					if (!missingStatuses.length && current[selectedMapId]) return current;
+					if (!missingStatuses.length && current[selectedEnvironmentId]) return current;
 					const merged = normalizeColumns(
 						[...existing, ...missingStatuses.map((status) => ({ status, label: status }))],
 						defaultTaskColumns,
 					);
-					return { ...current, [selectedMapId]: merged };
+					return { ...current, [selectedEnvironmentId]: merged };
 				});
 				setSessions(nextSessions);
-				const mapOrder = taskOrderByMap[selectedMapId] ?? [];
-				setTasks(sortTasksByOrder(nextTasks, mapOrder));
+				const environmentOrder = taskOrderByEnvironment[selectedEnvironmentId] ?? [];
+				setTasks(sortTasksByOrder(nextTasks, environmentOrder));
 				setNotebook(nextNotebook);
 				setDashboard(nextDashboard);
 				if (nextSessions.length && !selectedSessionId) setSelectedSessionId(nextSessions[0].id);
@@ -323,11 +323,11 @@ function MainAtlasApp() {
 	}, [
 		activeSession?.id,
 		isMiniMode,
-		selectedMapId,
+		selectedEnvironmentId,
 		selectedSessionId,
-		taskOrderByMap,
+		taskOrderByEnvironment,
 		setSessions,
-		setTaskColumnsByMap,
+		setTaskColumnsByEnvironment,
 		setTasks,
 		setNotebook,
 		setDashboard,
@@ -341,37 +341,37 @@ function MainAtlasApp() {
 			try {
 				const persistedOrder = readStorage(TASK_ORDER_KEY, {} as Record<string, string[]>);
 				const persistedColumns = readStorage(TASK_COLUMNS_KEY, {} as Record<string, TaskColumn[]>);
-				setTaskColumnsByMap(persistedColumns);
-				const [mapList, active, appName] = await Promise.all([
-					window.atlas.listMaps(),
+				setTaskColumnsByEnvironment(persistedColumns);
+				const [environmentList, active, appName] = await Promise.all([
+					window.atlas.listEnvironments(),
 					window.atlas.getActiveSession(),
 					window.atlas.getCurrentApp(),
 				]);
-				setMaps(mapList);
+				setEnvironments(environmentList);
 				setActiveSession(active);
 				setCurrentAppName(normalizeTrackedAppName(appName));
-				if (!mapList.length) {
+				if (!environmentList.length) {
 					setShowFirstLaunch(true);
 					return;
 				}
-				const preferredMapId = active?.map_id ?? mapList[0].id;
-				setSelectedMapId(preferredMapId);
+				const preferredEnvironmentId = active?.environment_id ?? environmentList[0].id;
+				setSelectedEnvironmentId(preferredEnvironmentId);
 				const [nextSessions, nextTasks, nextNotebook, nextDashboard] = await Promise.all([
-					window.atlas.listSessionsByMap(preferredMapId),
-					window.atlas.listTasksByMap(preferredMapId),
-					window.atlas.getNotebookByMap(preferredMapId),
-					window.atlas.getDashboardOverview(preferredMapId),
+					window.atlas.listSessionsByEnvironment(preferredEnvironmentId),
+					window.atlas.listTasksByEnvironment(preferredEnvironmentId),
+					window.atlas.getNotebookByEnvironment(preferredEnvironmentId),
+					window.atlas.getDashboardOverview(preferredEnvironmentId),
 				]);
 				setSessions(nextSessions);
-				const existingOrder = persistedOrder[preferredMapId] ?? [];
+				const existingOrder = persistedOrder[preferredEnvironmentId] ?? [];
 				const existingSet = new Set(nextTasks.map((task) => task.id));
 				const normalizedOrder = [
 					...existingOrder.filter((id) => existingSet.has(id)),
 					...nextTasks.map((task) => task.id).filter((id) => !existingOrder.includes(id)),
 				];
-				setTaskOrderByMap((current) => ({ ...current, [preferredMapId]: normalizedOrder }));
+				setTaskOrderByEnvironment((current) => ({ ...current, [preferredEnvironmentId]: normalizedOrder }));
 				const existing = normalizeColumns(
-					persistedColumns[preferredMapId] ?? defaultTaskColumns,
+					persistedColumns[preferredEnvironmentId] ?? defaultTaskColumns,
 					defaultTaskColumns,
 				);
 				const knownStatuses = new Set(existing.map((column) => column.status));
@@ -383,7 +383,7 @@ function MainAtlasApp() {
 					[...existing, ...missingStatuses.map((status) => ({ status, label: status }))],
 					defaultTaskColumns,
 				);
-				setTaskColumnsByMap((current) => ({ ...current, [preferredMapId]: merged }));
+				setTaskColumnsByEnvironment((current) => ({ ...current, [preferredEnvironmentId]: merged }));
 				setTasks(sortTasksByOrder(nextTasks, normalizedOrder));
 				setNotebook(nextNotebook);
 				setDashboard(nextDashboard);
@@ -401,14 +401,14 @@ function MainAtlasApp() {
 		};
 		start().catch(console.error);
 	}, [
-		setTaskColumnsByMap,
-		setMaps,
+		setTaskColumnsByEnvironment,
+		setEnvironments,
 		setActiveSession,
 		setCurrentAppName,
 		setShowFirstLaunch,
-		setSelectedMapId,
+		setSelectedEnvironmentId,
 		setSessions,
-		setTaskOrderByMap,
+		setTaskOrderByEnvironment,
 		setTasks,
 		setNotebook,
 		setDashboard,
@@ -419,50 +419,50 @@ function MainAtlasApp() {
 	]);
 
 	// Helpers
-	const refreshMapData = async (mapId: string) => {
-		if (!mapId) return;
+	const refreshEnvironmentData = async (environmentId: string) => {
+		if (!environmentId) return;
 		const [nextSessions, nextTasks, nextNotebook, nextDashboard] = await Promise.all([
-			window.atlas.listSessionsByMap(mapId),
-			window.atlas.listTasksByMap(mapId),
-			window.atlas.getNotebookByMap(mapId),
-			window.atlas.getDashboardOverview(mapId),
+			window.atlas.listSessionsByEnvironment(environmentId),
+			window.atlas.listTasksByEnvironment(environmentId),
+			window.atlas.getNotebookByEnvironment(environmentId),
+			window.atlas.getDashboardOverview(environmentId),
 		]);
-		syncColumnsForMap(mapId, nextTasks);
+		syncColumnsForEnvironment(environmentId, nextTasks);
 		setSessions(nextSessions);
-		const mapOrder = taskOrderByMap[mapId] ?? [];
-		setTasks(sortTasksByOrder(nextTasks, mapOrder));
+		const environmentOrder = taskOrderByEnvironment[environmentId] ?? [];
+		setTasks(sortTasksByOrder(nextTasks, environmentOrder));
 		setNotebook(nextNotebook);
 		setDashboard(nextDashboard);
 		if (nextSessions.length && !selectedSessionId) setSelectedSessionId(nextSessions[0].id);
 	};
 
-	const syncColumnsForMap = (mapId: string, nextTasks: TaskItem[]) => {
-		setTaskColumnsByMap((current) => {
-			const existing = normalizeColumns(current[mapId] ?? defaultTaskColumns, defaultTaskColumns);
+	const syncColumnsForEnvironment = (environmentId: string, nextTasks: TaskItem[]) => {
+		setTaskColumnsByEnvironment((current) => {
+			const existing = normalizeColumns(current[environmentId] ?? defaultTaskColumns, defaultTaskColumns);
 			const knownStatuses = new Set(existing.map((column) => column.status));
 			const missingStatuses = nextTasks
 				.map((task) => task.status)
 				.filter((status, index, all) => all.indexOf(status) === index)
 				.filter((status) => !knownStatuses.has(status));
-			if (!missingStatuses.length && current[mapId]) return current;
+			if (!missingStatuses.length && current[environmentId]) return current;
 			const merged = normalizeColumns(
 				[...existing, ...missingStatuses.map((status) => ({ status, label: status }))],
 				defaultTaskColumns,
 			);
-			return { ...current, [mapId]: merged };
+			return { ...current, [environmentId]: merged };
 		});
 	};
 
-	const syncTasksForMap = async (mapId: string) => {
-		const nextTasks = await window.atlas.listTasksByMap(mapId);
-		syncColumnsForMap(mapId, nextTasks);
-		const existingOrder = taskOrderByMap[mapId] ?? [];
+	const syncTasksForEnvironment = async (environmentId: string) => {
+		const nextTasks = await window.atlas.listTasksByEnvironment(environmentId);
+		syncColumnsForEnvironment(environmentId, nextTasks);
+		const existingOrder = taskOrderByEnvironment[environmentId] ?? [];
 		const existingSet = new Set(nextTasks.map((task) => task.id));
 		const normalizedOrder = [
 			...existingOrder.filter((id) => existingSet.has(id)),
 			...nextTasks.map((task) => task.id).filter((id) => !existingOrder.includes(id)),
 		];
-		setTaskOrderByMap((current) => ({ ...current, [mapId]: normalizedOrder }));
+		setTaskOrderByEnvironment((current) => ({ ...current, [environmentId]: normalizedOrder }));
 		setTasks(sortTasksByOrder(nextTasks, normalizedOrder));
 	};
 
@@ -472,103 +472,103 @@ function MainAtlasApp() {
 	};
 
 	// Map operations
-	const onCreateMap = async () => {
-		const candidate = newMapName.trim();
+	const onCreateEnvironment = async () => {
+		const candidate = newEnvironmentName.trim();
 		if (!candidate) return;
-		const exists = maps.some((mapItem) => mapItem.name.trim().toLowerCase() === candidate.toLowerCase());
+		const exists = environments.some((environmentItem) => environmentItem.name.trim().toLowerCase() === candidate.toLowerCase());
 		if (exists) {
 			setErrorMessage("Environment name already exists.");
 			return;
 		}
-		const map = await window.atlas.createMap(candidate, {
+		const map = await window.atlas.createEnvironment(candidate, {
 			icon: DEFAULT_ENVIRONMENT_ICON,
 			accent: null,
 			preset: "custom",
 		});
-		setMaps([...maps, map]);
-		setSelectedMapId(map.id);
-		setRenameMapName(map.name);
-		setNewMapName("");
-		setShowMapMenu(false);
+		setEnvironments([...environments, map]);
+		setSelectedEnvironmentId(map.id);
+		setRenameEnvironmentName(map.name);
+		setNewEnvironmentName("");
+		setShowEnvironmentMenu(false);
 		setShowFirstLaunch(false);
 		setErrorMessage("");
-		await refreshMapData(map.id);
+		await refreshEnvironmentData(map.id);
 	};
 
 	const onCreatePresetEnvironment = async (preset: EnvironmentPresetTemplate) => {
 		const lower = (value: string) => value.trim().toLowerCase();
 		let name = preset.name;
 		let suffix = 2;
-		while (maps.some((mapItem) => lower(mapItem.name) === lower(name))) {
+		while (environments.some((environmentItem) => lower(environmentItem.name) === lower(name))) {
 			name = `${preset.name} ${suffix}`;
 			suffix += 1;
 		}
-		const map = await window.atlas.createMap(name, {
+		const map = await window.atlas.createEnvironment(name, {
 			icon: preset.icon,
 			accent: preset.accent,
 			preset: preset.id,
 		});
-		setMaps((current) => [...current, map]);
-		setSelectedMapId(map.id);
-		setRenameMapName(map.name);
-		setNewMapName("");
-		setShowMapMenu(false);
+		setEnvironments((current) => [...current, map]);
+		setSelectedEnvironmentId(map.id);
+		setRenameEnvironmentName(map.name);
+		setNewEnvironmentName("");
+		setShowEnvironmentMenu(false);
 		setShowFirstLaunch(false);
 		setErrorMessage("");
-		await refreshMapData(map.id);
+		await refreshEnvironmentData(map.id);
 	};
 
 	const onUpdateEnvironment = async (
-		fields: Partial<Pick<MapItem, "name" | "icon" | "accent" | "preset">>,
+		fields: Partial<Pick<Environment, "name" | "icon" | "accent" | "preset">>,
 	) => {
-		if (!selectedMapId) return;
-		const updated = await window.atlas.updateMap(selectedMapId, fields);
-		setMaps((current) => current.map((mapItem) => (mapItem.id === updated.id ? updated : mapItem)));
+		if (!selectedEnvironmentId) return;
+		const updated = await window.atlas.updateEnvironment(selectedEnvironmentId, fields);
+		setEnvironments((current) => current.map((environmentItem) => (environmentItem.id === updated.id ? updated : environmentItem)));
 	};
 
-	const onRenameMap = async () => {
-		if (!selectedMap || !renameMapName.trim()) return;
-		const renamed = await window.atlas.renameMap(selectedMap.id, renameMapName.trim());
-		setMaps((current) => current.map((item) => (item.id === renamed.id ? renamed : item)));
-		setRenameMapName("");
-		setShowMapMenu(false);
+	const onRenameEnvironment = async () => {
+		if (!selectedEnvironment || !renameEnvironmentName.trim()) return;
+		const renamed = await window.atlas.renameEnvironment(selectedEnvironment.id, renameEnvironmentName.trim());
+		setEnvironments((current) => current.map((item) => (item.id === renamed.id ? renamed : item)));
+		setRenameEnvironmentName("");
+		setShowEnvironmentMenu(false);
 	};
 
-	const onSelectMap = async (mapId: string) => {
-		setSelectedMapId(mapId);
+	const onSelectEnvironment = async (environmentId: string) => {
+		setSelectedEnvironmentId(environmentId);
 		setSelectedSessionId("");
 		setNotebook(null);
 		setActivityBlocks([]);
-		setShowMapMenu(false);
-		await refreshMapData(mapId);
+		setShowEnvironmentMenu(false);
+		await refreshEnvironmentData(environmentId);
 	};
 
-	const onDeleteMap = async () => {
-		if (!selectedMap) return;
-		if (activeSession && activeSession.map_id === selectedMap.id) {
+	const onDeleteEnvironment = async () => {
+		if (!selectedEnvironment) return;
+		if (activeSession && activeSession.environment_id === selectedEnvironment.id) {
 			setErrorMessage("Stop the active session in this map before deleting it.");
 			return;
 		}
 		const confirmed = window.confirm(
-			`Delete map "${selectedMap.name}"? This removes all sessions, tasks, and notes in it.`,
+			`Delete map "${selectedEnvironment.name}"? This removes all sessions, tasks, and notes in it.`,
 		);
 		if (!confirmed) return;
 		try {
-			await window.atlas.deleteMap(selectedMap.id);
-			const remainingMaps = maps.filter((mapItem) => mapItem.id !== selectedMap.id);
-			const fallbackMapId = remainingMaps[0]?.id ?? "";
-			setMaps(remainingMaps);
-			setShowMapMenu(false);
-			setRenameMapName("");
-			setNewMapName("");
-			setSelectedMapId(fallbackMapId);
+			await window.atlas.deleteEnvironment(selectedEnvironment.id);
+			const remainingEnvironments = environments.filter((environmentItem) => environmentItem.id !== selectedEnvironment.id);
+			const fallbackEnvironmentId = remainingEnvironments[0]?.id ?? "";
+			setEnvironments(remainingEnvironments);
+			setShowEnvironmentMenu(false);
+			setRenameEnvironmentName("");
+			setNewEnvironmentName("");
+			setSelectedEnvironmentId(fallbackEnvironmentId);
 			setSelectedSessionId("");
 			setNotebook(null);
 			setActivityBlocks([]);
-			setShowFirstLaunch(remainingMaps.length === 0);
+			setShowFirstLaunch(remainingEnvironments.length === 0);
 			setErrorMessage("");
-			if (fallbackMapId) {
-				await refreshMapData(fallbackMapId);
+			if (fallbackEnvironmentId) {
+				await refreshEnvironmentData(fallbackEnvironmentId);
 				return;
 			}
 			setSessions([]);
@@ -582,11 +582,11 @@ function MainAtlasApp() {
 
 	// Session operations
 	const onStartSession = async () => {
-		if (!selectedMapId || activeSession) return;
-		const session = await window.atlas.startSession(selectedMapId);
+		if (!selectedEnvironmentId || activeSession) return;
+		const session = await window.atlas.startSession(selectedEnvironmentId);
 		setActiveSession(session);
 		setSelectedSessionId(session.id);
-		await Promise.all([refreshMapData(selectedMapId), refreshActivity(session.id)]);
+		await Promise.all([refreshEnvironmentData(selectedEnvironmentId), refreshActivity(session.id)]);
 	};
 
 	const onPauseResume = async () => {
@@ -595,26 +595,26 @@ function MainAtlasApp() {
 			? await window.atlas.resumeSession(activeSession.id)
 			: await window.atlas.pauseSession(activeSession.id);
 		setActiveSession(next);
-		await refreshMapData(next.map_id);
+		await refreshEnvironmentData(next.environment_id);
 	};
 
 	const onStopSession = async () => {
 		if (!activeSession) return;
 		const latestActive = await window.atlas.getActiveSession();
 		const sessionToStop = latestActive ?? activeSession;
-		const mapId = sessionToStop.map_id;
+		const environmentId = sessionToStop.environment_id;
 		try {
 			await window.atlas.stopSession(sessionToStop.id);
 			setActiveSession(null);
 			setActivityBlocks([]);
-			await refreshMapData(mapId);
+			await refreshEnvironmentData(environmentId);
 			setErrorMessage("");
 		} catch (error) {
 			const latestActive = await window.atlas.getActiveSession();
 			if (!latestActive) {
 				setActiveSession(null);
 				setActivityBlocks([]);
-				await refreshMapData(mapId);
+				await refreshEnvironmentData(environmentId);
 				setErrorMessage("");
 				return;
 			}
@@ -624,7 +624,7 @@ function MainAtlasApp() {
 
 	const onDeleteSession = async (sessionId: string) => {
 		if (
-			!selectedMapId ||
+			!selectedEnvironmentId ||
 			!window.confirm("Are you sure you want to delete this session? This cannot be undone.")
 		)
 			return;
@@ -634,7 +634,7 @@ function MainAtlasApp() {
 				setSelectedSessionId("");
 				setActivityBlocks([]);
 			}
-			await refreshMapData(selectedMapId);
+			await refreshEnvironmentData(selectedEnvironmentId);
 			setErrorMessage("");
 		} catch (error) {
 			setErrorMessage(error instanceof Error ? error.message : "Unable to delete session.");
@@ -645,15 +645,15 @@ function MainAtlasApp() {
 	// captured line can land in the right column of whichever environment it
 	// targets (not only the one that's currently open).
 	const columnsFor = useCallback(
-		(mapId: string) => normalizeColumns(taskColumnsByMap[mapId] ?? defaultTaskColumns, defaultTaskColumns),
-		[taskColumnsByMap],
+		(environmentId: string) => normalizeColumns(taskColumnsByEnvironment[environmentId] ?? defaultTaskColumns, defaultTaskColumns),
+		[taskColumnsByEnvironment],
 	);
 
 	// Files a parsed Smart Capture result: creates the task (fully routed with
 	// priority/due/tags/column) or the note, then surfaces it — switching to the
 	// target environment if the capture named a different one.
 	const onSmartCapture = async (result: ParsedCapture) => {
-		const envId = result.environmentId ?? selectedMapId;
+		const envId = result.environmentId ?? selectedEnvironmentId;
 		const title = result.title.trim();
 		if (!envId || !title) {
 			setCaptureOpen(false);
@@ -671,10 +671,10 @@ function MainAtlasApp() {
 				});
 			}
 			setErrorMessage("");
-			if (envId !== selectedMapId) {
-				await onSelectMap(envId);
+			if (envId !== selectedEnvironmentId) {
+				await onSelectEnvironment(envId);
 			} else {
-				await syncTasksForMap(envId);
+				await syncTasksForEnvironment(envId);
 				setDashboard(await window.atlas.getDashboardOverview(envId));
 			}
 			if (result.kind === "task") setView("tasks");
@@ -687,20 +687,20 @@ function MainAtlasApp() {
 
 	// Task operations
 	const onCreateTaskInColumn = async (status: TaskStatus, title: string) => {
-		if (!selectedMapId || !title.trim()) return;
-		const created = await window.atlas.createTask(selectedMapId, title.trim(), "");
+		if (!selectedEnvironmentId || !title.trim()) return;
+		const created = await window.atlas.createTask(selectedEnvironmentId, title.trim(), "");
 		if (created.status !== status) await window.atlas.updateTaskStatus(created.id, status);
-		await syncTasksForMap(selectedMapId);
-		setDashboard(await window.atlas.getDashboardOverview(selectedMapId));
+		await syncTasksForEnvironment(selectedEnvironmentId);
+		setDashboard(await window.atlas.getDashboardOverview(selectedEnvironmentId));
 	};
 
 	const onRenameTaskColumn = (status: TaskStatus, label: string) => {
-		if (!selectedMapId) return;
-		setTaskColumnsByMap((current) => {
-			const columns = normalizeColumns(current[selectedMapId] ?? defaultTaskColumns, defaultTaskColumns).map(
+		if (!selectedEnvironmentId) return;
+		setTaskColumnsByEnvironment((current) => {
+			const columns = normalizeColumns(current[selectedEnvironmentId] ?? defaultTaskColumns, defaultTaskColumns).map(
 				(column) => (column.status === status ? { ...column, label } : column),
 			);
-			return { ...current, [selectedMapId]: columns };
+			return { ...current, [selectedEnvironmentId]: columns };
 		});
 	};
 
@@ -709,9 +709,9 @@ function MainAtlasApp() {
 		targetStatus: TaskStatus,
 		position: "before" | "after" = "before",
 	) => {
-		if (!selectedMapId || draggedStatus === targetStatus) return;
-		setTaskColumnsByMap((current) => {
-			const columns = normalizeColumns(current[selectedMapId] ?? defaultTaskColumns, defaultTaskColumns);
+		if (!selectedEnvironmentId || draggedStatus === targetStatus) return;
+		setTaskColumnsByEnvironment((current) => {
+			const columns = normalizeColumns(current[selectedEnvironmentId] ?? defaultTaskColumns, defaultTaskColumns);
 			const draggedIndex = columns.findIndex((column) => column.status === draggedStatus);
 			const targetIndex = columns.findIndex((column) => column.status === targetStatus);
 			if (draggedIndex < 0 || targetIndex < 0) return current;
@@ -720,14 +720,14 @@ function MainAtlasApp() {
 			let insertIndex = position === "after" ? targetIndex + 1 : targetIndex;
 			if (draggedIndex < insertIndex) insertIndex -= 1;
 			nextColumns.splice(insertIndex, 0, draggedColumn);
-			return { ...current, [selectedMapId]: nextColumns };
+			return { ...current, [selectedEnvironmentId]: nextColumns };
 		});
 	};
 
 	const onAddTaskColumn = () => {
-		if (!selectedMapId) return;
-		setTaskColumnsByMap((current) => {
-			const columns = normalizeColumns(current[selectedMapId] ?? defaultTaskColumns, defaultTaskColumns);
+		if (!selectedEnvironmentId) return;
+		setTaskColumnsByEnvironment((current) => {
+			const columns = normalizeColumns(current[selectedEnvironmentId] ?? defaultTaskColumns, defaultTaskColumns);
 			const used = new Set(columns.map((column) => column.status));
 			let nextIndex = columns.length + 1;
 			let nextStatus = `column_${nextIndex}`;
@@ -737,15 +737,15 @@ function MainAtlasApp() {
 			}
 			return {
 				...current,
-				[selectedMapId]: [...columns, { status: nextStatus, label: `Column ${nextIndex}` }],
+				[selectedEnvironmentId]: [...columns, { status: nextStatus, label: `Column ${nextIndex}` }],
 			};
 		});
 	};
 
 	const onRemoveTaskColumn = async (status: TaskStatus) => {
-		if (!selectedMapId) return;
+		if (!selectedEnvironmentId) return;
 		const columns = normalizeColumns(
-			taskColumnsByMap[selectedMapId] ?? defaultTaskColumns,
+			taskColumnsByEnvironment[selectedEnvironmentId] ?? defaultTaskColumns,
 			defaultTaskColumns,
 		);
 		if (columns.length <= 1) return;
@@ -758,13 +758,13 @@ function MainAtlasApp() {
 				tasksInRemovedColumn.map((task) => window.atlas.updateTaskStatus(task.id, fallbackStatus)),
 			);
 		}
-		setTaskColumnsByMap((current) => ({ ...current, [selectedMapId]: nextColumns }));
-		await syncTasksForMap(selectedMapId);
-		setDashboard(await window.atlas.getDashboardOverview(selectedMapId));
+		setTaskColumnsByEnvironment((current) => ({ ...current, [selectedEnvironmentId]: nextColumns }));
+		await syncTasksForEnvironment(selectedEnvironmentId);
+		setDashboard(await window.atlas.getDashboardOverview(selectedEnvironmentId));
 	};
 
 	const onDropInColumn = async (status: TaskStatus) => {
-		if (!draggedTaskId || !selectedMapId) {
+		if (!draggedTaskId || !selectedEnvironmentId) {
 			setDropStatus(null);
 			return;
 		}
@@ -776,18 +776,18 @@ function MainAtlasApp() {
 			dragged && dragged.status !== status
 				? tasks.map((task) => (task.id === dragged.id ? { ...task, status } : task))
 				: tasks;
-		const currentOrder = taskOrderByMap[selectedMapId] ?? tasks.map((task) => task.id);
+		const currentOrder = taskOrderByEnvironment[selectedEnvironmentId] ?? tasks.map((task) => task.id);
 		const cleanOrder = currentOrder.filter((id) => baseTasks.some((task) => task.id === id));
 		const withDraggedAtEnd = cleanOrder.includes(draggedTaskId) ? cleanOrder : [...cleanOrder, draggedTaskId];
-		setTaskOrderByMap((current) => ({ ...current, [selectedMapId]: withDraggedAtEnd }));
+		setTaskOrderByEnvironment((current) => ({ ...current, [selectedEnvironmentId]: withDraggedAtEnd }));
 		setTasks(sortTasksByOrder(baseTasks, withDraggedAtEnd));
 		setDraggedTaskId("");
 		setDropStatus(null);
-		setDashboard(await window.atlas.getDashboardOverview(selectedMapId));
+		setDashboard(await window.atlas.getDashboardOverview(selectedEnvironmentId));
 	};
 
 	const onDropOnTask = async (targetTask: TaskItem, position: "before" | "after" = "before") => {
-		if (!draggedTaskId || !selectedMapId || draggedTaskId === targetTask.id) {
+		if (!draggedTaskId || !selectedEnvironmentId || draggedTaskId === targetTask.id) {
 			setDropStatus(null);
 			return;
 		}
@@ -802,40 +802,40 @@ function MainAtlasApp() {
 		const nextTasks = tasks.map((task) =>
 			task.id === dragged.id ? { ...task, status: targetTask.status } : task,
 		);
-		const currentOrder = taskOrderByMap[selectedMapId] ?? tasks.map((task) => task.id);
+		const currentOrder = taskOrderByEnvironment[selectedEnvironmentId] ?? tasks.map((task) => task.id);
 		const cleanOrder = currentOrder.filter((id) => nextTasks.some((task) => task.id === id));
 		const nextOrder = reorderTaskIds(cleanOrder, dragged.id, targetTask.id, position);
-		setTaskOrderByMap((current) => ({ ...current, [selectedMapId]: nextOrder }));
+		setTaskOrderByEnvironment((current) => ({ ...current, [selectedEnvironmentId]: nextOrder }));
 		setTasks(sortTasksByOrder(nextTasks, nextOrder));
 		setDraggedTaskId("");
 		setDropStatus(null);
-		setDashboard(await window.atlas.getDashboardOverview(selectedMapId));
+		setDashboard(await window.atlas.getDashboardOverview(selectedEnvironmentId));
 	};
 
 	const onUpdateTask = async (taskId: string, fields: TaskUpdate) => {
-		if (!selectedMapId) return;
+		if (!selectedEnvironmentId) return;
 		const updated = await window.atlas.updateTask(taskId, fields);
 		setTasks((current) => current.map((task) => (task.id === taskId ? { ...task, ...updated } : task)));
 		if ("status" in fields) {
-			setDashboard(await window.atlas.getDashboardOverview(selectedMapId));
+			setDashboard(await window.atlas.getDashboardOverview(selectedEnvironmentId));
 		}
 	};
 
 	const onDeleteTask = async (taskId: string) => {
-		if (!selectedMapId) return;
+		if (!selectedEnvironmentId) return;
 		await window.atlas.deleteTask(taskId);
 		setTasks((current) => current.filter((task) => task.id !== taskId));
-		setTaskOrderByMap((current) => ({
+		setTaskOrderByEnvironment((current) => ({
 			...current,
-			[selectedMapId]: (current[selectedMapId] ?? []).filter((id) => id !== taskId),
+			[selectedEnvironmentId]: (current[selectedEnvironmentId] ?? []).filter((id) => id !== taskId),
 		}));
-		setDashboard(await window.atlas.getDashboardOverview(selectedMapId));
+		setDashboard(await window.atlas.getDashboardOverview(selectedEnvironmentId));
 	};
 
 	// Notebook & actions
-	const onUpdateNotebookByMap = async (content: string) => {
-		if (!selectedMapId) return;
-		const updated = await window.atlas.updateNotebookByMap(selectedMapId, content);
+	const onUpdateNotebookByEnvironment = async (content: string) => {
+		if (!selectedEnvironmentId) return;
+		const updated = await window.atlas.updateNotebookByEnvironment(selectedEnvironmentId, content);
 		setNotebook(updated);
 	};
 
@@ -956,18 +956,18 @@ function MainAtlasApp() {
 						<label htmlFor="welcome-map-name">Environment name</label>
 						<input
 							id="welcome-map-name"
-							value={newMapName}
-							onChange={(event) => setNewMapName(event.target.value)}
+							value={newEnvironmentName}
+							onChange={(event) => setNewEnvironmentName(event.target.value)}
 							placeholder="e.g. Work, Coding, Gaming"
 							autoFocus
 							onKeyDown={(event) => {
 								if (event.key === "Enter") {
 									event.preventDefault();
-									void onCreateMap();
+									void onCreateEnvironment();
 								}
 							}}
 						/>
-						<button className="action-btn atlas-welcome-create" onClick={() => void onCreateMap()}>
+						<button className="action-btn atlas-welcome-create" onClick={() => void onCreateEnvironment()}>
 							Create environment
 						</button>
 
@@ -1010,30 +1010,30 @@ function MainAtlasApp() {
 					<div className="atlas-header-slot">
 						<AtlasHeader
 							isMacPlatform={isMacPlatform}
-							selectedMapId={selectedMapId}
-							selectedMapName={selectedMap?.name ?? "Choose environment"}
-							selectedMapIcon={selectedMap?.icon ?? null}
-							selectedMapAccent={selectedMap?.accent ?? null}
-							maps={maps}
+							selectedEnvironmentId={selectedEnvironmentId}
+							selectedEnvironmentName={selectedEnvironment?.name ?? "Choose environment"}
+							selectedEnvironmentIcon={selectedEnvironment?.icon ?? null}
+							selectedEnvironmentAccent={selectedEnvironment?.accent ?? null}
+							environments={environments}
 							onCreatePresetEnvironment={onCreatePresetEnvironment}
 							onUpdateEnvironment={onUpdateEnvironment}
-							showMapMenu={showMapMenu}
-							renameMapName={renameMapName}
-							newMapName={newMapName}
-							onToggleMapMenu={() => setShowMapMenu((v) => !v)}
-							onCloseMapMenu={() => setShowMapMenu(false)}
-							onSelectMap={onSelectMap}
-							onRenameMapNameChange={setRenameMapName}
-							onNewMapNameChange={setNewMapName}
-							onCreateMap={onCreateMap}
-							onRenameMap={onRenameMap}
-							onDeleteMap={onDeleteMap}
-							canDeleteMap={
-								Boolean(selectedMapId) && !(activeSession && activeSession.map_id === selectedMapId)
+							showEnvironmentMenu={showEnvironmentMenu}
+							renameEnvironmentName={renameEnvironmentName}
+							newEnvironmentName={newEnvironmentName}
+							onToggleEnvironmentMenu={() => setShowEnvironmentMenu((v) => !v)}
+							onCloseEnvironmentMenu={() => setShowEnvironmentMenu(false)}
+							onSelectEnvironment={onSelectEnvironment}
+							onRenameEnvironmentNameChange={setRenameEnvironmentName}
+							onNewEnvironmentNameChange={setNewEnvironmentName}
+							onCreateEnvironment={onCreateEnvironment}
+							onRenameEnvironment={onRenameEnvironment}
+							onDeleteEnvironment={onDeleteEnvironment}
+							canDeleteEnvironment={
+								Boolean(selectedEnvironmentId) && !(activeSession && activeSession.environment_id === selectedEnvironmentId)
 							}
 							activeSession={activeSession}
 							activeElapsed={activeElapsed}
-							canStartRecording={Boolean(selectedMapId)}
+							canStartRecording={Boolean(selectedEnvironmentId)}
 							onStartSession={onStartSession}
 							onPauseResume={onPauseResume}
 							onStopSession={onStopSession}
@@ -1061,7 +1061,7 @@ function MainAtlasApp() {
 								activeSession={activeSession}
 								activeElapsed={activeElapsed}
 								currentAppName={currentAppName}
-								selectedMapName={selectedMap?.name ?? "None"}
+								selectedEnvironmentName={selectedEnvironment?.name ?? "None"}
 								sessions={sessions}
 								selectedSession={selectedSession}
 								onOpenSession={openSession}
@@ -1086,7 +1086,7 @@ function MainAtlasApp() {
 								onAddTaskColumn={onAddTaskColumn}
 								onRemoveTaskColumn={onRemoveTaskColumn}
 								notebook={notebook}
-								onUpdateNotebookByMap={onUpdateNotebookByMap}
+								onUpdateNotebookByEnvironment={onUpdateNotebookByEnvironment}
 								theme={theme}
 								onThemeChange={setTheme}
 								focus={focus}
@@ -1113,18 +1113,18 @@ function MainAtlasApp() {
 							<h2>Create your first environment</h2>
 							<p>Environments group your sessions, activity, tasks and notes into one context.</p>
 							<input
-								value={newMapName}
-								onChange={(event) => setNewMapName(event.target.value)}
+								value={newEnvironmentName}
+								onChange={(event) => setNewEnvironmentName(event.target.value)}
 								placeholder="e.g. Work, Coding, Gaming"
 								autoFocus
 								onKeyDown={(event) => {
 									if (event.key === "Enter") {
 										event.preventDefault();
-										void onCreateMap();
+										void onCreateEnvironment();
 									}
 								}}
 							/>
-							<button className="action-btn" onClick={() => void onCreateMap()}>
+							<button className="action-btn" onClick={() => void onCreateEnvironment()}>
 								Create
 							</button>
 
@@ -1164,11 +1164,11 @@ function MainAtlasApp() {
 				<SmartCapture
 					open={captureOpen}
 					onClose={() => setCaptureOpen(false)}
-					environments={maps}
-					currentEnvironmentId={selectedMapId || null}
+					environments={environments}
+					currentEnvironmentId={selectedEnvironmentId || null}
 					columnsFor={columnsFor}
 					onSubmit={onSmartCapture}
-					accent={selectedMap?.accent || globalAccent}
+					accent={selectedEnvironment?.accent || globalAccent}
 				/>
 			)}
 		</div>

@@ -10,7 +10,7 @@ export function DashboardView(props: MainContentViewsProps) {
 		activeSession: props.activeSession,
 		activeElapsed: props.activeElapsed,
 		currentAppName: props.currentAppName,
-		selectedMapName: props.selectedMapName,
+		selectedEnvironmentName: props.selectedEnvironmentName,
 		sessions: props.sessions,
 		now: props.now,
 		formatDuration: props.formatDuration,

@@ -33,16 +33,16 @@ describe("AtlasDatabase — schema creation", () => {
 	it("creates all expected tables in a fresh database", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
 
-		for (const table of ["maps", "sessions", "pauses", "activity_blocks", "tasks", "notes"]) {
+		for (const table of ["environments", "sessions", "pauses", "activity_blocks", "tasks", "notes"]) {
 			expect(db.tableExists(table)).toBe(true);
 		}
 	});
 
-	it("adds the incremental map and task columns", async () => {
+	it("adds the incremental environment and task columns", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
 
 		for (const column of ["icon", "accent", "preset"]) {
-			expect(db.columnExists("maps", column)).toBe(true);
+			expect(db.columnExists("environments", column)).toBe(true);
 		}
 		for (const column of ["priority", "tags", "due_date"]) {
 			expect(db.columnExists("tasks", column)).toBe(true);
@@ -52,44 +52,44 @@ describe("AtlasDatabase — schema creation", () => {
 	it("running create twice on the same path does not error or duplicate columns", async () => {
 		const dbPath = createTempDbPath();
 		const first = await AtlasDatabase.create(dbPath);
-		first.createMap("Existing map");
+		first.createEnvironment("Existing environment");
 
 		const second = await AtlasDatabase.create(dbPath);
 
-		const mapColumns = second.all("PRAGMA table_info(maps)");
+		const environmentColumns = second.all("PRAGMA table_info(environments)");
 		const taskColumns = second.all("PRAGMA table_info(tasks)");
 
 		for (const column of ["icon", "accent", "preset"]) {
-			expect(mapColumns.filter((c) => c.name === column)).toHaveLength(1);
+			expect(environmentColumns.filter((c) => c.name === column)).toHaveLength(1);
 		}
 		for (const column of ["priority", "tags", "due_date"]) {
 			expect(taskColumns.filter((c) => c.name === column)).toHaveLength(1);
 		}
 
 		// Re-initializing schema didn't touch data that was already there.
-		expect(second.listMaps()).toHaveLength(1);
+		expect(second.listEnvironments()).toHaveLength(1);
 	});
 });
 
-describe("AtlasDatabase — environment (map) CRUD", () => {
-	it("creates a map with null metadata by default", async () => {
+describe("AtlasDatabase — environment CRUD", () => {
+	it("creates an environment with null metadata by default", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
 
-		const map = db.createMap("Deep Work");
+		const environment = db.createEnvironment("Deep Work");
 
-		expect(map.name).toBe("Deep Work");
-		expect(map.icon).toBeNull();
-		expect(map.accent).toBeNull();
-		expect(map.preset).toBeNull();
-		expect(db.getMap(map.id)).toMatchObject({ id: map.id, name: "Deep Work" });
+		expect(environment.name).toBe("Deep Work");
+		expect(environment.icon).toBeNull();
+		expect(environment.accent).toBeNull();
+		expect(environment.preset).toBeNull();
+		expect(db.getEnvironment(environment.id)).toMatchObject({ id: environment.id, name: "Deep Work" });
 	});
 
-	it("creates a map with icon/accent/preset metadata", async () => {
+	it("creates an environment with icon/accent/preset metadata", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
 
-		const map = db.createMap("Study", { icon: "book", accent: "#ff0000", preset: "school" });
+		const environment = db.createEnvironment("Study", { icon: "book", accent: "#ff0000", preset: "school" });
 
-		expect(db.getMap(map.id)).toMatchObject({
+		expect(db.getEnvironment(environment.id)).toMatchObject({
 			name: "Study",
 			icon: "book",
 			accent: "#ff0000",
@@ -97,110 +97,110 @@ describe("AtlasDatabase — environment (map) CRUD", () => {
 		});
 	});
 
-	it("lists maps ordered by creation time", async () => {
+	it("lists environments ordered by creation time", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
 
-		const first = db.createMap("First");
-		const second = db.createMap("Second");
+		const first = db.createEnvironment("First");
+		const second = db.createEnvironment("Second");
 		// created_at is millisecond-precision wall-clock time; pin explicit,
 		// distinct values so ordering can't tie-break unpredictably on fast CI.
-		db.run("UPDATE maps SET created_at = ? WHERE id = ?", ["2020-01-01T00:00:00.000Z", first.id]);
-		db.run("UPDATE maps SET created_at = ? WHERE id = ?", ["2020-01-02T00:00:00.000Z", second.id]);
+		db.run("UPDATE environments SET created_at = ? WHERE id = ?", ["2020-01-01T00:00:00.000Z", first.id]);
+		db.run("UPDATE environments SET created_at = ? WHERE id = ?", ["2020-01-02T00:00:00.000Z", second.id]);
 
-		const maps = db.listMaps();
-		expect(maps.map((m) => m.id)).toEqual([first.id, second.id]);
+		const environments = db.listEnvironments();
+		expect(environments.map((m) => m.id)).toEqual([first.id, second.id]);
 	});
 
-	it("renames a map", async () => {
+	it("renames an environment", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Old name");
+		const environment = db.createEnvironment("Old name");
 
-		const renamed = db.renameMap(map.id, "New name");
+		const renamed = db.renameEnvironment(environment.id, "New name");
 
 		expect(renamed.name).toBe("New name");
-		expect(db.getMap(map.id).name).toBe("New name");
+		expect(db.getEnvironment(environment.id).name).toBe("New name");
 	});
 
-	it("updates map icon/accent/preset via updateMap", async () => {
+	it("updates environment icon/accent/preset via updateEnvironment", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Focus");
+		const environment = db.createEnvironment("Focus");
 
-		const updated = db.updateMap(map.id, { icon: "target", accent: "#00ff00", preset: "custom" });
+		const updated = db.updateEnvironment(environment.id, { icon: "target", accent: "#00ff00", preset: "custom" });
 
 		expect(updated).toMatchObject({ icon: "target", accent: "#00ff00", preset: "custom" });
 	});
 
 	it("ignores fields that aren't in the allowed list", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Focus", { icon: "target" });
+		const environment = db.createEnvironment("Focus", { icon: "target" });
 
-		const updated = db.updateMap(map.id, { unrelatedField: "ignored" });
+		const updated = db.updateEnvironment(environment.id, { unrelatedField: "ignored" });
 
 		expect(updated.icon).toBe("target");
 	});
 
-	it("deletes a map along with its tasks, notes, and sessions", async () => {
+	it("deletes an environment along with its tasks, notes, and sessions", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Temp");
-		db.createTask(map.id, "A task");
-		db.createNote(map.id, "Some content");
-		const session = db.startSession(map.id);
+		const environment = db.createEnvironment("Temp");
+		db.createTask(environment.id, "A task");
+		db.createNote(environment.id, "Some content");
+		const session = db.startSession(environment.id);
 		db.stopSession(session.id);
 
-		expect(db.deleteMap(map.id)).toBe(true);
+		expect(db.deleteEnvironment(environment.id)).toBe(true);
 
-		expect(db.getMap(map.id)).toBeNull();
-		expect(db.listTasksByMap(map.id)).toEqual([]);
-		expect(db.listSessionsByMap(map.id)).toEqual([]);
+		expect(db.getEnvironment(environment.id)).toBeNull();
+		expect(db.listTasksByEnvironment(environment.id)).toEqual([]);
+		expect(db.listSessionsByEnvironment(environment.id)).toEqual([]);
 	});
 
-	it("throws when deleting a map that does not exist", async () => {
+	it("throws when deleting an environment that does not exist", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
 
-		expect(() => db.deleteMap("nonexistent-id")).toThrow(/not found/i);
+		expect(() => db.deleteEnvironment("nonexistent-id")).toThrow(/not found/i);
 	});
 
-	it("throws when deleting a map with an active session", async () => {
+	it("throws when deleting an environment with an active session", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Active map");
-		db.startSession(map.id);
+		const environment = db.createEnvironment("Active environment");
+		db.startSession(environment.id);
 
-		expect(() => db.deleteMap(map.id)).toThrow(/active session/i);
+		expect(() => db.deleteEnvironment(environment.id)).toThrow(/active session/i);
 	});
 });
 
 describe("AtlasDatabase — session lifecycle", () => {
-	it("starts a session for a map", async () => {
+	it("starts a session for an environment", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
+		const environment = db.createEnvironment("Work");
 
-		const session = db.startSession(map.id);
+		const session = db.startSession(environment.id);
 
-		expect(session.map_id).toBe(map.id);
+		expect(session.environment_id).toBe(environment.id);
 		expect(session.is_active).toBe(1);
 		expect(session.is_paused).toBe(0);
 		expect(session.ended_at).toBeFalsy();
 		expect(db.getActiveSession().id).toBe(session.id);
 	});
 
-	it("throws when starting a session for a nonexistent map", async () => {
+	it("throws when starting a session for a nonexistent environment", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
 
-		expect(() => db.startSession("missing-map")).toThrow(/map not found/i);
+		expect(() => db.startSession("missing-environment")).toThrow(/environment not found/i);
 	});
 
 	it("throws when a session is already active", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
-		db.startSession(map.id);
+		const environment = db.createEnvironment("Work");
+		db.startSession(environment.id);
 
-		expect(() => db.startSession(map.id)).toThrow(/already active/i);
+		expect(() => db.startSession(environment.id)).toThrow(/already active/i);
 	});
 
 	it("pauses an active session and records a pause entry", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
-		const session = db.startSession(map.id);
+		const environment = db.createEnvironment("Work");
+		const session = db.startSession(environment.id);
 
 		const paused = db.pauseSession(session.id);
 
@@ -211,8 +211,8 @@ describe("AtlasDatabase — session lifecycle", () => {
 
 	it("is idempotent when pausing an already-paused session", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
-		const session = db.startSession(map.id);
+		const environment = db.createEnvironment("Work");
+		const session = db.startSession(environment.id);
 		db.pauseSession(session.id);
 
 		db.pauseSession(session.id);
@@ -228,8 +228,8 @@ describe("AtlasDatabase — session lifecycle", () => {
 
 	it("is a no-op to resume a session that isn't paused", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
-		const session = db.startSession(map.id);
+		const environment = db.createEnvironment("Work");
+		const session = db.startSession(environment.id);
 
 		const resumed = db.resumeSession(session.id);
 
@@ -245,8 +245,8 @@ describe("AtlasDatabase — session lifecycle", () => {
 
 	it("computes total_duration as elapsed time minus paused time", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
-		const session = db.startSession(map.id);
+		const environment = db.createEnvironment("Work");
+		const session = db.startSession(environment.id);
 
 		// Backdate the session start by 10s so elapsed time is deterministic
 		// instead of racing the wall clock during the test run.
@@ -272,8 +272,8 @@ describe("AtlasDatabase — session lifecycle", () => {
 
 	it("closes a trailing pause when a session is stopped while still paused", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
-		const session = db.startSession(map.id);
+		const environment = db.createEnvironment("Work");
+		const session = db.startSession(environment.id);
 		db.pauseSession(session.id);
 
 		const stopped = db.stopSession(session.id);
@@ -287,8 +287,8 @@ describe("AtlasDatabase — session lifecycle", () => {
 
 	it("is idempotent when stopping an already-stopped session", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
-		const session = db.startSession(map.id);
+		const environment = db.createEnvironment("Work");
+		const session = db.startSession(environment.id);
 		const stopped = db.stopSession(session.id);
 
 		const stoppedAgain = db.stopSession(session.id);
@@ -302,24 +302,24 @@ describe("AtlasDatabase — session lifecycle", () => {
 		expect(() => db.stopSession("missing-session")).toThrow(/no active session/i);
 	});
 
-	it("lists sessions for a map, most recently created first", async () => {
+	it("lists sessions for an environment, most recently created first", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
-		const first = db.startSession(map.id);
+		const environment = db.createEnvironment("Work");
+		const first = db.startSession(environment.id);
 		db.stopSession(first.id);
-		const second = db.startSession(map.id);
+		const second = db.startSession(environment.id);
 		db.stopSession(second.id);
 		db.run("UPDATE sessions SET created_at = ? WHERE id = ?", ["2020-01-01T00:00:00.000Z", first.id]);
 		db.run("UPDATE sessions SET created_at = ? WHERE id = ?", ["2020-01-02T00:00:00.000Z", second.id]);
 
-		const sessions = db.listSessionsByMap(map.id);
+		const sessions = db.listSessionsByEnvironment(environment.id);
 		expect(sessions.map((s) => s.id)).toEqual([second.id, first.id]);
 	});
 
 	it("deletes a stopped session along with its pauses and activity blocks", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
-		const session = db.startSession(map.id);
+		const environment = db.createEnvironment("Work");
+		const session = db.startSession(environment.id);
 		db.createActivityBlock(session.id, "Editor", new Date().toISOString());
 		db.stopSession(session.id);
 
@@ -331,8 +331,8 @@ describe("AtlasDatabase — session lifecycle", () => {
 
 	it("throws when deleting an active session", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
-		const session = db.startSession(map.id);
+		const environment = db.createEnvironment("Work");
+		const session = db.startSession(environment.id);
 
 		expect(() => db.deleteSession(session.id)).toThrow(/cannot delete an active session/i);
 	});
@@ -341,8 +341,8 @@ describe("AtlasDatabase — session lifecycle", () => {
 describe("AtlasDatabase — activity blocks", () => {
 	it("creates an activity block for an active session", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
-		const session = db.startSession(map.id);
+		const environment = db.createEnvironment("Work");
+		const session = db.startSession(environment.id);
 
 		const block = db.createActivityBlock(session.id, "VS Code", new Date().toISOString());
 
@@ -352,8 +352,8 @@ describe("AtlasDatabase — activity blocks", () => {
 
 	it("returns null when creating a block for a session that is not active", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
-		const session = db.startSession(map.id);
+		const environment = db.createEnvironment("Work");
+		const session = db.startSession(environment.id);
 		db.stopSession(session.id);
 
 		const block = db.createActivityBlock(session.id, "VS Code", new Date().toISOString());
@@ -363,8 +363,8 @@ describe("AtlasDatabase — activity blocks", () => {
 
 	it("closes the open activity block when the session stops", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
-		const session = db.startSession(map.id);
+		const environment = db.createEnvironment("Work");
+		const session = db.startSession(environment.id);
 		db.createActivityBlock(session.id, "VS Code", new Date().toISOString());
 
 		db.stopSession(session.id);
@@ -378,9 +378,9 @@ describe("AtlasDatabase — activity blocks", () => {
 describe("AtlasDatabase — task CRUD", () => {
 	it("creates a task with sensible defaults", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
+		const environment = db.createEnvironment("Work");
 
-		const task = db.createTask(map.id, "Write tests");
+		const task = db.createTask(environment.id, "Write tests");
 
 		expect(task.status).toBe("todo");
 		expect(task.priority).toBe("none");
@@ -390,9 +390,9 @@ describe("AtlasDatabase — task CRUD", () => {
 
 	it("round-trips tags through JSON storage as a real array", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
+		const environment = db.createEnvironment("Work");
 
-		const created = db.createTask(map.id, "Ship it", "", { tags: ["urgent", "backend"] });
+		const created = db.createTask(environment.id, "Ship it", "", { tags: ["urgent", "backend"] });
 		expect(created.tags).toEqual(["urgent", "backend"]);
 
 		// The column itself stores a JSON string, not a native array.
@@ -400,50 +400,50 @@ describe("AtlasDatabase — task CRUD", () => {
 		expect(typeof raw.tags).toBe("string");
 		expect(JSON.parse(raw.tags)).toEqual(["urgent", "backend"]);
 
-		const [listed] = db.listTasksByMap(map.id);
+		const [listed] = db.listTasksByEnvironment(environment.id);
 		expect(listed.tags).toEqual(["urgent", "backend"]);
 	});
 
 	it("filters out non-string tags on create", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
+		const environment = db.createEnvironment("Work");
 
-		const task = db.createTask(map.id, "Odd tags", "", { tags: ["ok", 42, null, "fine"] });
+		const task = db.createTask(environment.id, "Odd tags", "", { tags: ["ok", 42, null, "fine"] });
 
 		expect(task.tags).toEqual(["ok", "fine"]);
 	});
 
 	it("normalizes a missing priority to none", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
+		const environment = db.createEnvironment("Work");
 
-		const task = db.createTask(map.id, "No priority given");
+		const task = db.createTask(environment.id, "No priority given");
 
 		expect(task.priority).toBe("none");
 	});
 
 	it("normalizes an invalid priority to none", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
+		const environment = db.createEnvironment("Work");
 
-		const task = db.createTask(map.id, "Bogus priority", "", { priority: "extremely-critical" });
+		const task = db.createTask(environment.id, "Bogus priority", "", { priority: "extremely-critical" });
 
 		expect(task.priority).toBe("none");
 	});
 
 	it("accepts a valid priority", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
+		const environment = db.createEnvironment("Work");
 
-		const task = db.createTask(map.id, "Important", "", { priority: "urgent" });
+		const task = db.createTask(environment.id, "Important", "", { priority: "urgent" });
 
 		expect(task.priority).toBe("urgent");
 	});
 
 	it("updates task status via updateTaskStatus", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
-		const task = db.createTask(map.id, "Do it");
+		const environment = db.createEnvironment("Work");
+		const task = db.createTask(environment.id, "Do it");
 
 		const updated = db.updateTaskStatus(task.id, "done");
 
@@ -452,8 +452,8 @@ describe("AtlasDatabase — task CRUD", () => {
 
 	it("updates arbitrary fields via updateTask, including a tags round trip", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
-		const task = db.createTask(map.id, "Do it");
+		const environment = db.createEnvironment("Work");
+		const task = db.createTask(environment.id, "Do it");
 
 		const updated = db.updateTask(task.id, {
 			title: "Do it now",
@@ -470,8 +470,8 @@ describe("AtlasDatabase — task CRUD", () => {
 
 	it("normalizes an invalid priority to none on update", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
-		const task = db.createTask(map.id, "Do it", "", { priority: "high" });
+		const environment = db.createEnvironment("Work");
+		const task = db.createTask(environment.id, "Do it", "", { priority: "high" });
 
 		const updated = db.updateTask(task.id, { priority: "not-a-real-priority" });
 
@@ -480,22 +480,22 @@ describe("AtlasDatabase — task CRUD", () => {
 
 	it("deletes a task", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
-		const task = db.createTask(map.id, "Temp task");
+		const environment = db.createEnvironment("Work");
+		const task = db.createTask(environment.id, "Temp task");
 
 		expect(db.deleteTask(task.id)).toBe(true);
-		expect(db.listTasksByMap(map.id)).toEqual([]);
+		expect(db.listTasksByEnvironment(environment.id)).toEqual([]);
 	});
 
-	it("lists tasks for a map, most recently created first", async () => {
+	it("lists tasks for an environment, most recently created first", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
-		const first = db.createTask(map.id, "First");
-		const second = db.createTask(map.id, "Second");
+		const environment = db.createEnvironment("Work");
+		const first = db.createTask(environment.id, "First");
+		const second = db.createTask(environment.id, "Second");
 		db.run("UPDATE tasks SET created_at = ? WHERE id = ?", ["2020-01-01T00:00:00.000Z", first.id]);
 		db.run("UPDATE tasks SET created_at = ? WHERE id = ?", ["2020-01-02T00:00:00.000Z", second.id]);
 
-		const tasks = db.listTasksByMap(map.id);
+		const tasks = db.listTasksByEnvironment(environment.id);
 		expect(tasks.map((t) => t.id)).toEqual([second.id, first.id]);
 	});
 });
@@ -503,46 +503,46 @@ describe("AtlasDatabase — task CRUD", () => {
 describe("AtlasDatabase — note CRUD", () => {
 	it("creates a note with an empty notebook document when no content is given", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
+		const environment = db.createEnvironment("Work");
 
-		const note = db.createNote(map.id);
+		const note = db.createNote(environment.id);
 
-		expect(note.map_id).toBe(map.id);
+		expect(note.environment_id).toBe(environment.id);
 		const parsed = JSON.parse(note.content);
 		expect(parsed).toMatchObject({ version: 1, nodes: [] });
 	});
 
 	it("creates a note with explicit content", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
+		const environment = db.createEnvironment("Work");
 
-		const note = db.createNote(map.id, "hello world");
+		const note = db.createNote(environment.id, "hello world");
 
 		expect(note.content).toBe("hello world");
 	});
 
-	it("throws when creating a note without a map id", async () => {
+	it("throws when creating a note without an environment id", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
 
-		expect(() => db.createNote(null, "x")).toThrow(/map id is required/i);
+		expect(() => db.createNote(null, "x")).toThrow(/environment id is required/i);
 	});
 
-	it("reuses the existing note for a map instead of creating a second row", async () => {
+	it("reuses the existing note for an environment instead of creating a second row", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
-		const first = db.createNote(map.id, "first content");
+		const environment = db.createEnvironment("Work");
+		const first = db.createNote(environment.id, "first content");
 
-		const second = db.createNote(map.id, "second content");
+		const second = db.createNote(environment.id, "second content");
 
 		expect(second.id).toBe(first.id);
 		expect(second.content).toBe("second content");
-		expect(db.all("SELECT * FROM notes WHERE map_id = ?", [map.id])).toHaveLength(1);
+		expect(db.all("SELECT * FROM notes WHERE environment_id = ?", [environment.id])).toHaveLength(1);
 	});
 
 	it("updates a note's content", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
-		const note = db.createNote(map.id, "original");
+		const environment = db.createEnvironment("Work");
+		const note = db.createNote(environment.id, "original");
 
 		const updated = db.updateNote(note.id, "changed");
 
@@ -551,66 +551,66 @@ describe("AtlasDatabase — note CRUD", () => {
 
 	it("deletes a note", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
-		const note = db.createNote(map.id, "temp");
+		const environment = db.createEnvironment("Work");
+		const note = db.createNote(environment.id, "temp");
 
 		db.deleteNote(note.id);
 
 		expect(db.all("SELECT * FROM notes WHERE id = ?", [note.id])).toEqual([]);
 	});
 
-	it("getNotebookByMap creates a notebook on first access and returns the same one after", async () => {
+	it("getNotebookByEnvironment creates a notebook on first access and returns the same one after", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
+		const environment = db.createEnvironment("Work");
 
-		const created = db.getNotebookByMap(map.id);
-		const fetchedAgain = db.getNotebookByMap(map.id);
+		const created = db.getNotebookByEnvironment(environment.id);
+		const fetchedAgain = db.getNotebookByEnvironment(environment.id);
 
 		expect(fetchedAgain.id).toBe(created.id);
 	});
 
-	it("updateNotebookByMap updates the map's single notebook", async () => {
+	it("updateNotebookByEnvironment updates the environment's single notebook", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
-		db.getNotebookByMap(map.id);
+		const environment = db.createEnvironment("Work");
+		db.getNotebookByEnvironment(environment.id);
 
-		const updated = db.updateNotebookByMap(map.id, "notebook content");
+		const updated = db.updateNotebookByEnvironment(environment.id, "notebook content");
 
 		expect(updated.content).toBe("notebook content");
 	});
 
-	it("listNotesByMap returns the single notebook for a map, and an empty array with no map id", async () => {
+	it("listNotesByEnvironment returns the single notebook for an environment, and an empty array with no environment id", async () => {
 		const db = await AtlasDatabase.create(createTempDbPath());
-		const map = db.createMap("Work");
-		db.createNote(map.id, "content");
+		const environment = db.createEnvironment("Work");
+		db.createNote(environment.id, "content");
 
-		expect(db.listNotesByMap(map.id)).toHaveLength(1);
-		expect(db.listNotesByMap(null)).toEqual([]);
+		expect(db.listNotesByEnvironment(environment.id)).toHaveLength(1);
+		expect(db.listNotesByEnvironment(null)).toEqual([]);
 	});
 });
 
 describe("AtlasDatabase — persistence across reopen", () => {
-	it("persists maps, tasks, and notes across reopening the same file", async () => {
+	it("persists environments, tasks, and notes across reopening the same file", async () => {
 		const dbPath = createTempDbPath();
 		const original = await AtlasDatabase.create(dbPath);
 
-		const map = original.createMap("Durable", { icon: "book" });
-		const task = original.createTask(map.id, "Persisted task", "", { priority: "high", tags: ["x"] });
-		original.createNote(map.id, "persisted content");
+		const environment = original.createEnvironment("Durable", { icon: "book" });
+		const task = original.createTask(environment.id, "Persisted task", "", { priority: "high", tags: ["x"] });
+		original.createNote(environment.id, "persisted content");
 
 		const reopened = await AtlasDatabase.create(dbPath);
 
-		expect(reopened.getMap(map.id)).toMatchObject({ name: "Durable", icon: "book" });
-		const [reopenedTask] = reopened.listTasksByMap(map.id);
+		expect(reopened.getEnvironment(environment.id)).toMatchObject({ name: "Durable", icon: "book" });
+		const [reopenedTask] = reopened.listTasksByEnvironment(environment.id);
 		expect(reopenedTask).toMatchObject({ id: task.id, title: "Persisted task", priority: "high", tags: ["x"] });
-		expect(reopened.getNotebookByMap(map.id).content).toBe("persisted content");
+		expect(reopened.getNotebookByEnvironment(environment.id).content).toBe("persisted content");
 	});
 
 	it("persists a session's final state after stopping", async () => {
 		const dbPath = createTempDbPath();
 		const original = await AtlasDatabase.create(dbPath);
-		const map = original.createMap("Durable");
-		const session = original.startSession(map.id);
+		const environment = original.createEnvironment("Durable");
+		const session = original.startSession(environment.id);
 		original.stopSession(session.id);
 
 		const reopened = await AtlasDatabase.create(dbPath);

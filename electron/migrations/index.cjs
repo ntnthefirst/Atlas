@@ -9,7 +9,7 @@
 // sql.js import flow, before an AtlasDatabase wrapper exists).
 "use strict";
 
-const MIGRATIONS = [require("./001_initial.cjs")];
+const MIGRATIONS = [require("./001_initial.cjs"), require("./002_rename_maps_to_environments.cjs")];
 
 function ensureMigrationsTable(dbLike) {
 	dbLike.run(

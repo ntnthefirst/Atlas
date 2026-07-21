@@ -65,7 +65,7 @@ export function NotchInputWindowApp() {
 				});
 			} else {
 				// Append a post-it node carrying the captured text to the notebook.
-				const notebook = await window.atlas.getNotebookByMap(payload.environmentId);
+				const notebook = await window.atlas.getNotebookByEnvironment(payload.environmentId);
 				let doc: { version: number; viewport: { x: number; y: number; zoom: number }; nodes: unknown[] };
 				try {
 					doc = JSON.parse(notebook?.content || "");
@@ -89,7 +89,7 @@ export function NotchInputWindowApp() {
 					...POSTIT_DEFAULTS,
 					text,
 				});
-				await window.atlas.updateNotebookByMap(payload.environmentId, JSON.stringify(doc));
+				await window.atlas.updateNotebookByEnvironment(payload.environmentId, JSON.stringify(doc));
 			}
 			close();
 		} catch {

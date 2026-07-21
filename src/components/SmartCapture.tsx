@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { CheckIcon, DocumentTextIcon, SparklesIcon } from "@heroicons/react/24/outline";
-import type { MapItem, TaskColumn } from "../types";
+import type { Environment, TaskColumn } from "../types";
 import { parseCapture, type ParsedCapture } from "../utils/smartParse";
 import { PRIORITY_META } from "./main-content/taskMeta";
 
 interface SmartCaptureProps {
 	open: boolean;
 	onClose: () => void;
-	environments: MapItem[];
+	environments: Environment[];
 	currentEnvironmentId: string | null;
 	columnsFor: (environmentId: string) => TaskColumn[];
 	onSubmit: (result: ParsedCapture) => void | Promise<void>;

@@ -1,51 +1,52 @@
 // ---------------------------------------------------------------------------
-// Environment (map) IPC handlers (map:*).
+// Environment IPC handlers (environment:*).
 //
 // Extracted from main.cjs's wireIpc() (WP-0.2) with no behaviour change. Most
-// of these are thin passthroughs to the database, but map:create and
-// map:delete also re-derive which top-level window should be showing (main vs
-// welcome) once the set of maps changes -- `openPrimaryWindowByMapState` is
-// passed in to preserve that side effect exactly, in the same order as
-// before.
+// of these are thin passthroughs to the database, but environment:create and
+// environment:delete also re-derive which top-level window should be showing
+// (main vs welcome) once the set of environments changes --
+// `openPrimaryWindowByEnvironmentState` is passed in to preserve that side
+// effect exactly, in the same order as before.
 //
 // `getDb` is a getter rather than a plain value because `db` is assigned
 // during app startup, after this module is required -- capturing it by value
-// here would freeze it at `null` and break every handler. `openPrimaryWindowByMapState`
-// is passed as a plain function reference instead: it's a `function`
-// declaration in main.cjs that is never reassigned, so unlike `db` there is
-// no stale-capture risk in holding onto it directly.
+// here would freeze it at `null` and break every handler.
+// `openPrimaryWindowByEnvironmentState` is passed as a plain function
+// reference instead: it's a `function` declaration in main.cjs that is never
+// reassigned, so unlike `db` there is no stale-capture risk in holding onto
+// it directly.
 // ---------------------------------------------------------------------------
 
 function register(ipcMain, deps) {
-	const { getDb, openPrimaryWindowByMapState } = deps;
+	const { getDb, openPrimaryWindowByEnvironmentState } = deps;
 
-	ipcMain.handle("map:list", () => getDb().listMaps());
+	ipcMain.handle("environment:list", () => getDb().listEnvironments());
 
-	ipcMain.handle("map:create", (_event, name, options = {}) => {
+	ipcMain.handle("environment:create", (_event, name, options = {}) => {
 		if (!name || !name.trim()) {
 			throw new Error("Environment name is required.");
 		}
-		const createdMap = getDb().createMap(name.trim(), {
+		const createdEnvironment = getDb().createEnvironment(name.trim(), {
 			icon: options?.icon ?? null,
 			accent: options?.accent ?? null,
 			preset: options?.preset ?? null,
 		});
-		openPrimaryWindowByMapState();
-		return createdMap;
+		openPrimaryWindowByEnvironmentState();
+		return createdEnvironment;
 	});
 
-	ipcMain.handle("map:rename", (_event, mapId, name) => {
-		if (!mapId) {
+	ipcMain.handle("environment:rename", (_event, environmentId, name) => {
+		if (!environmentId) {
 			throw new Error("Environment id missing.");
 		}
 		if (!name || !name.trim()) {
 			throw new Error("Environment name is required.");
 		}
-		return getDb().renameMap(mapId, name.trim());
+		return getDb().renameEnvironment(environmentId, name.trim());
 	});
 
-	ipcMain.handle("map:update", (_event, mapId, fields = {}) => {
-		if (!mapId) {
+	ipcMain.handle("environment:update", (_event, environmentId, fields = {}) => {
+		if (!environmentId) {
 			throw new Error("Environment id missing.");
 		}
 		const sanitized = {};
@@ -53,15 +54,15 @@ function register(ipcMain, deps) {
 		if (typeof fields?.icon === "string" || fields?.icon === null) sanitized.icon = fields.icon;
 		if (typeof fields?.accent === "string" || fields?.accent === null) sanitized.accent = fields.accent;
 		if (typeof fields?.preset === "string" || fields?.preset === null) sanitized.preset = fields.preset;
-		return getDb().updateMap(mapId, sanitized);
+		return getDb().updateEnvironment(environmentId, sanitized);
 	});
 
-	ipcMain.handle("map:delete", (_event, mapId) => {
-		if (!mapId) {
-			throw new Error("Map id missing.");
+	ipcMain.handle("environment:delete", (_event, environmentId) => {
+		if (!environmentId) {
+			throw new Error("Environment id missing.");
 		}
-		const deleted = getDb().deleteMap(mapId);
-		openPrimaryWindowByMapState();
+		const deleted = getDb().deleteEnvironment(environmentId);
+		openPrimaryWindowByEnvironmentState();
 		return deleted;
 	});
 }

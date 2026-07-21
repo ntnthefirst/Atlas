@@ -17,7 +17,7 @@ export type MainContentViewsProps = {
 	activeSession: Session | null;
 	activeElapsed: string;
 	currentAppName: string;
-	selectedMapName: string;
+	selectedEnvironmentName: string;
 	sessions: Session[];
 	selectedSession: Session | null;
 	onOpenSession: (sessionId: string) => void;
@@ -43,7 +43,7 @@ export type MainContentViewsProps = {
 	onAddTaskColumn: () => void;
 	onRemoveTaskColumn: (status: TaskStatus) => Promise<void>;
 	notebook: NoteItem | null;
-	onUpdateNotebookByMap: (content: string) => Promise<void>;
+	onUpdateNotebookByEnvironment: (content: string) => Promise<void>;
 	theme: "dark" | "light" | "system";
 	onThemeChange: (theme: "dark" | "light" | "system") => void;
 	focus: UseFocusReturn;

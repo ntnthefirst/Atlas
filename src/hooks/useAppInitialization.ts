@@ -1,14 +1,14 @@
 import { useEffect } from "react";
 import type React from "react";
-import type { MapItem, Session, DashboardOverview, NoteItem, TaskItem, TaskColumn } from "../types";
+import type { Environment, Session, DashboardOverview, NoteItem, TaskItem, TaskColumn } from "../types";
 import { TASK_ORDER_KEY, TASK_COLUMNS_KEY, defaultTaskColumns } from "../constants";
 import { readStorage, normalizeTrackedAppName, normalizeColumns, sortTasksByOrder } from "../utils";
 
 interface UseAppInitializationProps {
-	setMaps: (maps: MapItem[]) => void;
+	setEnvironments: (environments: Environment[]) => void;
 	setActiveSession: (session: Session | null) => void;
 	setCurrentAppName: (name: string) => void;
-	setSelectedMapId: (id: string) => void;
+	setSelectedEnvironmentId: (id: string) => void;
 	setSelectedSessionId: (id: string) => void;
 	setErrorMessage: (msg: string) => void;
 	setHasBootstrapped: (v: boolean) => void;
@@ -17,15 +17,15 @@ interface UseAppInitializationProps {
 	setTasks: (tasks: TaskItem[]) => void;
 	setNotebook: (notebook: NoteItem | null) => void;
 	setDashboard: (dashboard: DashboardOverview) => void;
-	setTaskColumnsByMap: (v: Record<string, TaskColumn[]>) => void;
-	setTaskOrderByMap: React.Dispatch<React.SetStateAction<Record<string, string[]>>>;
+	setTaskColumnsByEnvironment: (v: Record<string, TaskColumn[]>) => void;
+	setTaskOrderByEnvironment: React.Dispatch<React.SetStateAction<Record<string, string[]>>>;
 }
 
 export const useAppInitialization = ({
-	setMaps,
+	setEnvironments,
 	setActiveSession,
 	setCurrentAppName,
-	setSelectedMapId,
+	setSelectedEnvironmentId,
 	setSelectedSessionId,
 	setErrorMessage,
 	setHasBootstrapped,
@@ -34,57 +34,57 @@ export const useAppInitialization = ({
 	setTasks,
 	setNotebook,
 	setDashboard,
-	setTaskColumnsByMap,
-	setTaskOrderByMap,
+	setTaskColumnsByEnvironment,
+	setTaskOrderByEnvironment,
 }: UseAppInitializationProps) => {
 	useEffect(() => {
 		const start = async () => {
 			try {
 				const persistedOrder = readStorage(TASK_ORDER_KEY, {} as Record<string, string[]>);
 				const persistedColumns = readStorage(TASK_COLUMNS_KEY, {} as Record<string, TaskColumn[]>);
-				setTaskColumnsByMap(persistedColumns);
+				setTaskColumnsByEnvironment(persistedColumns);
 
-				const [mapList, active, appName] = await Promise.all([
-					window.atlas.listMaps(),
+				const [environmentList, active, appName] = await Promise.all([
+					window.atlas.listEnvironments(),
 					window.atlas.getActiveSession(),
 					window.atlas.getCurrentApp(),
 				]);
 
-				setMaps(mapList);
+				setEnvironments(environmentList);
 				setActiveSession(active);
 				setCurrentAppName(normalizeTrackedAppName(appName));
 
-				if (!mapList.length) {
+				if (!environmentList.length) {
 					setShowFirstLaunch(true);
 					return;
 				}
 
-				const preferredMapId = active?.map_id ?? mapList[0].id;
-				setSelectedMapId(preferredMapId);
+				const preferredEnvironmentId = active?.environment_id ?? environmentList[0].id;
+				setSelectedEnvironmentId(preferredEnvironmentId);
 
 				const [nextSessions, nextTasks, nextNotebook, nextDashboard] = await Promise.all([
-					window.atlas.listSessionsByMap(preferredMapId),
-					window.atlas.listTasksByMap(preferredMapId),
-					window.atlas.getNotebookByMap(preferredMapId),
-					window.atlas.getDashboardOverview(preferredMapId),
+					window.atlas.listSessionsByEnvironment(preferredEnvironmentId),
+					window.atlas.listTasksByEnvironment(preferredEnvironmentId),
+					window.atlas.getNotebookByEnvironment(preferredEnvironmentId),
+					window.atlas.getDashboardOverview(preferredEnvironmentId),
 				]);
 
 				setSessions(nextSessions);
 
-				const existingOrder = persistedOrder[preferredMapId] ?? [];
+				const existingOrder = persistedOrder[preferredEnvironmentId] ?? [];
 				const existingSet = new Set(nextTasks.map((task) => task.id));
 				const normalizedOrder = [
 					...existingOrder.filter((id) => existingSet.has(id)),
 					...nextTasks.map((task) => task.id).filter((id) => !existingOrder.includes(id)),
 				];
 
-				setTaskOrderByMap((current) => ({
+				setTaskOrderByEnvironment((current) => ({
 					...current,
-					[preferredMapId]: normalizedOrder,
+					[preferredEnvironmentId]: normalizedOrder,
 				}));
 
 				const existing = normalizeColumns(
-					persistedColumns[preferredMapId] ?? defaultTaskColumns,
+					persistedColumns[preferredEnvironmentId] ?? defaultTaskColumns,
 					defaultTaskColumns,
 				);
 				const knownStatuses = new Set(existing.map((column) => column.status));
@@ -98,7 +98,7 @@ export const useAppInitialization = ({
 					defaultTaskColumns,
 				);
 
-				setTaskColumnsByMap({ ...persistedColumns, [preferredMapId]: merged });
+				setTaskColumnsByEnvironment({ ...persistedColumns, [preferredEnvironmentId]: merged });
 				setTasks(sortTasksByOrder(nextTasks, normalizedOrder));
 				setNotebook(nextNotebook);
 				setDashboard(nextDashboard);
@@ -119,10 +119,10 @@ export const useAppInitialization = ({
 
 		start().catch(console.error);
 	}, [
-		setMaps,
+		setEnvironments,
 		setActiveSession,
 		setCurrentAppName,
-		setSelectedMapId,
+		setSelectedEnvironmentId,
 		setSelectedSessionId,
 		setErrorMessage,
 		setHasBootstrapped,
@@ -131,7 +131,7 @@ export const useAppInitialization = ({
 		setTasks,
 		setNotebook,
 		setDashboard,
-		setTaskColumnsByMap,
-		setTaskOrderByMap,
+		setTaskColumnsByEnvironment,
+		setTaskOrderByEnvironment,
 	]);
 };

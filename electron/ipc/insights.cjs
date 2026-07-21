@@ -15,16 +15,16 @@
 function register(ipcMain, deps) {
 	const { getDb } = deps;
 
-	ipcMain.handle("dashboard:overview", (_event, mapId) => {
-		if (!mapId) {
+	ipcMain.handle("dashboard:overview", (_event, environmentId) => {
+		if (!environmentId) {
 			return {
 				totalTodayMs: 0,
 				timePerApp: [],
-				timePerMap: [],
+				timePerEnvironment: [],
 				quickStats: { sessionsToday: 0, openTasks: 0 },
 			};
 		}
-		return getDb().getDashboardOverview(mapId);
+		return getDb().getDashboardOverview(environmentId);
 	});
 
 	ipcMain.handle("data:repairCorruptedSessions", () => {

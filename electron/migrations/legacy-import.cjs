@@ -44,6 +44,22 @@ function readTableCounts(core, tableNames) {
 	return counts;
 }
 
+// Tables that a migration renames, as `legacy name -> current name`.
+//
+// Verification reads the table list from the pre-migration source and then
+// counts rows in the migrated copy, so without this a renamed table is looked
+// up under a name that no longer exists — the import aborts and the app
+// refuses to start for exactly the existing users this whole path exists to
+// protect.
+//
+// ADD AN ENTRY HERE whenever a migration renames a table.
+const TABLE_RENAMES = {
+	// 002_rename_maps_to_environments
+	maps: "environments",
+};
+
+const currentNameOf = (legacyTable) => TABLE_RENAMES[legacyTable] ?? legacyTable;
+
 function safeUnlink(filePath) {
 	try {
 		if (fs.existsSync(filePath)) {
@@ -123,13 +139,17 @@ function importLegacyDatabaseIfNeeded(dbPath) {
 		const workingCore = wrapDatabase(working);
 		runMigrations(workingCore);
 
-		// Step 4 — verify.
-		const targetCounts = readTableCounts(workingCore, tables);
-		const mismatches = tables.filter((table) => sourceCounts[table] !== targetCounts[table]);
+		// Step 4 — verify. Each source table is counted under whatever name it
+		// now has, since a migration may have renamed it (see TABLE_RENAMES).
+		const targetCounts = readTableCounts(workingCore, tables.map(currentNameOf));
+		const mismatches = tables.filter((table) => sourceCounts[table] !== targetCounts[currentNameOf(table)]);
 		if (mismatches.length > 0) {
 			throw new Error(
 				`row count mismatch after import for: ${mismatches
-					.map((table) => `${table} (source=${sourceCounts[table]}, imported=${targetCounts[table]})`)
+					.map(
+						(table) =>
+							`${table} (source=${sourceCounts[table]}, imported=${targetCounts[currentNameOf(table)]})`,
+					)
 					.join(", ")}`,
 			);
 		}
