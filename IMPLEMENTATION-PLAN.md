@@ -35,7 +35,7 @@ Last updated: 2026-07-21. Keep this current — it is what a fresh session reads
 |---|---|
 | WP-0.1 Test harness | **Done.** Vitest + 3-OS CI matrix. |
 | WP-0.2 Split main.cjs | **In progress.** 2455 → 1473 lines, 18 modules. Pure config, window geometry, three window factories and six IPC domains extracted. |
-| WP-0.3 Database engine swap | Not started. |
+| WP-0.3 Database engine swap | **Done.** `node-sqlite3-wasm` (see D9), migration framework, verified legacy import. |
 | WP-0.4 Secret vault | **Done.** Keys encrypted, legacy plaintext migrated. |
 | WP-0.5 Event log | Not started. Blocked on WP-0.3. |
 | WP-0.6 Cross-platform adapter | Not started. |
@@ -197,8 +197,24 @@ slower than the sql.js it replaced. Multi-statement operations like
 `deleteMap` are wrapped for the same reason, which also fixes a pre-existing
 atomicity bug where a crash midway left orphaned rows.
 
-Settings: `journal_mode = WAL`, `synchronous = NORMAL`. Not `OFF` — the speed
-is tempting and the corruption risk is not acceptable for user data.
+Settings: `synchronous = NORMAL`. Not `OFF` — the speed is tempting and the
+corruption risk is not acceptable for user data.
+
+**WAL is not available.** `node-sqlite3-wasm`'s VFS accepts the pragma but
+`journal_mode` still reports `delete`; its WASM VFS has no shared-memory
+backing for WAL's coordination file. The plan's original "enable WAL"
+criterion therefore **cannot be met** with this engine. Atlas is
+single-process, so the practical cost is low, but do not write code that
+assumes WAL's concurrent-reader semantics.
+
+**Where the databases actually live** — this cost real debugging time, so it
+is written down: production uses `%APPDATA%/Atlas`, the dev build uses
+`%APPDATA%/Atlas-Dev`. They are separate. `npm run smoke` therefore never
+touches real user data, which is exactly what you want, but it also means a
+migration verified in dev has not been proven against a production database.
+The legacy import was additionally verified by hand against a copy of the
+real 4.27MB production database: six tables, 16,269 activity blocks and 65
+sessions, all preserved with identical counts and `integrity_check` ok.
 
 ### A tension worth naming
 
