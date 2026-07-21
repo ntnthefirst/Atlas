@@ -103,6 +103,30 @@ function register(ipcMain, deps) {
 		}
 		return getDb().setEnvironmentConfig(environmentId, patch ?? {});
 	});
+
+	// WP-1.2 (isolation enforcement UI): the one write path for an
+	// environment's isolation mode. Deliberately its own channel, not folded
+	// into environment:update -- flipping this is never an incidental field
+	// edit alongside a rename or a new accent, it is THE decision this whole
+	// WP exists to make visible, so it gets its own named, logged transition
+	// rather than disappearing into a generic "fields" bag. `setEnvironmentIsolationMode`
+	// validates the mode itself (throws on anything but "connected"/"enclosed")
+	// and takes effect on the very next scoped(...) call -- see
+	// electron/data/scoped.cjs, which reads this column fresh per call rather
+	// than caching it, so there is no restart and no stale in-memory copy to
+	// invalidate.
+	ipcMain.handle("environment:setIsolationMode", (_event, environmentId, mode) => {
+		if (!environmentId) {
+			throw new Error("Environment id missing.");
+		}
+		getDb().setEnvironmentIsolationMode(environmentId, mode);
+		// `subject` (not `payload`) carries the new mode -- event-log.cjs#record
+		// only persists {environmentId, subject, payload, sessionId}, and a short
+		// identifier like the mode itself is exactly what `subject` is for (see
+		// scoped.cjs's own cross-environment-read logging for the same pattern).
+		getEventLog?.()?.record("environment.isolation_mode_changed", { environmentId, subject: mode });
+		return getDb().getEnvironment(environmentId);
+	});
 }
 
 module.exports = { register };

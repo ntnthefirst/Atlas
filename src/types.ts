@@ -8,13 +8,36 @@ export type EnvironmentPreset =
 	| "writing"
 	| "custom";
 
+// The two isolation modes (WP-0.8), exactly as electron/data/isolation.cjs's
+// ISOLATION_MODES defines them. There are exactly two — do not add a third
+// here without adding it there first; the renderer follows the data layer,
+// never the other way around.
+export type IsolationMode = "connected" | "enclosed";
+
 export type Environment = {
 	id: string;
 	name: string;
 	icon?: string | null;
 	accent?: string | null;
 	preset?: string | null;
+	// A first-class column (WP-0.8, exposed to the renderer starting WP-1.2),
+	// not part of `EnvironmentConfig` below — see that type's comment for why
+	// keeping it separate matters.
+	isolation_mode: IsolationMode;
 	created_at: string;
+};
+
+// One entry from the WP-0.8 cross-environment allowlist
+// (electron/data/isolation.cjs's CROSS_ENVIRONMENT_ALLOWLIST), as served by
+// `isolation:getAllowlist`. `label` is the plain-language description defined
+// right next to that signal in isolation.cjs — the isolation-enforcement UI
+// (WP-1.2) must render its "what Connected mode shares" list from an array of
+// these, never from a hand-written list of strings, so that widening the
+// allowlist in one place is the only change ever needed to keep the UI
+// truthful.
+export type IsolationAllowlistEntry = {
+	signal: string;
+	label: string;
 };
 
 // The per-environment settings document (WP-1.1). Mirrors

@@ -9,9 +9,9 @@ import type { Environment, TaskColumn } from "../types";
 const NOW = new Date(2026, 5, 15, 12, 0, 0).getTime();
 
 const ENVIRONMENTS: Environment[] = [
-	{ id: "env-work", name: "Work", created_at: "2026-01-01T00:00:00.000Z" },
-	{ id: "env-school", name: "School Project", created_at: "2026-01-01T00:00:00.000Z" },
-	{ id: "env-personal", name: "Personal", created_at: "2026-01-01T00:00:00.000Z" },
+	{ id: "env-work", name: "Work", isolation_mode: "connected", created_at: "2026-01-01T00:00:00.000Z" },
+	{ id: "env-school", name: "School Project", isolation_mode: "connected", created_at: "2026-01-01T00:00:00.000Z" },
+	{ id: "env-personal", name: "Personal", isolation_mode: "connected", created_at: "2026-01-01T00:00:00.000Z" },
 ];
 
 const COLUMNS: TaskColumn[] = [

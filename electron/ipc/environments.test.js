@@ -120,3 +120,73 @@ describe("environment:getConfig / environment:setConfig (WP-1.1)", () => {
 		expect(receivedPatch).toEqual({});
 	});
 });
+
+describe("environment:setIsolationMode (WP-1.2)", () => {
+	function createFakeDb(initialMode = "connected") {
+		const environment = { id: "env-1", name: "Work", icon: null, accent: null, preset: null, isolation_mode: initialMode, created_at: "t" };
+		return {
+			environment,
+			setEnvironmentIsolationMode: (environmentId, mode) => {
+				if (environmentId !== environment.id) {
+					throw new Error("Environment not found.");
+				}
+				if (mode !== "connected" && mode !== "enclosed") {
+					throw new Error(`Invalid isolation mode: ${mode}`);
+				}
+				environment.isolation_mode = mode;
+				return mode;
+			},
+			getEnvironment: (environmentId) => (environmentId === environment.id ? { ...environment } : null),
+		};
+	}
+
+	it("writes the new mode and returns the full, refreshed environment row", () => {
+		const db = createFakeDb("connected");
+		const ipcMain = createFakeIpcMain();
+		register(ipcMain, { getDb: () => db, openPrimaryWindowByEnvironmentState: () => {} });
+
+		const result = ipcMain.invoke("environment:setIsolationMode", "env-1", "enclosed");
+
+		expect(result).toEqual({ id: "env-1", name: "Work", icon: null, accent: null, preset: null, isolation_mode: "enclosed", created_at: "t" });
+		expect(db.environment.isolation_mode).toBe("enclosed");
+	});
+
+	it("records environment.isolation_mode_changed with the new mode as the event subject", () => {
+		const db = createFakeDb("connected");
+		const eventLog = { record: vi.fn() };
+		const ipcMain = createFakeIpcMain();
+		register(ipcMain, { getDb: () => db, openPrimaryWindowByEnvironmentState: () => {}, getEventLog: () => eventLog });
+
+		ipcMain.invoke("environment:setIsolationMode", "env-1", "enclosed");
+
+		expect(eventLog.record).toHaveBeenCalledTimes(1);
+		expect(eventLog.record).toHaveBeenCalledWith("environment.isolation_mode_changed", {
+			environmentId: "env-1",
+			subject: "enclosed",
+		});
+	});
+
+	it("throws when no environment id is given", () => {
+		const ipcMain = createFakeIpcMain();
+		register(ipcMain, { getDb: () => createFakeDb(), openPrimaryWindowByEnvironmentState: () => {} });
+
+		expect(() => ipcMain.invoke("environment:setIsolationMode", null, "enclosed")).toThrow(/id missing/i);
+	});
+
+	it("propagates the db layer's rejection of an invalid mode rather than writing it", () => {
+		const db = createFakeDb("connected");
+		const ipcMain = createFakeIpcMain();
+		register(ipcMain, { getDb: () => db, openPrimaryWindowByEnvironmentState: () => {} });
+
+		expect(() => ipcMain.invoke("environment:setIsolationMode", "env-1", "private")).toThrow(/invalid isolation mode/i);
+		expect(db.environment.isolation_mode).toBe("connected");
+	});
+
+	it("never throws when no event log getter is supplied", () => {
+		const db = createFakeDb("connected");
+		const ipcMain = createFakeIpcMain();
+		register(ipcMain, { getDb: () => db, openPrimaryWindowByEnvironmentState: () => {} });
+
+		expect(() => ipcMain.invoke("environment:setIsolationMode", "env-1", "enclosed")).not.toThrow();
+	});
+});

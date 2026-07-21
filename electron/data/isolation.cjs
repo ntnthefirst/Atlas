@@ -90,6 +90,42 @@ function isAllowlistedSignal(signal) {
 	return CROSS_ENVIRONMENT_ALLOWLIST.includes(signal);
 }
 
+// WP-1.2 (isolation enforcement UI): the plain-language description of each
+// allowlisted signal, keyed by the same signal name used above. This is what
+// the renderer's "here's exactly what Connected mode shares" list is built
+// from -- never a second, hand-written copy of that list. Adding an entry to
+// CROSS_ENVIRONMENT_ALLOWLIST without adding its label here is a mistake this
+// module can catch: describeAllowlist() below throws rather than silently
+// serving an unlabeled (or, worse, silently blank) entry to the UI, and
+// isolation.test.js pins down that every allowlisted signal has one.
+//
+// Write these for the person deciding whether to flip a switch, not for a
+// developer: name the actual thing that crosses (what it's compared against,
+// what it never includes), not the internal signal identifier.
+const CROSS_ENVIRONMENT_SIGNAL_LABELS = Object.freeze({
+	[CROSS_ENVIRONMENT_SIGNALS.ENVIRONMENT_TIME_TOTALS]:
+		"How much time you spend in this environment today, shown side-by-side with your other connected " +
+		"environments' totals on the dashboard. Only the numbers travel -- never a task title, note, file path, " +
+		"or event subject.",
+});
+
+// The one function the isolation-enforcement UI (and its IPC channel) reads
+// instead of iterating CROSS_ENVIRONMENT_ALLOWLIST itself: pairs each
+// allowlisted signal with its label, in allowlist order, and fails loudly
+// (not silently) if the two ever fall out of sync -- which can only happen if
+// someone edits the allowlist above without adding a matching label right
+// next to it, exactly the mistake this pairing exists to make impossible to
+// ship unnoticed.
+function describeAllowlist() {
+	return CROSS_ENVIRONMENT_ALLOWLIST.map((signal) => {
+		const label = CROSS_ENVIRONMENT_SIGNAL_LABELS[signal];
+		if (!label) {
+			throw new Error(`No user-facing label defined for allowlisted signal "${signal}".`);
+		}
+		return { signal, label };
+	});
+}
+
 // The single decision point: may a read of `signal`, computed across
 // environments, be handed to an environment in `requesterMode`, when one of
 // the environments it's derived from is in `targetMode`?
@@ -126,6 +162,8 @@ module.exports = {
 	isValidIsolationMode,
 	CROSS_ENVIRONMENT_SIGNALS,
 	CROSS_ENVIRONMENT_ALLOWLIST,
+	CROSS_ENVIRONMENT_SIGNAL_LABELS,
 	isAllowlistedSignal,
 	isCrossEnvironmentReadAllowed,
+	describeAllowlist,
 };

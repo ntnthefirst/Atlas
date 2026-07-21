@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Select, ThemeModePicker, Toggle } from "../ui";
+import { EnvironmentAccessCard } from "./EnvironmentAccessCard";
 import type { MainContentViewsProps } from "./types";
 
 type UpdateInfo = {
@@ -10,7 +11,13 @@ type UpdateInfo = {
 	error?: string;
 };
 
-export function SettingsView({ theme, onThemeChange }: MainContentViewsProps) {
+export function SettingsView({
+	theme,
+	onThemeChange,
+	selectedEnvironment,
+	isolationAllowlist,
+	onChangeEnvironmentIsolationMode,
+}: MainContentViewsProps) {
 	const [timeFormat, setTimeFormat] = useState("24h");
 	const [startWeekOn, setStartWeekOn] = useState("monday");
 	const [density, setDensity] = useState("comfortable");
@@ -124,6 +131,14 @@ export function SettingsView({ theme, onThemeChange }: MainContentViewsProps) {
 					/>
 				</div>
 			</section>
+
+			<div className="xl:col-span-2">
+				<EnvironmentAccessCard
+					environment={selectedEnvironment}
+					allowlist={isolationAllowlist}
+					onChangeMode={onChangeEnvironmentIsolationMode}
+				/>
+			</div>
 
 			<section className="atlas-card grid gap-4 xl:col-span-2">
 				<header className="card-head">

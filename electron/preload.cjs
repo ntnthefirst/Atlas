@@ -11,6 +11,16 @@ contextBridge.exposeInMainWorld("atlas", {
 	notifyEnvironmentSwitch: (environmentId) => ipcRenderer.invoke("environment:switch", environmentId),
 	getEnvironmentConfig: (environmentId) => ipcRenderer.invoke("environment:getConfig", environmentId),
 	setEnvironmentConfig: (environmentId, patch) => ipcRenderer.invoke("environment:setConfig", environmentId, patch),
+	// WP-1.2: switch an environment's isolation mode. Takes effect immediately
+	// -- electron/data/scoped.cjs reads `isolation_mode` fresh on every call, so
+	// there is nothing here to invalidate or a restart to wait for.
+	setEnvironmentIsolationMode: (environmentId, mode) =>
+		ipcRenderer.invoke("environment:setIsolationMode", environmentId, mode),
+	// The WP-0.8 allowlist, described in plain language -- what the
+	// isolation-enforcement UI's "here's exactly what Connected mode shares"
+	// list is rendered from. See electron/data/isolation.cjs's
+	// describeAllowlist() for why this can never drift from enforcement.
+	getIsolationAllowlist: () => ipcRenderer.invoke("isolation:getAllowlist"),
 
 	getActiveSession: () => ipcRenderer.invoke("session:active"),
 	startSession: (environmentId) => ipcRenderer.invoke("session:start", environmentId),

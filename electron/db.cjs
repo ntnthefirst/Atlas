@@ -3,7 +3,7 @@ const { Database } = require("node-sqlite3-wasm");
 const { wrapDatabase } = require("./migrations/sqlite-helpers.cjs");
 const { runMigrations } = require("./migrations/index.cjs");
 const { importLegacyDatabaseIfNeeded } = require("./migrations/legacy-import.cjs");
-const { isValidIsolationMode } = require("./data/isolation.cjs");
+const { isValidIsolationMode, DEFAULT_ISOLATION_MODE } = require("./data/isolation.cjs");
 const {
 	parseEnvironmentConfig,
 	serializeEnvironmentConfig,
@@ -308,14 +308,24 @@ class AtlasDatabase {
 		return session;
 	}
 
+	// `isolation_mode` (WP-0.8) rides along on every environment read from here
+	// on (WP-1.2): it is a first-class column on this row, exactly like icon/
+	// accent/preset, so the isolation-enforcement UI can show and switch it
+	// straight from the same environment list the app already loads -- no
+	// separate round trip, and no way for the renderer's idea of an
+	// environment's mode to go stale relative to what electron/data/scoped.cjs
+	// actually enforces.
 	listEnvironments() {
-		return this.all("SELECT id, name, icon, accent, preset, created_at FROM environments ORDER BY created_at ASC");
+		return this.all(
+			"SELECT id, name, icon, accent, preset, isolation_mode, created_at FROM environments ORDER BY created_at ASC",
+		);
 	}
 
 	getEnvironment(environmentId) {
-		return this.first("SELECT id, name, icon, accent, preset, created_at FROM environments WHERE id = ?", [
-			environmentId,
-		]);
+		return this.first(
+			"SELECT id, name, icon, accent, preset, isolation_mode, created_at FROM environments WHERE id = ?",
+			[environmentId],
+		);
 	}
 
 	createEnvironment(name, options = {}) {
@@ -325,6 +335,13 @@ class AtlasDatabase {
 			icon: options.icon ?? null,
 			accent: options.accent ?? null,
 			preset: options.preset ?? null,
+			// Not part of the INSERT below -- the column's own
+			// `NOT NULL DEFAULT 'connected'` (migration 004) is what actually
+			// assigns this. Mirrored into the returned object here purely so a
+			// freshly created environment's isolation_mode is visible to the
+			// caller immediately, without a second read back from the row this
+			// INSERT just wrote.
+			isolation_mode: DEFAULT_ISOLATION_MODE,
 			created_at: nowIso(),
 		};
 

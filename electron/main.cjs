@@ -53,6 +53,7 @@ const { register: registerFocusIpc } = require("./ipc/focus.cjs");
 const { register: registerNotchIpc } = require("./ipc/notch.cjs");
 const { register: registerAiIpc } = require("./ipc/ai.cjs");
 const { register: registerSystemIpc } = require("./ipc/system.cjs");
+const { register: registerIsolationIpc } = require("./ipc/isolation.cjs");
 
 let mainWindow = null;
 let miniWindow = null;
@@ -579,6 +580,8 @@ function wireIpc() {
 	});
 
 	registerAiIpc(ipcMain);
+
+	registerIsolationIpc(ipcMain);
 }
 
 app.whenReady().then(async () => {

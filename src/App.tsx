@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { MinusIcon, XMarkIcon, PauseIcon, PlayIcon, StopIcon } from "@heroicons/react/24/outline";
-import type { AtlasView, TaskStatus, TaskItem, TaskColumn, TaskUpdate, Environment } from "./types";
+import type {
+	AtlasView,
+	TaskStatus,
+	TaskItem,
+	TaskColumn,
+	TaskUpdate,
+	Environment,
+	IsolationAllowlistEntry,
+	IsolationMode,
+} from "./types";
 import { AtlasHeader } from "./components/AtlasHeader";
 import { AtlasSidebar } from "./components/AtlasSidebar";
 import { AtlasMainContent } from "./components/AtlasMainContent";
@@ -12,6 +21,7 @@ import { ActionEditorWindowApp } from "./components/action-editor/ActionEditorWi
 import { NotchInputWindowApp } from "./components/notch-input/NotchInputWindowApp";
 import { SmartCapture } from "./components/SmartCapture";
 import type { ParsedCapture } from "./utils/smartParse";
+import { switchIsolationMode } from "./utils/isolationMode";
 import logo from "./assets/logosmall.png";
 import {
 	useEnvironmentManagement,
@@ -89,6 +99,12 @@ function MainAtlasApp() {
 	}, [isMiniMode, isWelcomeMode]);
 
 	const { environments, setEnvironments, selectedEnvironmentId, setSelectedEnvironmentId, selectedEnvironment } = useEnvironmentManagement();
+	// WP-1.2 (isolation enforcement UI): the WP-0.8 cross-environment allowlist,
+	// described in plain language by the main process. Loaded once at
+	// bootstrap (it's a static list, not per-environment) and handed straight
+	// through to whatever renders "what's shared right now" -- see
+	// src/utils/isolationMode.ts for why this must never be re-described here.
+	const [isolationAllowlist, setIsolationAllowlist] = useState<IsolationAllowlistEntry[]>([]);
 	const {
 		activeSession,
 		setActiveSession,
@@ -344,14 +360,16 @@ function MainAtlasApp() {
 				const persistedOrder = readStorage(TASK_ORDER_KEY, {} as Record<string, string[]>);
 				const persistedColumns = readStorage(TASK_COLUMNS_KEY, {} as Record<string, TaskColumn[]>);
 				setTaskColumnsByEnvironment(persistedColumns);
-				const [environmentList, active, appName] = await Promise.all([
+				const [environmentList, active, appName, allowlist] = await Promise.all([
 					window.atlas.listEnvironments(),
 					window.atlas.getActiveSession(),
 					window.atlas.getCurrentApp(),
+					window.atlas.getIsolationAllowlist(),
 				]);
 				setEnvironments(environmentList);
 				setActiveSession(active);
 				setCurrentAppName(normalizeTrackedAppName(appName));
+				setIsolationAllowlist(allowlist);
 				if (!environmentList.length) {
 					setShowFirstLaunch(true);
 					return;
@@ -407,6 +425,7 @@ function MainAtlasApp() {
 		setEnvironments,
 		setActiveSession,
 		setCurrentAppName,
+		setIsolationAllowlist,
 		setShowFirstLaunch,
 		setSelectedEnvironmentId,
 		setSessions,
@@ -525,6 +544,29 @@ function MainAtlasApp() {
 	) => {
 		if (!selectedEnvironmentId) return;
 		const updated = await window.atlas.updateEnvironment(selectedEnvironmentId, fields);
+		setEnvironments((current) => current.map((environmentItem) => (environmentItem.id === updated.id ? updated : environmentItem)));
+	};
+
+	// WP-1.2 (isolation enforcement UI): the one call path both Connected<->
+	// Enclosed transitions go through. `switchIsolationMode` (src/utils/
+	// isolationMode.ts) owns the actual decision logic -- which warning to
+	// show, whether to bail out on cancel -- this just supplies the real
+	// `window.confirm` / `window.atlas.setEnvironmentIsolationMode` and folds
+	// the result back into local state exactly like `onUpdateEnvironment`
+	// above. Returns nothing when the user cancels or the mode wasn't
+	// actually changing; there is nothing to update in that case.
+	const onChangeEnvironmentIsolationMode = async (nextMode: IsolationMode) => {
+		if (!selectedEnvironment) return;
+		const updated = await switchIsolationMode({
+			environmentId: selectedEnvironment.id,
+			environmentName: selectedEnvironment.name,
+			currentMode: selectedEnvironment.isolation_mode,
+			nextMode,
+			allowlist: isolationAllowlist,
+			confirm: (message) => window.confirm(message),
+			setIsolationMode: (environmentId, mode) => window.atlas.setEnvironmentIsolationMode(environmentId, mode),
+		});
+		if (!updated) return;
 		setEnvironments((current) => current.map((environmentItem) => (environmentItem.id === updated.id ? updated : environmentItem)));
 	};
 
@@ -1064,6 +1106,9 @@ function MainAtlasApp() {
 								activeElapsed={activeElapsed}
 								currentAppName={currentAppName}
 								selectedEnvironmentName={selectedEnvironment?.name ?? "None"}
+								selectedEnvironment={selectedEnvironment}
+								isolationAllowlist={isolationAllowlist}
+								onChangeEnvironmentIsolationMode={onChangeEnvironmentIsolationMode}
 								sessions={sessions}
 								selectedSession={selectedSession}
 								onOpenSession={openSession}

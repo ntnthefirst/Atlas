@@ -17,6 +17,8 @@ import type {
 	Environment,
 	EnvironmentConfig,
 	EnvironmentConfigPatch,
+	IsolationAllowlistEntry,
+	IsolationMode,
 	NoteItem,
 	NotchInputPayload,
 	NotchPreferences,
@@ -56,6 +58,8 @@ declare global {
 			notifyEnvironmentSwitch: (environmentId: string) => Promise<boolean>;
 			getEnvironmentConfig: (environmentId: string) => Promise<EnvironmentConfig | null>;
 			setEnvironmentConfig: (environmentId: string, patch: EnvironmentConfigPatch) => Promise<EnvironmentConfig>;
+			setEnvironmentIsolationMode: (environmentId: string, mode: IsolationMode) => Promise<Environment>;
+			getIsolationAllowlist: () => Promise<IsolationAllowlistEntry[]>;
 
 			getActiveSession: () => Promise<Session | null>;
 			startSession: (environmentId: string) => Promise<Session>;

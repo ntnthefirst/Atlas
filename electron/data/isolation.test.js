@@ -6,8 +6,10 @@ import {
 	isValidIsolationMode,
 	CROSS_ENVIRONMENT_SIGNALS,
 	CROSS_ENVIRONMENT_ALLOWLIST,
+	CROSS_ENVIRONMENT_SIGNAL_LABELS,
 	isAllowlistedSignal,
 	isCrossEnvironmentReadAllowed,
+	describeAllowlist,
 } from "./isolation.cjs";
 
 // ---------------------------------------------------------------------------
@@ -66,6 +68,49 @@ describe("the cross-environment allowlist -- exact contents", () => {
 		expect(isAllowlistedSignal("note_bodies")).toBe(false);
 		expect(isAllowlistedSignal("")).toBe(false);
 		expect(isAllowlistedSignal(undefined)).toBe(false);
+	});
+});
+
+describe("CROSS_ENVIRONMENT_SIGNAL_LABELS / describeAllowlist() -- WP-1.2's UI feed", () => {
+	// The isolation-enforcement UI (WP-1.2) is required to render its "what
+	// Connected mode shares" list FROM the allowlist, never as separate
+	// hand-written JSX. These are the tests that make that promise mean
+	// something: every allowlisted signal must have a label, describeAllowlist()
+	// must return exactly one entry per allowlist entry (so the UI's list
+	// length is provably tied to the allowlist's length, not a coincidence),
+	// and widening the allowlist without adding a label must fail loudly.
+	it("has exactly one label per allowlisted signal -- same keys, nothing extra, nothing missing", () => {
+		expect(Object.keys(CROSS_ENVIRONMENT_SIGNAL_LABELS).sort()).toEqual([...CROSS_ENVIRONMENT_ALLOWLIST].sort());
+	});
+
+	it("every label is a real, non-empty, human-readable string", () => {
+		for (const signal of CROSS_ENVIRONMENT_ALLOWLIST) {
+			const label = CROSS_ENVIRONMENT_SIGNAL_LABELS[signal];
+			expect(typeof label).toBe("string");
+			expect(label.trim().length).toBeGreaterThan(10);
+		}
+	});
+
+	it("describeAllowlist() returns exactly one entry per allowlist entry, in allowlist order", () => {
+		const described = describeAllowlist();
+		expect(described).toHaveLength(CROSS_ENVIRONMENT_ALLOWLIST.length);
+		expect(described.map((entry) => entry.signal)).toEqual([...CROSS_ENVIRONMENT_ALLOWLIST]);
+		for (const entry of described) {
+			expect(entry.label).toBe(CROSS_ENVIRONMENT_SIGNAL_LABELS[entry.signal]);
+		}
+	});
+
+	it("today's exact described allowlist -- pinned, like CROSS_ENVIRONMENT_ALLOWLIST itself", () => {
+		expect(describeAllowlist()).toEqual([
+			{
+				signal: "environment_time_totals",
+				label: CROSS_ENVIRONMENT_SIGNAL_LABELS.environment_time_totals,
+			},
+		]);
+	});
+
+	it("CROSS_ENVIRONMENT_SIGNAL_LABELS is frozen too, so a call site cannot patch in a label without touching this module", () => {
+		expect(Object.isFrozen(CROSS_ENVIRONMENT_SIGNAL_LABELS)).toBe(true);
 	});
 });
 
