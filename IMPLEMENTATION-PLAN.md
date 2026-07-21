@@ -29,10 +29,19 @@ days. Calendar time depends entirely on the burst pattern (see section 4).
 
 ## 1b. Status
 
-Last updated: 2026-07-21. Keep this current — it is what a fresh session reads first.
+Last updated: 2026-07-22. Keep this current — it is what a fresh session reads first.
+
+**Phase 0: complete (8/8). Phase 1: complete (5/5).** Suite at 724 tests.
+Next unstarted work is Phase 2 (the launcher). Everything through WP-1.5 is
+committed and pushed to `dev`; the working tree is clean.
 
 | Package | State |
 |---|---|
+| WP-1.1 Environment config | **Done.** Versioned per-environment config document. |
+| WP-1.2 Isolation UI | **Done.** Connected/Enclosed control; shared-list rendered from the allowlist. |
+| WP-1.3 Per-environment Notch | **Done.** Layout store; existing config preserved as the default. |
+| WP-1.4 Environment switching | **Done.** Atomic, <2ms, rebindable global hotkey, startupBehaviour. |
+| WP-1.5 Environment management | **Done.** Create/edit/duplicate/archive/delete with real counts. |
 | WP-0.1 Test harness | **Done.** Vitest + 3-OS CI matrix. |
 | WP-0.2 Split main.cjs | **Substantially done.** 2455 → 746 lines (−70%), ~30 modules. All 73 IPC handlers, all config, the updater, focus engine, notch windows and tray extracted. See the note below on the remaining 746 lines. |
 | WP-0.3 Database engine swap | **Done.** `node-sqlite3-wasm` (see D9), migration framework, verified legacy import. |
