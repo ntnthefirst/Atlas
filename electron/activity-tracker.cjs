@@ -1,51 +1,8 @@
-const { execFile } = require("node:child_process");
-const { promisify } = require("node:util");
-
-const execFileAsync = promisify(execFile);
-
-const WINDOWS_FOREGROUND_PROCESS_SCRIPT = `
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-using System.Text;
-public class Win32 {
-  [DllImport("user32.dll")]
-  public static extern IntPtr GetForegroundWindow();
-
-  [DllImport("user32.dll")]
-  public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-
-  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-  public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
-}
-"@
-
-$hwnd = [Win32]::GetForegroundWindow()
-if ($hwnd -eq [IntPtr]::Zero) {
-  @{ processName = "Unknown"; title = ""; label = "Unknown" } | ConvertTo-Json -Compress
-  exit
-}
-
-$windowProcessId = 0
-[Win32]::GetWindowThreadProcessId($hwnd, [ref]$windowProcessId) | Out-Null
-
-$titleBuffer = New-Object System.Text.StringBuilder 1024
-[Win32]::GetWindowText($hwnd, $titleBuffer, $titleBuffer.Capacity) | Out-Null
-$title = $titleBuffer.ToString().Trim()
-
-try {
-	$proc = Get-Process -Id $windowProcessId -ErrorAction Stop
-  $processName = if ([string]::IsNullOrWhiteSpace($proc.ProcessName)) { "Unknown" } else { $proc.ProcessName }
-	$label = if ([string]::IsNullOrWhiteSpace($title)) { $processName } else { $title }
-  @{ processName = $processName; title = $title; label = $label } | ConvertTo-Json -Compress
-} catch {
-  if ([string]::IsNullOrWhiteSpace($title)) {
-    @{ processName = "Unknown"; title = ""; label = "Unknown" } | ConvertTo-Json -Compress
-  } else {
-    @{ processName = "Unknown"; title = $title; label = $title } | ConvertTo-Json -Compress
-  }
-}
-`;
+// WP-0.6: OS access (the PowerShell call this file used to make directly)
+// now lives behind the platform adapter -- see electron/platform/win32.cjs
+// for the script and electron/platform/unsupported.cjs for the non-Windows
+// fallback this file must handle explicitly (D10).
+const platform = require("./platform/index.cjs");
 
 class ActivityTracker {
 	// `eventLog` is optional (defaults to null) so this class stays usable
@@ -105,36 +62,28 @@ class ActivityTracker {
 		return this.currentAppName;
 	}
 
+	// *Which* process names count as "a shell, not a real foreground app" is
+	// Windows-specific data (macOS's equivalent list would be entirely
+	// different process names), so that list lives behind the platform
+	// adapter alongside win32.cjs's other Windows-specific knowledge. This
+	// method stays here, under this name, because *whether* an ignored
+	// process should be excluded from activity tracking is Atlas tracking
+	// policy, not an OS query -- the adapter only answers "is this a known
+	// shell process name", it has no notion of activity blocks or sessions.
 	isIgnoredProcess(processName) {
-		const value = (processName || "").toLowerCase();
-		return value === "powershell" || value === "pwsh" || value === "cmd" || value === "windowsterminal";
+		return platform.isIgnoredProcessName(processName);
 	}
 
+	// Delegates to the platform adapter (WP-0.6) instead of spawning
+	// PowerShell directly. Returns exactly what the adapter returns --
+	// including the `supported` flag -- so tick() (below) can branch on it
+	// explicitly rather than this method quietly turning "unsupported
+	// platform" into some particular app name. That silent conversion is
+	// the anti-pattern D10 calls out by name: this used to return the
+	// literal string "Unknown" for any non-Windows platform, which reads
+	// identically to a real window that is genuinely titled "Unknown".
 	async getForegroundAppInfo() {
-		if (process.platform !== "win32") {
-			return { processName: "Unknown", label: "Unknown" };
-		}
-
-		const { stdout } = await execFileAsync("powershell.exe", [
-			"-NoProfile",
-			"-Command",
-			WINDOWS_FOREGROUND_PROCESS_SCRIPT,
-		]);
-
-		const value = stdout.trim();
-		if (!value) {
-			return { processName: "Unknown", label: "Unknown" };
-		}
-
-		try {
-			const parsed = JSON.parse(value);
-			return {
-				processName: parsed?.processName?.trim() || "Unknown",
-				label: parsed?.label?.trim() || parsed?.processName?.trim() || "Unknown",
-			};
-		} catch {
-			return { processName: "Unknown", label: value || "Unknown" };
-		}
+		return platform.getForegroundWindow();
 	}
 
 	async tick() {
@@ -158,6 +107,18 @@ class ActivityTracker {
 
 			const appInfo = await this.getForegroundAppInfo();
 			const now = new Date().toISOString();
+
+			if (!appInfo.supported) {
+				// D10: Windows only, for now. On any other platform the adapter is
+				// honest that it has no foreground-window data at all -- do not
+				// fabricate an app name (that would recreate the exact "Unknown"
+				// ambiguity WP-0.6 removes) or bookkeep an activity block for data
+				// we don't have. Just close whatever block a prior tick may have
+				// left open, same as the ignored-process branch below.
+				this.currentAppName = "Tracking unsupported on this platform";
+				this.db.closeOpenActivityBlock(session.id, now);
+				return;
+			}
 
 			if (this.isIgnoredProcess(appInfo.processName)) {
 				this.currentAppName = "No tracked app";

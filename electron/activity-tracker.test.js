@@ -26,8 +26,10 @@ afterEach(() => {
 // Overrides the instance method rather than mocking child_process -- tick()
 // calls `this.getForegroundAppInfo()`, so an own-property override on the
 // instance shadows the prototype method the same way a real subclass would.
+// `supported: true` mirrors the real shape the platform adapter (WP-0.6)
+// returns on Windows -- see electron/platform/win32.cjs.
 function stubForegroundApp(tracker, processName, label = processName) {
-	tracker.getForegroundAppInfo = vi.fn().mockResolvedValue({ processName, label });
+	tracker.getForegroundAppInfo = vi.fn().mockResolvedValue({ supported: true, processName, label });
 }
 
 async function createSessionContext() {
@@ -144,5 +146,53 @@ describe("ActivityTracker — app.focus event recording (WP-0.5)", () => {
 		await tracker.tick();
 
 		expect(eventLog.record).not.toHaveBeenCalled();
+	});
+});
+
+describe("ActivityTracker — platform adapter integration (WP-0.6)", () => {
+	it("never records app.focus or bookkeeps a block when the platform adapter reports unsupported", async () => {
+		const { db, session } = await createSessionContext();
+		const eventLog = { record: vi.fn() };
+		const tracker = new ActivityTracker(db, eventLog);
+		tracker.setCurrentSession(session.id);
+		// This is the shape electron/platform/unsupported.cjs returns -- no
+		// processName, no label, nothing to fabricate a value from.
+		tracker.getForegroundAppInfo = vi.fn().mockResolvedValue({ supported: false });
+
+		await tracker.tick();
+
+		expect(eventLog.record).not.toHaveBeenCalled();
+		expect(db.getOpenActivityBlock(session.id)).toBeFalsy();
+		// Must not silently fall back to the ambiguous literal "Unknown" --
+		// that string is indistinguishable from a real app genuinely named
+		// Unknown, which is exactly the anti-pattern WP-0.6 removes.
+		expect(tracker.getCurrentAppName()).not.toBe("Unknown");
+	});
+
+	it("closes an activity block left open from a prior (supported) tick once the platform becomes unsupported", async () => {
+		const { db, session } = await createSessionContext();
+		const tracker = new ActivityTracker(db);
+		tracker.setCurrentSession(session.id);
+		stubForegroundApp(tracker, "chrome");
+		await tracker.tick();
+		expect(db.getOpenActivityBlock(session.id)).toBeTruthy();
+
+		tracker.getForegroundAppInfo = vi.fn().mockResolvedValue({ supported: false });
+		await tracker.tick();
+
+		expect(db.getOpenActivityBlock(session.id)).toBeFalsy();
+	});
+
+	it("isIgnoredProcess() delegates to the platform adapter's isIgnoredProcessName()", async () => {
+		const { db } = await createSessionContext();
+		const tracker = new ActivityTracker(db);
+
+		// On this (Windows) test machine, the real win32 adapter is active --
+		// same shell names the pre-WP-0.6 inline check used.
+		expect(tracker.isIgnoredProcess("powershell")).toBe(true);
+		expect(tracker.isIgnoredProcess("pwsh")).toBe(true);
+		expect(tracker.isIgnoredProcess("cmd")).toBe(true);
+		expect(tracker.isIgnoredProcess("windowsterminal")).toBe(true);
+		expect(tracker.isIgnoredProcess("chrome")).toBe(false);
 	});
 });

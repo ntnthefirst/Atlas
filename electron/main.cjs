@@ -1,6 +1,5 @@
 const path = require("node:path");
 const fs = require("node:fs");
-const { spawn } = require("node:child_process");
 const {
 	app,
 	BrowserWindow,
@@ -19,6 +18,7 @@ const { AtlasDatabase } = require("./db.cjs");
 const { ActivityTracker } = require("./activity-tracker.cjs");
 const { EventLog } = require("./services/event-log.cjs");
 const { getSystemStats, listOpenApps } = require("./system-info.cjs");
+const platform = require("./platform/index.cjs");
 const { loadAiPreferences, getPublicAiConfig, setAiConfig, aiComplete } = require("./ai.cjs");
 const { compareVersionStrings, normalizeReleaseList } = require("./services/version.cjs");
 const { NOTCH_PREFS_FILE, defaultNotchPreferences, normalizeNotchPreferences } = require("./config/notch-prefs.cjs");
@@ -1025,15 +1025,18 @@ function wireIpc() {
 
 	registerInsightsIpc(ipcMain, { getDb: () => db, getEventLog: () => eventLog });
 
-	ipcMain.handle("app:launch", (_event, command) => {
+	ipcMain.handle("app:launch", async (_event, command) => {
 		if (!command || !command.trim()) {
 			throw new Error("Command is required.");
 		}
-		spawn(command, {
-			shell: true,
-			detached: true,
-			stdio: "ignore",
-		});
+		// WP-0.6: the actual spawn() call now lives behind the platform
+		// adapter (electron/platform/win32.cjs). `supported: false` here would
+		// mean this build is running on a platform Atlas doesn't support (D10)
+		// -- handled explicitly rather than silently reporting success.
+		const result = await platform.launch(command);
+		if (!result.supported) {
+			throw new Error("Launching apps is not supported on this platform.");
+		}
 		return true;
 	});
 
