@@ -3,9 +3,9 @@
 //
 // Extracted from main.cjs's wireIpc() (WP-0.2) with no behaviour change. Note
 // that dashboard:getLayout / dashboard:setLayout are NOT here -- those are
-// preference handlers (backed by dashboardPreferences, not the database) and
-// stay in main.cjs alongside the other preference handlers. Only the two
-// database-backed handlers below moved.
+// preference handlers (backed by dashboardPreferences, not the database), and
+// live in electron/ipc/system.cjs alongside the other preference/system
+// handlers. Only the two database-backed handlers below moved into this file.
 //
 // `getDb` is a getter rather than a plain value because `db` is assigned
 // during app startup, after this module is required -- capturing it by value

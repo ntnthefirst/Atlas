@@ -17,9 +17,7 @@ const { autoUpdater } = require("electron-updater");
 const { AtlasDatabase } = require("./db.cjs");
 const { ActivityTracker } = require("./activity-tracker.cjs");
 const { EventLog } = require("./services/event-log.cjs");
-const { getSystemStats, listOpenApps } = require("./system-info.cjs");
-const platform = require("./platform/index.cjs");
-const { loadAiPreferences, getPublicAiConfig, setAiConfig, aiComplete } = require("./ai.cjs");
+const { loadAiPreferences } = require("./ai.cjs");
 const { compareVersionStrings, normalizeReleaseList } = require("./services/version.cjs");
 const { NOTCH_PREFS_FILE, defaultNotchPreferences, normalizeNotchPreferences } = require("./config/notch-prefs.cjs");
 const { computeNotchBounds, selectTargetDisplays } = require("./windows/notch-geometry.cjs");
@@ -54,6 +52,12 @@ const { register: registerEnvironmentIpc } = require("./ipc/environments.cjs");
 const { register: registerSessionIpc } = require("./ipc/sessions.cjs");
 const { register: registerActivityIpc } = require("./ipc/activity.cjs");
 const { register: registerInsightsIpc } = require("./ipc/insights.cjs");
+const { register: registerWindowsIpc } = require("./ipc/windows.cjs");
+const { register: registerAppIpc } = require("./ipc/app.cjs");
+const { register: registerFocusIpc } = require("./ipc/focus.cjs");
+const { register: registerNotchIpc } = require("./ipc/notch.cjs");
+const { register: registerAiIpc } = require("./ipc/ai.cjs");
+const { register: registerSystemIpc } = require("./ipc/system.cjs");
 
 let mainWindow = null;
 let miniWindow = null;
@@ -1025,344 +1029,52 @@ function wireIpc() {
 
 	registerInsightsIpc(ipcMain, { getDb: () => db, getEventLog: () => eventLog });
 
-	ipcMain.handle("app:launch", async (_event, command) => {
-		if (!command || !command.trim()) {
-			throw new Error("Command is required.");
-		}
-		// WP-0.6: the actual spawn() call now lives behind the platform
-		// adapter (electron/platform/win32.cjs). `supported: false` here would
-		// mean this build is running on a platform Atlas doesn't support (D10)
-		// -- handled explicitly rather than silently reporting success.
-		const result = await platform.launch(command);
-		if (!result.supported) {
-			throw new Error("Launching apps is not supported on this platform.");
-		}
-		return true;
+	registerWindowsIpc(ipcMain, {
+		getMainWindow: () => mainWindow,
+		getWelcomeWindow: () => welcomeWindow,
+		getMiniWindow: () => miniWindow,
+		getDb: () => db,
+		applyNativeTheme,
+		createMiniWindow,
+		createSettingsWindow,
+		createActionEditorWindow,
+		createNotchInputWindow,
+		showMainWindow,
 	});
 
-	ipcMain.handle("window:minimize", (event) => {
-		const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow ?? welcomeWindow;
-		if (targetWindow && !targetWindow.isDestroyed()) {
-			targetWindow.minimize();
-		}
-		return true;
+	registerAppIpc(ipcMain, {
+		getUpdatePreferences: () => updatePreferences,
+		saveUpdatePreferences,
+		fetchReleases,
+		performInAppUpdate,
+		isWindows,
 	});
 
-	ipcMain.handle("app:platform", () => process.platform);
-
-	ipcMain.handle("window:setTheme", (_event, theme) => {
-		applyNativeTheme(theme);
-		return true;
+	registerFocusIpc(ipcMain, {
+		getFocusState: () => focusState,
+		rollFocusStatsIfNeeded,
+		startFocus,
+		pauseFocus,
+		resumeFocus,
+		advanceFocusPhase,
+		stopFocus,
+		setFocusGoal,
+		updateFocusConfig,
 	});
 
-	ipcMain.handle("app:setAccent", (_event, value) => {
-		// Relay the accent change to every window so the whole app updates live.
-		for (const browserWindow of BrowserWindow.getAllWindows()) {
-			if (!browserWindow.isDestroyed()) {
-				browserWindow.webContents.send("accent:changed", value);
-			}
-		}
-		return true;
+	registerNotchIpc(ipcMain, {
+		getNotchPreferences: () => notchPreferences,
+		applyNotchPreferences,
+		positionNotchWindow,
+		getPendingNotchInputPayload: () => pendingNotchInputPayload,
 	});
 
-	ipcMain.handle("notch:getPreferences", () => notchPreferences);
-
-	ipcMain.handle("notch:setPreferences", (_event, prefs) =>
-		applyNotchPreferences({ ...notchPreferences, ...(prefs || {}) }),
-	);
-
-	ipcMain.handle("dashboard:getLayout", () => dashboardPreferences);
-
-	ipcMain.handle("dashboard:setLayout", (_event, prefs) =>
-		saveDashboardPreferences({ ...dashboardPreferences, ...(prefs || {}) }),
-	);
-
-	ipcMain.handle("focus:getState", () => {
-		rollFocusStatsIfNeeded();
-		return focusState;
-	});
-	ipcMain.handle("focus:start", (_event, goal) => startFocus(goal));
-	ipcMain.handle("focus:pause", () => pauseFocus());
-	ipcMain.handle("focus:resume", () => resumeFocus());
-	ipcMain.handle("focus:skip", () => {
-		if (focusState.runtime) advanceFocusPhase(true);
-		return focusState;
-	});
-	ipcMain.handle("focus:stop", () => stopFocus());
-	ipcMain.handle("focus:setGoal", (_event, goal) => setFocusGoal(goal));
-	ipcMain.handle("focus:setConfig", (_event, patch) => updateFocusConfig(patch));
-
-	ipcMain.handle("notch:resize", (event, width, height) => {
-		const notchWindow = BrowserWindow.fromWebContents(event.sender);
-		if (!notchWindow || notchWindow.isDestroyed()) {
-			return false;
-		}
-		const display =
-			screen.getAllDisplays().find((item) => item.id === notchWindow.notchDisplayId) ??
-			screen.getPrimaryDisplay();
-		const safeWidth = Math.max(120, Math.min(900, Math.ceil(Number(width) || 0)));
-		const safeHeight = Math.max(44, Math.min(600, Math.ceil(Number(height) || 0)));
-		positionNotchWindow(notchWindow, display, safeWidth, safeHeight);
-		return true;
+	registerSystemIpc(ipcMain, {
+		getDashboardPreferences: () => dashboardPreferences,
+		saveDashboardPreferences,
 	});
 
-	// Toggles the notch window's click-through state. When the card is retracted
-	// (or the pointer is over the transparent margins), the renderer flips this on
-	// so clicks pass straight to whatever is behind the notch instead of the
-	// invisible window swallowing them. `forward: true` keeps mouse-move events
-	// flowing to the renderer so it can detect the pointer re-entering the peek
-	// and flip interactivity back on. Never made click-through while free-floating
-	// (it must stay grabbable) — the renderer enforces that too.
-	ipcMain.handle("notch:setIgnoreMouse", (event, ignore) => {
-		const notchWindow = BrowserWindow.fromWebContents(event.sender);
-		if (!notchWindow || notchWindow.isDestroyed()) {
-			return false;
-		}
-		if (ignore) {
-			notchWindow.setIgnoreMouseEvents(true, { forward: true });
-		} else {
-			notchWindow.setIgnoreMouseEvents(false);
-		}
-		return true;
-	});
-
-	ipcMain.handle("screen:listDisplays", () => {
-		const primaryId = screen.getPrimaryDisplay().id;
-		return screen.getAllDisplays().map((display, index) => ({
-			id: display.id,
-			label: `Display ${index + 1} (${display.size.width}x${display.size.height})${display.id === primaryId ? " — Primary" : ""}`,
-			isPrimary: display.id === primaryId,
-			width: display.size.width,
-			height: display.size.height,
-		}));
-	});
-
-	ipcMain.handle("window:openMini", () => {
-		createMiniWindow();
-		return true;
-	});
-
-	ipcMain.handle("window:openSettings", (event) => {
-		const parentWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow ?? welcomeWindow;
-		createSettingsWindow(parentWindow);
-		return true;
-	});
-
-	ipcMain.handle("window:openActionEditor", () => {
-		// No parent window: this is opened from the notch as often as from
-		// Settings, and should stay open/independent either way rather than
-		// being tied to (and modal-blocked behind) whichever window asked.
-		createActionEditorWindow(null);
-		return true;
-	});
-
-	ipcMain.handle("window:openNotchInput", (_event, payload) => {
-		createNotchInputWindow(payload && typeof payload === "object" ? payload : {});
-		return true;
-	});
-
-	ipcMain.handle("notchInput:getPayload", () => pendingNotchInputPayload ?? {});
-
-	ipcMain.handle("app:pickFile", async (event) => {
-		const ownerWindow = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-		const result = await dialog.showOpenDialog(ownerWindow, {
-			properties: ["openFile"],
-			filters: isWindows
-				? [
-						{ name: "Programs", extensions: ["exe", "bat", "cmd"] },
-						{ name: "All files", extensions: ["*"] },
-					]
-				: [{ name: "All files", extensions: ["*"] }],
-		});
-		if (result.canceled || result.filePaths.length === 0) {
-			return null;
-		}
-		return result.filePaths[0];
-	});
-
-	ipcMain.handle("app:getFileIcon", async (_event, filePath) => {
-		if (!filePath) return null;
-		// A quoted path (the common case — paths with spaces, e.g. under
-		// "Program Files", get auto-quoted when picked) keeps everything
-		// between the quotes intact. An unquoted command may have trailing
-		// arguments after the first space, which get dropped.
-		const trimmed = filePath.trim();
-		const quotedMatch = trimmed.match(/^"([^"]+)"/);
-		const target = quotedMatch ? quotedMatch[1] : trimmed.split(" ")[0];
-		try {
-			const icon = await app.getFileIcon(target, { size: "normal" });
-			return icon.isEmpty() ? null : icon.toDataURL();
-		} catch {
-			return null;
-		}
-	});
-
-	ipcMain.handle("system:listOpenApps", () => listOpenApps());
-
-	ipcMain.handle("system:getStats", () => getSystemStats());
-
-	ipcMain.handle("window:resizeMini", (_event, width, height) => {
-		if (!miniWindow || miniWindow.isDestroyed()) {
-			return false;
-		}
-
-		const safeWidth = Math.max(220, Math.min(900, Math.ceil(Number(width) || 0)));
-		const safeHeight = Math.max(40, Math.min(260, Math.ceil(Number(height) || 0)));
-		miniWindow.setContentSize(safeWidth, safeHeight);
-		return true;
-	});
-
-	ipcMain.handle("window:showMain", () => {
-		showMainWindow();
-		return true;
-	});
-
-	// Brings the main window forward only if it already exists, without launching
-	// it — the notch can run fully standalone, so this never force-opens the app.
-	ipcMain.handle("window:focusMainIfOpen", () => {
-		if (!mainWindow || mainWindow.isDestroyed()) {
-			return false;
-		}
-		if (mainWindow.isMinimized()) {
-			mainWindow.restore();
-		}
-		mainWindow.show();
-		mainWindow.focus();
-		return true;
-	});
-
-	ipcMain.handle("window:navigate", (_event, view) => {
-		showMainWindow();
-		if (mainWindow && !mainWindow.isDestroyed()) {
-			mainWindow.webContents.send("window:navigate-changed", view);
-		}
-		return true;
-	});
-
-	ipcMain.handle("window:closeMini", () => {
-		if (!miniWindow || miniWindow.isDestroyed()) {
-			return false;
-		}
-
-		const hasActiveSession = Boolean(db && db.getActiveSession());
-		const canRevealMain = Boolean(mainWindow && !mainWindow.isDestroyed());
-		if (hasActiveSession && canRevealMain && mainWindow.isVisible() === false) {
-			showMainWindow();
-		}
-
-		miniWindow.close();
-		return true;
-	});
-
-	ipcMain.handle("window:toggleMaximize", () => {
-		if (!mainWindow) {
-			return false;
-		}
-		if (mainWindow.isMaximized()) {
-			mainWindow.unmaximize();
-			return false;
-		}
-		mainWindow.maximize();
-		return true;
-	});
-
-	ipcMain.handle("window:close", (event) => {
-		const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow ?? welcomeWindow;
-		if (targetWindow && !targetWindow.isDestroyed()) {
-			targetWindow.close();
-		}
-		return true;
-	});
-
-	ipcMain.handle("app:version", () => {
-		return app.getVersion();
-	});
-
-	ipcMain.handle("app:getUpdatePreferences", () => {
-		return updatePreferences;
-	});
-
-	ipcMain.handle("app:setUpdatePreferences", (_event, nextPreferences) => {
-		return saveUpdatePreferences(nextPreferences);
-	});
-
-	ipcMain.handle("app:checkUpdates", async (_event, options = {}) => {
-		const includePrerelease =
-			typeof options?.includePrerelease === "boolean"
-				? options.includePrerelease
-				: updatePreferences.includeBeta;
-		const localVersion = app.getVersion();
-
-		try {
-			const releases = await fetchReleases(includePrerelease);
-			const latestRelease = releases[0] ?? null;
-			if (!latestRelease) {
-				return {
-					hasUpdate: false,
-					local: localVersion,
-					latest: null,
-					error: "No published releases available",
-				};
-			}
-
-			const isOutdated = compareVersionStrings(latestRelease.version, localVersion) > 0;
-
-			return {
-				hasUpdate: isOutdated,
-				local: localVersion,
-				latest: latestRelease.version,
-				releaseUrl: latestRelease.url,
-				publishedAt: latestRelease.publishedAt,
-				downloadUrl: isOutdated ? (latestRelease.installerUrl ?? undefined) : undefined,
-			};
-		} catch (error) {
-			return {
-				hasUpdate: false,
-				local: localVersion,
-				latest: null,
-				error: error instanceof Error ? error.message : "Unknown error",
-			};
-		}
-	});
-
-	ipcMain.handle("app:releaseHistory", async (_event, options = {}) => {
-		const includePrerelease =
-			typeof options?.includePrerelease === "boolean"
-				? options.includePrerelease
-				: updatePreferences.includeBeta;
-
-		try {
-			const releases = await fetchReleases(includePrerelease);
-
-			return { releases };
-		} catch (error) {
-			return {
-				releases: [],
-				error: error instanceof Error ? error.message : "Unknown error",
-			};
-		}
-	});
-
-	ipcMain.handle("app:downloadAndInstallUpdate", async (_event, options = {}) => {
-		const includePrerelease =
-			typeof options?.includePrerelease === "boolean"
-				? options.includePrerelease
-				: updatePreferences.includeBeta;
-		return performInAppUpdate(includePrerelease);
-	});
-
-	// AI provider integrations. Keys stay in the main process (see ai.cjs); the
-	// renderer only ever gets masked config back and sends prompts to run.
-	ipcMain.handle("ai:getConfig", () => getPublicAiConfig());
-	ipcMain.handle("ai:setConfig", (_event, patch) => setAiConfig(patch));
-	ipcMain.handle("ai:complete", async (_event, args) => {
-		try {
-			const result = await aiComplete(args);
-			return { ok: true, ...result };
-		} catch (error) {
-			return { ok: false, error: error instanceof Error ? error.message : "AI request failed." };
-		}
-	});
+	registerAiIpc(ipcMain);
 }
 
 app.whenReady().then(async () => {
