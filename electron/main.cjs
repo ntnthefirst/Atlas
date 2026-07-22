@@ -81,6 +81,8 @@ const { migrateScenes } = require("./services/smart-functions/migrate-scenes.cjs
 const { register: registerSmartFunctionsIpc } = require("./ipc/smart-functions.cjs");
 const { createPatternMiner } = require("./services/pattern-miner/miner.cjs");
 const { register: registerPatternMinerIpc } = require("./ipc/pattern-miner.cjs");
+const { createFindingLifecycleManager } = require("./services/pattern-miner/finding-lifecycle-manager.cjs");
+const { register: registerFindingsIpc } = require("./ipc/findings.cjs");
 
 let mainWindow = null;
 let miniWindow = null;
@@ -248,6 +250,17 @@ const smartFunctionsEngine = createSmartFunctionsEngine({
 const patternMiner = createPatternMiner({
 	getDb: () => db,
 	getEventLog: () => eventLog,
+});
+
+// WP-3.4: the finding lifecycle manager -- a singleton like the five above.
+// Owns the back-off/expiry preferences the SAME way patternMiner owns its own
+// thresholds (loaded once during app.whenReady() below); markSuggested/
+// acceptFinding/ignoreFinding/resurfaceDueFindings/sweepExpiredFindings are
+// each only ever invoked through an explicit `findings:*` IPC call (see
+// finding-lifecycle-manager.cjs's own header for why nothing here may run on
+// a boot-time timer).
+const findingLifecycleManager = createFindingLifecycleManager({
+	getDb: () => db,
 });
 
 if (isDev) {
@@ -957,6 +970,7 @@ function wireIpc() {
 	registerContextIpc(ipcMain, { contextService });
 	registerSmartFunctionsIpc(ipcMain, { getDb: () => db, engine: smartFunctionsEngine });
 	registerPatternMinerIpc(ipcMain, { miner: patternMiner, getDb: () => db });
+	registerFindingsIpc(ipcMain, { manager: findingLifecycleManager, engine: smartFunctionsEngine });
 
 	registerHotkeyIpc(ipcMain, {
 		getBinding: environmentHotkeyManager.getBinding,
@@ -990,6 +1004,10 @@ app.whenReady().then(async () => {
 	// WP-3.3: same deal for the pattern miner's thresholds -- never starts a
 	// mining run (see miner.cjs's own header).
 	patternMiner.loadPreferences();
+	// WP-3.4: same deal again for the finding lifecycle's back-off/expiry
+	// thresholds -- never accepts, ignores, expires, or resurfaces anything
+	// (see finding-lifecycle-manager.cjs's own header).
+	findingLifecycleManager.loadPreferences();
 	startFocusEngine();
 	autoUpdater.autoDownload = false;
 	autoUpdater.autoInstallOnAppQuit = true;

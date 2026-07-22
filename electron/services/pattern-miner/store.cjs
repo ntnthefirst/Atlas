@@ -34,6 +34,23 @@
 // WP-3.6's "which events produced this" drill-down loses its answer, exactly
 // the tradeoff the product vision's "remove temporary learning data" step
 // describes.
+//
+// -- A purge must not be silently undone by the NEXT mining run (WP-3.4) ----
+// `upsertFindings`' existing-row branch normally calls `replaceEvidence` on
+// every re-detection, unconditionally -- exactly right for a finding still
+// working its way through new/suggested/ignored, where fresh evidence is
+// exactly what WP-3.6's drill-down should show. But once a finding has been
+// ACCEPTED, electron/services/pattern-miner/finding-lifecycle-service.cjs's
+// acceptFinding() has already purged its evidence on purpose, as the literal
+// "purge the temporary learning data" step of the product vision's seven-step
+// flow -- if the very next mining run (the flow's own "keep mining" step)
+// then re-populated it the moment it re-detects the same still-true pattern,
+// that purge would only ever last until the next scheduled run, which is not
+// what "purge" means. So: an existing finding whose `status` is already
+// "accepted" has its stats refreshed as normal, but its evidence is left
+// alone -- accepted is a terminal lifecycle state (see finding-lifecycle.cjs's
+// TRANSITIONS), so there is no future decision this row's evidence could
+// still inform.
 // ---------------------------------------------------------------------------
 
 const { randomUUID } = require("node:crypto");
@@ -60,6 +77,17 @@ function rowToFinding(row) {
 		status: row.status,
 		createdAt: row.created_at,
 		updatedAt: row.updated_at,
+		// WP-3.4's lifecycle columns (migration 013) -- see that migration's own
+		// header for what each one means. Read here unconditionally: every column
+		// has a NOT NULL default (ignoreCount) or is simply nullable, so a
+		// pre-WP-3.4 row (impossible in practice, since the migration backfills
+		// every existing row, but still) degrades to "never ignored, never
+		// suggested, never decided" rather than `undefined`.
+		ignoreCount: row.ignore_count ?? 0,
+		suppressedUntil: row.suppressed_until ?? null,
+		suggestedAt: row.suggested_at ?? null,
+		decidedAt: row.decided_at ?? null,
+		acceptedRuleId: row.accepted_rule_id ?? null,
 	};
 }
 
@@ -130,7 +158,12 @@ function upsertFindings(db, findings) {
 						existing.id,
 					],
 				);
-				replaceEvidence(db, existing.id, finding.evidence);
+				// See this file's header ("A purge must not be silently undone by
+				// the next mining run") -- an accepted finding's evidence was
+				// purged on purpose and must stay purged.
+				if (existing.status !== "accepted") {
+					replaceEvidence(db, existing.id, finding.evidence);
+				}
 				updated += 1;
 			} else {
 				const id = randomUUID();
@@ -234,6 +267,39 @@ function deleteFinding(db, id) {
 	return true;
 }
 
+// The WP-3.4 lifecycle write path: a partial update against the five columns
+// migration 013 added (status, ignore_count, suppressed_until, suggested_at,
+// decided_at, accepted_rule_id) -- mirrors electron/services/smart-functions/
+// store.cjs#updateRule's own patch semantics exactly (re-reads the CURRENT row
+// first, so a field `patch` omits is preserved, not reset). This is the ONLY
+// function in this package that writes `status` -- electron/services/pattern-
+// miner/finding-lifecycle-service.cjs (the stateful orchestrator) is this
+// function's only caller, and it always calls this AFTER confirming the move
+// through finding-lifecycle.cjs#canTransition, never as a bare, unchecked
+// write. `upsertFindings` above deliberately never touches any of these
+// columns -- a re-detected pattern's stats refresh in place, but re-mining
+// alone can never move a finding through its lifecycle.
+function updateFindingLifecycle(db, id, patch = {}) {
+	const current = getFinding(db, id);
+	if (!current) {
+		return null;
+	}
+	const has = (key) => Object.prototype.hasOwnProperty.call(patch, key);
+	const status = has("status") ? patch.status : current.status;
+	const ignoreCount = has("ignoreCount") ? patch.ignoreCount : current.ignoreCount;
+	const suppressedUntil = has("suppressedUntil") ? patch.suppressedUntil : current.suppressedUntil;
+	const suggestedAt = has("suggestedAt") ? patch.suggestedAt : current.suggestedAt;
+	const decidedAt = has("decidedAt") ? patch.decidedAt : current.decidedAt;
+	const acceptedRuleId = has("acceptedRuleId") ? patch.acceptedRuleId : current.acceptedRuleId;
+	db.run(
+		`UPDATE findings SET
+			status = ?, ignore_count = ?, suppressed_until = ?, suggested_at = ?, decided_at = ?, accepted_rule_id = ?, updated_at = ?
+		 WHERE id = ?`,
+		[status, ignoreCount, suppressedUntil, suggestedAt, decidedAt, acceptedRuleId, nowIso(), id],
+	);
+	return getFinding(db, id);
+}
+
 module.exports = {
 	upsertFindings,
 	listFindingsForEnvironment,
@@ -242,5 +308,6 @@ module.exports = {
 	getFindingEvidence,
 	purgeFindingEvidence,
 	deleteFinding,
+	updateFindingLifecycle,
 	rowToFinding,
 };

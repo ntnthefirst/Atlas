@@ -22,6 +22,7 @@ const MIGRATIONS = [
 	require("./010_file_index_ext_index.cjs"),
 	require("./011_smart_functions.cjs"),
 	require("./012_pattern_miner.cjs"),
+	require("./013_finding_lifecycle.cjs"),
 ];
 
 function ensureMigrationsTable(dbLike) {
