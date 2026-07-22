@@ -402,6 +402,71 @@ function listEventsFollowing(db, eventId, options = {}) {
 	return db.all(sql, params).map(parseEventRow);
 }
 
+// --- Query helpers for the pattern miner (WP-3.3) --------------------------
+// The miner's own main-thread half (electron/services/pattern-miner/miner.cjs)
+// is the only caller of these two -- kept here, not hand-rolled SQL inside
+// that module, for the same reason every other Phase-3-miner query above
+// lives in this file: `events` has exactly one set of indexes (migration
+// 003), and this module is the one place that knows how to use them.
+
+const DEFAULT_MINING_PAGE_SIZE = 5000;
+
+function normalizeMiningPageSize(limit) {
+	const parsed = Number(limit);
+	if (!Number.isFinite(parsed) || parsed <= 0) {
+		return DEFAULT_MINING_PAGE_SIZE;
+	}
+	return Math.min(Math.floor(parsed), MAX_QUERY_LIMIT);
+}
+
+// Every distinct `environment_id` that has ever recorded an event -- the
+// `null` bucket ("events with no environment at all", e.g. app-wide events
+// recorded before any environment existed) is included as the JS value
+// `null`, exactly like every other nullable-environment convention in this
+// schema (files.environment_id, smart_functions.environment_id). This is
+// miner.cjs's own worklist: one full mining pass = one call to
+// listEventsForMining() per id this returns, never a query that spans more
+// than one of them at once.
+function listDistinctEventEnvironmentIds(db) {
+	return db.all("SELECT DISTINCT environment_id FROM events").map((row) => row.environment_id ?? null);
+}
+
+// Cursor-paginated read of ONE environment's events (or, when `environmentId`
+// is `null`/falsy, the events with NO environment), for the miner to stream
+// to its worker thread in bounded-size chunks rather than one unbounded
+// `SELECT *` — see electron/services/pattern-miner/mine-worker.cjs's header
+// for why chunking matters at 90-day scale. Ordered `(ts, id)` ascending,
+// backed entirely by idx_events_environment_ts (migration 003's own comment
+// names this exact access pattern) plus the table's own rowid ordering for
+// the tie-break — the same `ts > ? OR (ts = ? AND id > ?)` convention
+// listEventsFollowing() already uses, here as a keyset cursor instead of a
+// one-shot window: call once with `{ afterTs: "", afterId: 0 }` (or omit
+// both), then keep advancing `afterTs`/`afterId` to the last row's own
+// `ts`/`id` until fewer than `limit` rows come back.
+//
+// Deliberately selects only the four columns the pure miner
+// (electron/services/pattern-miner/algorithm.cjs) actually reads --
+// `payload`/`session_id`/`environment_id` are never fetched at all (not
+// fetched-then-discarded), both to keep a 90-day page cheap to read and
+// serialize across the worker-thread boundary, and because a whole page is
+// already scoped to one bucket, so `environment_id` on each row would be
+// redundant.
+function listEventsForMining(db, environmentId, options = {}) {
+	const afterTs = typeof options.afterTs === "string" ? options.afterTs : "";
+	const afterId = Number.isFinite(options.afterId) ? options.afterId : 0;
+	const limit = normalizeMiningPageSize(options.limit);
+
+	const envClause = environmentId ? "environment_id = ?" : "environment_id IS NULL";
+	const sql = `SELECT id, ts, type, subject FROM events
+		WHERE ${envClause} AND (ts > ? OR (ts = ? AND id > ?))
+		ORDER BY ts ASC, id ASC LIMIT ?`;
+	const params = environmentId
+		? [environmentId, afterTs, afterTs, afterId, limit]
+		: [afterTs, afterTs, afterId, limit];
+
+	return db.all(sql, params);
+}
+
 module.exports = {
 	EventLog,
 	pruneEvents,
@@ -410,6 +475,9 @@ module.exports = {
 	listEventsByEnvironment,
 	listEventsFollowing,
 	countEventsBySubject,
+	listDistinctEventEnvironmentIds,
+	listEventsForMining,
+	DEFAULT_MINING_PAGE_SIZE,
 	DEFAULT_FLUSH_INTERVAL_MS,
 	DEFAULT_MAX_BUFFER,
 	DEFAULT_RETENTION_DAYS,

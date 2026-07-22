@@ -79,6 +79,8 @@ const { register: registerContextIpc } = require("./ipc/context.cjs");
 const { createSmartFunctionsEngine } = require("./services/smart-functions/engine.cjs");
 const { migrateScenes } = require("./services/smart-functions/migrate-scenes.cjs");
 const { register: registerSmartFunctionsIpc } = require("./ipc/smart-functions.cjs");
+const { createPatternMiner } = require("./services/pattern-miner/miner.cjs");
+const { register: registerPatternMinerIpc } = require("./ipc/pattern-miner.cjs");
 
 let mainWindow = null;
 let miniWindow = null;
@@ -235,6 +237,17 @@ const smartFunctionsEngine = createSmartFunctionsEngine({
 	getTracker: () => tracker,
 	switchEnvironment: setActiveEnvironment,
 	platform,
+});
+
+// WP-3.3: the pattern miner -- a singleton like the four above. Its own
+// worker thread is only ever spawned from an explicit `patternMiner:runNow`
+// IPC call (see miner.cjs's own header for why an autostart here would be
+// unsafe for `npm run smoke`/`smoke:windows`, exactly like the crawler);
+// preferences (thresholds) are loaded during app.whenReady() below, same as
+// fileIndexCrawler's own.
+const patternMiner = createPatternMiner({
+	getDb: () => db,
+	getEventLog: () => eventLog,
 });
 
 if (isDev) {
@@ -943,6 +956,7 @@ function wireIpc() {
 	registerFileIndexIpc(ipcMain, { crawler: fileIndexCrawler, watcher: fileIndexWatcher, getDb: () => db });
 	registerContextIpc(ipcMain, { contextService });
 	registerSmartFunctionsIpc(ipcMain, { getDb: () => db, engine: smartFunctionsEngine });
+	registerPatternMinerIpc(ipcMain, { miner: patternMiner, getDb: () => db });
 
 	registerHotkeyIpc(ipcMain, {
 		getBinding: environmentHotkeyManager.getBinding,
@@ -973,6 +987,9 @@ app.whenReady().then(async () => {
 	// never starts a crawl (see fileIndexCrawler's own header for why an
 	// autostart here would be unsafe for `npm run smoke`/`smoke:windows`).
 	fileIndexCrawler.loadPreferences();
+	// WP-3.3: same deal for the pattern miner's thresholds -- never starts a
+	// mining run (see miner.cjs's own header).
+	patternMiner.loadPreferences();
 	startFocusEngine();
 	autoUpdater.autoDownload = false;
 	autoUpdater.autoInstallOnAppQuit = true;
@@ -1256,4 +1273,6 @@ app.on("before-quit", () => {
 	// timer, for the same reason (both are already unref'd, but shutting down
 	// explicitly matches every other singleton above).
 	smartFunctionsEngine.shutdown();
+	// WP-3.3: terminates any in-flight mining worker, for the same reason.
+	patternMiner.shutdown();
 });

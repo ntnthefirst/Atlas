@@ -11,6 +11,8 @@ import {
 	listEventsByEnvironment,
 	listEventsFollowing,
 	countEventsBySubject,
+	listDistinctEventEnvironmentIds,
+	listEventsForMining,
 } from "./event-log.cjs";
 
 // This suite is ESM (the package is `type: module`) even though the module
@@ -674,5 +676,113 @@ describe("countEventsBySubject() (WP-2.2 -- launcher frecency)", () => {
 		const db = await createDb();
 		expect(() => countEventsBySubject(db, "launcher.execute", null)).toThrow(/requires an environmentId/i);
 		expect(() => countEventsBySubject(db, "launcher.execute", undefined)).toThrow(/requires an environmentId/i);
+	});
+});
+
+describe("listDistinctEventEnvironmentIds (WP-3.3)", () => {
+	it("returns every environment id that has recorded an event, including the null bucket", async () => {
+		const db = await createDb();
+		seedEvents(db, [
+			{ ts: "2026-01-01T00:00:00.000Z", environmentId: "env-a" },
+			{ ts: "2026-01-01T00:01:00.000Z", environmentId: "env-b" },
+			{ ts: "2026-01-01T00:02:00.000Z", environmentId: null },
+		]);
+
+		const ids = listDistinctEventEnvironmentIds(db);
+		expect(new Set(ids)).toEqual(new Set(["env-a", "env-b", null]));
+	});
+
+	it("never repeats an id -- DISTINCT, not every row", async () => {
+		const db = await createDb();
+		seedEvents(db, [
+			{ ts: "2026-01-01T00:00:00.000Z", environmentId: "env-a" },
+			{ ts: "2026-01-01T00:01:00.000Z", environmentId: "env-a" },
+			{ ts: "2026-01-01T00:02:00.000Z", environmentId: "env-a" },
+		]);
+		expect(listDistinctEventEnvironmentIds(db)).toEqual(["env-a"]);
+	});
+
+	it("returns an empty array when the table has no rows at all", async () => {
+		const db = await createDb();
+		expect(listDistinctEventEnvironmentIds(db)).toEqual([]);
+	});
+});
+
+describe("listEventsForMining (WP-3.3)", () => {
+	it("scopes strictly to one environment, never leaking another's rows", async () => {
+		const db = await createDb();
+		seedEvents(db, [
+			{ ts: "2026-01-01T00:00:00.000Z", environmentId: "env-a", type: "app.focus", subject: "A" },
+			{ ts: "2026-01-01T00:01:00.000Z", environmentId: "env-b", type: "app.focus", subject: "B" },
+		]);
+
+		const rows = listEventsForMining(db, "env-a", {});
+		expect(rows.length).toBe(1);
+		expect(rows[0].subject).toBe("A");
+	});
+
+	it("selects only id/ts/type/subject -- never payload/session_id/environment_id", async () => {
+		const db = await createDb();
+		seedEvents(db, [
+			{
+				ts: "2026-01-01T00:00:00.000Z",
+				environmentId: "env-a",
+				type: "app.focus",
+				subject: "A",
+				payload: JSON.stringify({ secret: "never sent to a worker" }),
+				sessionId: "session-1",
+			},
+		]);
+
+		const [row] = listEventsForMining(db, "env-a", {});
+		expect(Object.keys(row).sort()).toEqual(["id", "subject", "ts", "type"]);
+	});
+
+	it("treats a null/falsy environmentId as the dedicated 'no environment' bucket", async () => {
+		const db = await createDb();
+		seedEvents(db, [
+			{ ts: "2026-01-01T00:00:00.000Z", environmentId: null, type: "app.focus", subject: "global" },
+			{ ts: "2026-01-01T00:01:00.000Z", environmentId: "env-a", type: "app.focus", subject: "scoped" },
+		]);
+
+		const rows = listEventsForMining(db, null, {});
+		expect(rows.length).toBe(1);
+		expect(rows[0].subject).toBe("global");
+	});
+
+	it("pages forward correctly via the (afterTs, afterId) cursor, with no gaps and no repeats", async () => {
+		const db = await createDb();
+		const rows = [];
+		for (let i = 0; i < 25; i += 1) {
+			rows.push({
+				ts: new Date(Date.parse("2026-01-01T00:00:00.000Z") + i * 60000).toISOString(),
+				environmentId: "env-a",
+				type: "app.focus",
+				subject: `s${i}`,
+			});
+		}
+		seedEvents(db, rows);
+
+		const pages = [];
+		let afterTs = "";
+		let afterId = 0;
+		for (let guard = 0; guard < 100; guard += 1) {
+			const page = listEventsForMining(db, "env-a", { afterTs, afterId, limit: 7 });
+			if (page.length === 0) {
+				break;
+			}
+			pages.push(page);
+			const last = page[page.length - 1];
+			afterTs = last.ts;
+			afterId = last.id;
+			if (page.length < 7) {
+				break;
+			}
+		}
+
+		expect(pages.length).toBe(4); // 25 rows at 7/page: 7, 7, 7, 4
+		const allSubjects = pages.flatMap((page) => page.map((row) => row.subject));
+		expect(allSubjects).toEqual(rows.map((_, i) => `s${i}`)); // exact order, no gaps, no repeats
+		expect(new Set(allSubjects).size).toBe(25); // never repeated across pages
 	});
 });
