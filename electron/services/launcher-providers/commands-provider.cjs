@@ -178,6 +178,20 @@ const COMMANDS = [
 			if (!match) {
 				return { ok: false, error: `No environment matches "${trimmedArg}".` };
 			}
+			// Record BEFORE switching, exactly as `environment:switch` does
+			// (ipc/environments.cjs) -- this command mirrors that handler, and
+			// until WP-3.1 it mirrored everything about it EXCEPT this line.
+			// That omission was invisible while `environment.switch` was only an
+			// analytics signal, but WP-3.1 turned it into a smart-function
+			// trigger: a rule set to run "when I switch environment" would fire
+			// from the Settings switcher and stay silent when the user did the
+			// same thing from the launcher -- the same action, through the
+			// feature Phase 2 exists to make primary. Deliberately untagged (no
+			// `smartFunctionOrigin` payload), because this IS a genuine external
+			// user action, not a rule's own side effect -- see
+			// smart-functions/actions.cjs's header on why that distinction is
+			// what keeps the loop guard honest.
+			context.getEventLog?.()?.record("environment.switch", { environmentId: match.id });
 			const switched = context.switchEnvironment?.(match.id) ?? false;
 			context.navigate?.("dashboard");
 			return { ok: Boolean(switched), title: `Switched to ${match.name}` };

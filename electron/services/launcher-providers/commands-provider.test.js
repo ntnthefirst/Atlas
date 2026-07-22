@@ -280,17 +280,37 @@ describe("execute() -- switch environment", () => {
 		expect(navigate).toHaveBeenCalledWith("dashboard");
 	});
 
+	// WP-3.1 turned `environment.switch` from an analytics-only signal into a
+	// smart-function trigger, so a switch that doesn't record one is a switch
+	// that silently fails to run the user's rules. This command mirrors the
+	// `environment:switch` IPC handler, and must mirror its event too.
+	it("records environment.switch, so an environment.switched rule fires from the launcher too", async () => {
+		const { db, envB } = await seedTwoEnvironments();
+		const eventLog = { record: vi.fn() };
+		const outcome = await execute(
+			{ id: "switch-environment:environment b" },
+			{},
+			{ getDb: () => db, switchEnvironment: vi.fn(() => true), navigate: vi.fn(), getEventLog: () => eventLog },
+		);
+
+		expect(outcome.ok).toBe(true);
+		expect(eventLog.record).toHaveBeenCalledWith("environment.switch", { environmentId: envB.id });
+	});
+
 	it("reports ok:false without throwing for a name matching no environment", async () => {
 		const { db } = await seedTwoEnvironments();
 		const switchEnvironment = vi.fn();
+		const eventLog = { record: vi.fn() };
 		const outcome = await execute(
 			{ id: "switch-environment:not a real place" },
 			{},
-			{ getDb: () => db, switchEnvironment },
+			{ getDb: () => db, switchEnvironment, getEventLog: () => eventLog },
 		);
 
 		expect(outcome.ok).toBe(false);
 		expect(switchEnvironment).not.toHaveBeenCalled();
+		// No switch happened, so no rule should be told one did.
+		expect(eventLog.record).not.toHaveBeenCalled();
 	});
 });
 
