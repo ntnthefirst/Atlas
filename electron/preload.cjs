@@ -243,4 +243,21 @@ contextBridge.exposeInMainWorld("atlas", {
 		ipcRenderer.on("fileIndex:watchStatus", listener);
 		return () => ipcRenderer.removeListener("fileIndex:watchStatus", listener);
 	},
+
+	// WP-2.8: work-context adaptation. `pinContext` overrides detection
+	// entirely until `unpinContext` -- see electron/services/context-service.cjs.
+	getContextStatus: () => ipcRenderer.invoke("context:getStatus"),
+	pinContext: (context) => ipcRenderer.invoke("context:pin", context),
+	unpinContext: () => ipcRenderer.invoke("context:unpin"),
+	// Controls this service's OWN polling only; the activity tracker feeds it
+	// for free whenever a session is running.
+	startContextDetection: () => ipcRenderer.invoke("context:startDetection"),
+	stopContextDetection: () => ipcRenderer.invoke("context:stopDetection"),
+	// Fires only when the committed context actually changes (never on a
+	// candidate that failed to hold), plus on pin/unpin.
+	onContextChanged: (callback) => {
+		const listener = (_event, status) => callback(status);
+		ipcRenderer.on("context:changed", listener);
+		return () => ipcRenderer.removeListener("context:changed", listener);
+	},
 });

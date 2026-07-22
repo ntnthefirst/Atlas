@@ -788,3 +788,28 @@ export type FileIndexWatchStatus = {
 	onBattery: boolean;
 	error: string | null;
 };
+
+// WP-2.8: work-context adaptation. The three contexts the plan requires;
+// `null` means "no sustained signal yet", which is deliberately distinct from
+// any of them -- see electron/services/context-detection.cjs.
+export type WorkContext = "coding" | "communication" | "browsing";
+
+export type ContextStatus = {
+	/** What detection has committed to, ignoring any pin. */
+	context: WorkContext | null;
+	/** What the app should actually act on: the pin if set, else `context`. */
+	effectiveContext: WorkContext | null;
+	pinnedContext: WorkContext | null;
+	isPinned: boolean;
+	/** A challenger that has not yet held the foreground long enough to win. */
+	candidate: WorkContext | null;
+	changedAt: number;
+	/** Whether this service's own foreground poll is running. */
+	polling: boolean;
+	/**
+	 * The Notch layout this context maps to (`context:coding`), or null when
+	 * the user has configured none -- in which case the environment's own
+	 * layout keeps applying.
+	 */
+	layoutId?: string | null;
+};

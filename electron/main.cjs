@@ -1,6 +1,6 @@
 const path = require("node:path");
 const fs = require("node:fs");
-const { app, BrowserWindow, dialog, ipcMain, nativeTheme, screen } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, nativeTheme, powerMonitor, screen } = require("electron");
 const { autoUpdater } = require("electron-updater");
 
 const { AtlasDatabase } = require("./db.cjs");
@@ -74,6 +74,8 @@ const { register: registerIsolationIpc } = require("./ipc/isolation.cjs");
 const { createFileIndexCrawler } = require("./services/file-index/crawler.cjs");
 const { createFileIndexWatcher } = require("./services/file-index/watcher.cjs");
 const { register: registerFileIndexIpc } = require("./ipc/file-index.cjs");
+const { createContextService } = require("./services/context-service.cjs");
+const { register: registerContextIpc } = require("./ipc/context.cjs");
 
 let mainWindow = null;
 let miniWindow = null;
@@ -187,6 +189,24 @@ const fileIndexWatcher = createFileIndexWatcher({
 	// crawl rather than silently leaving the index stale -- see watcher.cjs's
 	// header on "graceful degradation on a watch failure".
 	triggerRecrawl: () => fileIndexCrawler.startCrawl(),
+});
+
+// WP-2.8: work-context adaptation -- a singleton like the two above. Its own
+// polling never starts at boot (`context:startDetection` does that); the
+// activity tracker feeds it for free while a session runs, wired up where the
+// tracker is constructed below.
+const contextService = createContextService({
+	getDb: () => db,
+	getEventLog: () => eventLog,
+	getActiveEnvironmentId: () => currentEnvironmentId,
+	powerMonitor,
+	broadcast: (status) => {
+		for (const win of BrowserWindow.getAllWindows()) {
+			if (!win.isDestroyed()) {
+				win.webContents.send("context:changed", status);
+			}
+		}
+	},
 });
 
 if (isDev) {
@@ -893,6 +913,7 @@ function wireIpc() {
 	registerIsolationIpc(ipcMain);
 
 	registerFileIndexIpc(ipcMain, { crawler: fileIndexCrawler, watcher: fileIndexWatcher, getDb: () => db });
+	registerContextIpc(ipcMain, { contextService });
 
 	registerHotkeyIpc(ipcMain, {
 		getBinding: environmentHotkeyManager.getBinding,
@@ -1044,6 +1065,10 @@ app.whenReady().then(async () => {
 	});
 
 	tracker = new ActivityTracker(db, eventLog);
+	// WP-2.8: the tracker already reads the foreground process every 1500ms
+	// while a session runs; reuse that reading rather than paying for a second
+	// PowerShell probe (see context-service.cjs's header).
+	tracker.onForegroundApp = (processName) => contextService.observe(processName);
 	tracker.start();
 
 	const activeSession = db.getActiveSession();
@@ -1168,4 +1193,6 @@ app.on("before-quit", () => {
 	// timer -- a leaked watch handle would otherwise keep the process alive
 	// past this point, exactly the failure mode smoke:windows exists to catch.
 	fileIndexWatcher.shutdown();
+	// WP-2.8: clears the foreground-probe poll timer, for the same reason.
+	contextService.shutdown();
 });

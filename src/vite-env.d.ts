@@ -16,6 +16,8 @@ import type {
 	FileIndexStats,
 	FileIndexStatus,
 	FileIndexWatchStatus,
+	ContextStatus,
+	WorkContext,
 	FocusConfig,
 	FocusState,
 	Environment,
@@ -193,6 +195,14 @@ declare global {
 			stopFileIndexWatch: () => Promise<FileIndexWatchStatus>;
 			getFileIndexWatchStatus: () => Promise<FileIndexWatchStatus>;
 			onFileIndexWatchStatus: (callback: (status: FileIndexWatchStatus) => void) => () => void;
+
+			// WP-2.8: work-context adaptation.
+			getContextStatus: () => Promise<ContextStatus>;
+			pinContext: (context: WorkContext) => Promise<ContextStatus>;
+			unpinContext: () => Promise<ContextStatus>;
+			startContextDetection: () => Promise<ContextStatus>;
+			stopContextDetection: () => Promise<ContextStatus>;
+			onContextChanged: (callback: (status: ContextStatus) => void) => () => void;
 		};
 	}
 }

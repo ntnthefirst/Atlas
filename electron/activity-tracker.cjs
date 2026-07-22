@@ -21,6 +21,14 @@ class ActivityTracker {
 		// activity_blocks row (which also splits on window-title changes -- see
 		// the comment in tick() below).
 		this.lastFocusedProcessName = null;
+		// WP-2.8: an optional observer for the foreground process name this
+		// tracker already reads every tick. main.cjs points it at the context
+		// service (electron/services/context-service.cjs) so context detection
+		// costs nothing extra during a session -- the PowerShell probe has
+		// already been paid for here. A PROCESS NAME only, never `appInfo.label`
+		// (which prefers the window title): the same distinction recordFocusChange
+		// below is careful about, for the same privacy reason.
+		this.onForegroundApp = null;
 	}
 
 	start() {
@@ -138,6 +146,16 @@ class ActivityTracker {
 			}
 
 			this.recordFocusChange(session, appInfo.processName);
+
+			// WP-2.8: hand the same reading to the context detector. Guarded and
+			// swallowed -- context adaptation is a nice-to-have layered on top of
+			// activity tracking, and must never be able to break the tick that
+			// feeds it.
+			try {
+				this.onForegroundApp?.(appInfo.processName);
+			} catch (error) {
+				console.error("Context observation error:", error);
+			}
 		} finally {
 			this.isTickInProgress = false;
 		}
