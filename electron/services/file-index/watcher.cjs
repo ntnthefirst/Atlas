@@ -75,10 +75,26 @@
 // ONE root's watch is torn down and, if `triggerRecrawl` was wired up
 // (main.cjs points it at the crawler's own startCrawl), a fresh crawl is
 // kicked off so the index heals itself rather than silently going stale
-// forever. This does NOT cover the (undetectable from here) case of Windows
-// silently dropping change notifications under extreme sustained load
-// without ever surfacing an error -- see this WP's own report for that
-// known, unavoidable-from-userland limitation.
+// forever.
+//
+// -- The periodic safety net --------------------------------------------------
+// Reacting to a surfaced error is not sufficient on its own. `fs.watch`'s
+// Windows backing (ReadDirectoryChangesW) has an internal buffer, and when a
+// burst overflows it the OS can drop change notifications WITHOUT raising an
+// error anybody in userland can observe -- the watch handle stays open and
+// healthy-looking while the index quietly drifts out of step with the disk.
+// There is no way to detect that from here, so the only honest remedy is not
+// to depend on detecting it: while watching is active, a periodic sweep
+// re-runs a full crawl on an interval regardless of whether anything looked
+// wrong. The crawler is already built to make this cheap and safe to repeat --
+// it upserts by path (never duplicating a row) and prunes per-root only for
+// roots it actually finished (store.cjs's pruneStaleRows) -- so a redundant
+// sweep costs a walk and corrects any drift, while a genuinely needed one is
+// the difference between a stale index and a correct one. This is
+// IMPLEMENTATION-PLAN.md's WP-2.6 criterion "watcher failure degrades to
+// periodic re-crawl rather than a stale index"; the reactive path above
+// handles the failures that DO announce themselves, and this handles the ones
+// that don't.
 // ---------------------------------------------------------------------------
 
 const fs = require("node:fs");
@@ -93,6 +109,14 @@ const DEFAULT_DEBOUNCE_MS = 1200;
 // header). Still comfortably inside the "reflected within 5 seconds"
 // criterion.
 const DEFAULT_BATTERY_DEBOUNCE_MS = 4000;
+// How often the safety-net sweep re-crawls while watching is active (see this
+// file's header). Four hours is deliberately far longer than the debounce: the
+// sweep exists to correct silent drift that has already escaped the event
+// stream, not to be the primary path for staying current -- events are, and
+// they land within seconds. Short enough that a drifted index self-corrects
+// within one working session, long enough that the walk's cost is negligible
+// amortised over that window.
+const DEFAULT_SAFETY_NET_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
 function idleWatchStatus() {
 	return {
@@ -124,9 +148,15 @@ function createFileIndexWatcher(deps = {}) {
 	const debounceMs = deps.debounceMs ?? DEFAULT_DEBOUNCE_MS;
 	const batteryDebounceMs = deps.batteryDebounceMs ?? DEFAULT_BATTERY_DEBOUNCE_MS;
 	// Optional: called when a root's watch fails (see this file's header on
-	// "graceful degradation"). main.cjs wires this to the crawler's own
-	// startCrawl(); left unset in tests that aren't exercising this path.
+	// "graceful degradation"), and on the periodic safety-net sweep. main.cjs
+	// wires this to the crawler's own startCrawl(); left unset in tests that
+	// aren't exercising either path.
 	const triggerRecrawl = deps.triggerRecrawl ?? null;
+	const safetyNetIntervalMs = deps.safetyNetIntervalMs ?? DEFAULT_SAFETY_NET_INTERVAL_MS;
+	// Timer seams, so a test can drive the multi-hour sweep interval directly
+	// instead of waiting for it (same spirit as `now` and `createWatch` above).
+	const setIntervalFn = deps.setInterval ?? setInterval;
+	const clearIntervalFn = deps.clearInterval ?? clearInterval;
 	const broadcast =
 		deps.broadcast ??
 		((payload) => {
@@ -140,6 +170,7 @@ function createFileIndexWatcher(deps = {}) {
 	let handles = []; // [{ rootId, watcher }]
 	let dirty = new Map(); // absolute path -> the root (id/path/environmentId) it was seen under
 	let flushTimer = null;
+	let safetyNetTimer = null;
 	let flushing = Promise.resolve(); // the most recent (or in-flight) flush -- see waitForIdle()
 	let exclusionSet = new Set();
 	let maxDepth = 12;
@@ -270,6 +301,51 @@ function createFileIndexWatcher(deps = {}) {
 		}
 	}
 
+	// One tick of the periodic safety net (see this file's header for why a
+	// reactive-only fallback isn't enough). Returns whether it actually kicked
+	// off a crawl, purely so a test can assert the skip paths rather than
+	// having to infer them.
+	function runSafetyNetSweep() {
+		if (!isWatching() || !triggerRecrawl) {
+			return false;
+		}
+		// Skip while unplugged rather than pausing the whole net: a full walk is
+		// the single most expensive thing this package does, and the sweep is a
+		// correction for drift that may not even have happened. Events keep
+		// flowing on battery (the debounce merely widens), so skipping a tick
+		// costs at most one interval of drift-correction, and the next tick on
+		// AC power picks it up.
+		if (currentOnBatteryState()) {
+			return false;
+		}
+		try {
+			triggerRecrawl();
+			getEventLog()?.record?.("file_index.watch_safety_net", {});
+			return true;
+		} catch (error) {
+			console.error("[Atlas] file-index watcher: periodic safety-net re-crawl failed to start:", error);
+			return false;
+		}
+	}
+
+	function startSafetyNet() {
+		if (safetyNetTimer || !triggerRecrawl || !(safetyNetIntervalMs > 0)) {
+			return;
+		}
+		safetyNetTimer = setIntervalFn(runSafetyNetSweep, safetyNetIntervalMs);
+		// Never let the sweep timer be the reason the process stays alive --
+		// stop()/shutdown() clear it on quit, but unref means even a missed
+		// teardown can't hold the event loop open.
+		safetyNetTimer?.unref?.();
+	}
+
+	function stopSafetyNet() {
+		if (safetyNetTimer) {
+			clearIntervalFn(safetyNetTimer);
+			safetyNetTimer = null;
+		}
+	}
+
 	function stopRoot(rootId, reason) {
 		const index = handles.findIndex((entry) => entry.rootId === rootId);
 		if (index === -1) {
@@ -343,6 +419,7 @@ function createFileIndexWatcher(deps = {}) {
 			onBattery: currentOnBatteryState(),
 		};
 		watchPower();
+		startSafetyNet();
 		try {
 			getEventLog()?.record?.("file_index.watch_started", { payload: { rootsWatched: handles.length } });
 		} catch {
@@ -365,6 +442,7 @@ function createFileIndexWatcher(deps = {}) {
 			clearTimeout(flushTimer);
 			flushTimer = null;
 		}
+		stopSafetyNet();
 		dirty.clear();
 		unwatchPower();
 		const wasWatching = isWatching();

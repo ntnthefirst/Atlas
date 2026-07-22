@@ -112,10 +112,86 @@ function createTestWatcher({ statMap = new Map(), preferences = defaultPreferenc
 		debounceMs: overrides.debounceMs ?? 100,
 		batteryDebounceMs: overrides.batteryDebounceMs ?? 500,
 		triggerRecrawl: overrides.triggerRecrawl,
+		safetyNetIntervalMs: overrides.safetyNetIntervalMs,
+		setInterval: overrides.setInterval,
+		clearInterval: overrides.clearInterval,
 	});
 	activeWatchers.push(watcher);
 	return { watcher, created: fake.created, statMap };
 }
+
+// The safety-net interval is four hours in production, so these drive it
+// through injected setInterval/clearInterval seams and call the captured
+// callback directly -- the point under test is the SCHEDULING and the guards,
+// not setInterval itself.
+function createSafetyNetHarness(overrides = {}) {
+	const intervals = [];
+	const clearIntervalSpy = vi.fn();
+	const triggerRecrawl = overrides.triggerRecrawl ?? vi.fn();
+	const { watcher } = createTestWatcher({
+		triggerRecrawl: "triggerRecrawl" in overrides ? overrides.triggerRecrawl : triggerRecrawl,
+		safetyNetIntervalMs: overrides.safetyNetIntervalMs ?? 60_000,
+		setInterval: (callback, ms) => {
+			const handle = { callback, ms, unref: vi.fn() };
+			intervals.push(handle);
+			return handle;
+		},
+		clearInterval: clearIntervalSpy,
+		powerMonitor: overrides.powerMonitor,
+	});
+	return { watcher, intervals, clearIntervalSpy, triggerRecrawl };
+}
+
+describe("createFileIndexWatcher -- the periodic safety-net re-crawl", () => {
+	// Windows can drop change notifications without surfacing an error, so the
+	// reactive fallback in stopRoot() can never see that failure. The whole
+	// point of this timer is that it does not wait to be told something broke.
+	it("schedules a sweep on the configured interval when watching starts", () => {
+		const { watcher, intervals } = createSafetyNetHarness({ safetyNetIntervalMs: 60_000 });
+		expect(intervals).toHaveLength(0);
+		watcher.start();
+		expect(intervals).toHaveLength(1);
+		expect(intervals[0].ms).toBe(60_000);
+		// Must never be the reason the app can't quit.
+		expect(intervals[0].unref).toHaveBeenCalled();
+	});
+
+	it("a sweep kicks off a full re-crawl", () => {
+		const { watcher, intervals, triggerRecrawl } = createSafetyNetHarness();
+		watcher.start();
+		expect(triggerRecrawl).not.toHaveBeenCalled();
+		const fired = intervals[0].callback();
+		expect(fired).toBe(true);
+		expect(triggerRecrawl).toHaveBeenCalledTimes(1);
+	});
+
+	it("stop() clears the sweep, and a late tick after stop() re-crawls nothing", () => {
+		const { watcher, intervals, clearIntervalSpy, triggerRecrawl } = createSafetyNetHarness();
+		watcher.start();
+		const handle = intervals[0];
+		watcher.stop();
+		expect(clearIntervalSpy).toHaveBeenCalledWith(handle);
+		// Even if a tick still lands (a timer that already fired, a stale
+		// reference), it must not start a crawl for a watcher that is stopped.
+		expect(handle.callback()).toBe(false);
+		expect(triggerRecrawl).not.toHaveBeenCalled();
+	});
+
+	it("skips the sweep while on battery rather than starting the most expensive walk in the package", () => {
+		const { watcher, intervals, triggerRecrawl } = createSafetyNetHarness({
+			powerMonitor: { isOnBatteryPower: () => true, on: () => {}, removeListener: () => {} },
+		});
+		watcher.start();
+		expect(intervals[0].callback()).toBe(false);
+		expect(triggerRecrawl).not.toHaveBeenCalled();
+	});
+
+	it("schedules nothing at all when no re-crawl hook is wired up", () => {
+		const { watcher, intervals } = createSafetyNetHarness({ triggerRecrawl: undefined });
+		watcher.start();
+		expect(intervals).toHaveLength(0);
+	});
+});
 
 describe("createFileIndexWatcher -- lifecycle", () => {
 	it("start() reports state='error' when there are no enabled roots", () => {
