@@ -37,17 +37,21 @@
 // under it, and an environment can be deleted later without this migration
 // (or the crawler) needing to cascade -- a file whose owning environment
 // was since deleted simply becomes an orphaned-but-harmless association;
-// electron/data/scoped.cjs's files.search() only ever matches it against a
-// currently-live environment id or NULL, so an orphaned id can never
+// electron/services/file-index/store.cjs's searchFiles() only ever matches it
+// against a currently-live environment id or NULL, so an orphaned id can never
 // surface as another environment's file and is silently cleaned up the next
 // time that root is re-crawled (its association is recomputed from the
 // root config, which no longer names a deleted environment).
 //
 // -- Matching: FTS5, confirmed available ----------------------------------
-// A tiny throwaway probe (`CREATE VIRTUAL TABLE t USING fts5(name)`) against
-// this exact node-sqlite3-wasm build confirmed FTS5 is compiled in and
-// works, so this migration commits to it rather than a fallback LIKE-based
-// scan -- see this WP's final report for the probe output. `files_fts` is
+// A throwaway probe against this exact node-sqlite3-wasm build confirmed
+// FTS5 is compiled in: `CREATE VIRTUAL TABLE t USING fts5(name, path
+// UNINDEXED)` succeeds, prefix `MATCH '<tok>*'` returns the expected rows,
+// and `ORDER BY rank` (bm25) works. So this migration commits to FTS5 rather
+// than a fallback LIKE-based scan. Re-run that probe before assuming any of
+// it still holds if node-sqlite3-wasm is ever upgraded -- a build without
+// FTS5 compiled in would make this migration's last statement fail outright,
+// which is the loud failure we want rather than a silent one. `files_fts` is
 // deliberately NOT an FTS5 "external content" table synced via triggers
 // (the usual pattern for keeping an FTS index in step with a regular
 // table): `name` never changes for a given `path` (a file's name is derived

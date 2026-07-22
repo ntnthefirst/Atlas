@@ -126,8 +126,8 @@ function rebuildFtsIndex(db) {
 // token becomes its own double-quoted PREFIX phrase (`"tok"*`), ANDed
 // together (FTS5's default when multiple phrases appear with no explicit
 // OR/NOT) -- confirmed against this exact node-sqlite3-wasm build that plain
-// prefix MATCH and `ORDER BY rank` both work (see this WP's final report for
-// the probe). Quoting every token (with internal `"` doubled, FTS5's own
+// prefix MATCH and `ORDER BY rank` (bm25) both work; see migration 009's
+// header for the probe. Quoting every token (with internal `"` doubled, FTS5's own
 // escape rule) is what keeps a token containing a character FTS5's query
 // syntax would otherwise interpret (`:`, `-` as a column filter or NOT,
 // stray unmatched quotes, ...) from ever raising a syntax error -- a search
