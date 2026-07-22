@@ -21,6 +21,7 @@
 		"test:watch": "vitest",
 		"smoke": "node scripts/smoke-boot.cjs",
 		"smoke:windows": "node scripts/smoke-windows.cjs",
+		"measure:launcher": "node scripts/measure-launcher-open.cjs",
 		"verify:secrets": "electron scripts/verify-secrets.cjs",
 		"preview": "vite preview"
 	},

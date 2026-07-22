@@ -103,6 +103,29 @@ contextBridge.exposeInMainWorld("atlas", {
 	// callers must show that inline rather than assuming success.
 	getEnvironmentHotkey: () => ipcRenderer.invoke("hotkey:getBinding"),
 	setEnvironmentHotkey: (accelerator) => ipcRenderer.invoke("hotkey:setBinding", accelerator),
+	// WP-2.1: the launcher's own rebindable global hotkey -- a SEPARATE
+	// binding from the environment-switcher hotkey above (see
+	// electron/services/launcher-hotkey.cjs).
+	getLauncherHotkey: () => ipcRenderer.invoke("launcher:getHotkeyBinding"),
+	setLauncherHotkey: (accelerator) => ipcRenderer.invoke("launcher:setHotkeyBinding", accelerator),
+	// Results/execution go through the WP-2.2 provider seam (electron/services/
+	// launcher-providers.cjs) -- a fixed stub list filtered by `query` in
+	// WP-2.1, real providers later, same two channels either way.
+	queryLauncher: (query) => ipcRenderer.invoke("launcher:query", query),
+	executeLauncherResult: (resultId, modifier) => ipcRenderer.invoke("launcher:execute", resultId, modifier),
+	hideLauncherWindow: () => ipcRenderer.invoke("launcher:hide"),
+	// The renderer measures its own hotkey -> first-paint latency (see
+	// LauncherWindowApp.tsx) and reports the number back here for
+	// logging/event-log recording -- see ipc/launcher.cjs.
+	reportLauncherOpenLatency: (latencyMs) => ipcRenderer.invoke("launcher:reportOpenLatency", latencyMs),
+	// Fires every time the pre-created launcher window is shown (main.cjs's
+	// openLauncher()) -- `firedAtMs` is when the hotkey callback ran, in the
+	// main process.
+	onLauncherShow: (callback) => {
+		const listener = (_event, meta) => callback(meta);
+		ipcRenderer.on("launcher:show", listener);
+		return () => ipcRenderer.removeListener("launcher:show", listener);
+	},
 	getAppVersion: () => ipcRenderer.invoke("app:version"),
 	checkForUpdates: (options) => ipcRenderer.invoke("app:checkUpdates", options),
 	listReleaseHistory: (options) => ipcRenderer.invoke("app:releaseHistory", options),

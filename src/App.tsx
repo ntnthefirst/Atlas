@@ -19,6 +19,7 @@ import { SettingsWindowApp } from "./components/settings-window/SettingsWindowAp
 import { NotchApp } from "./components/notch/NotchApp";
 import { ActionEditorWindowApp } from "./components/action-editor/ActionEditorWindowApp";
 import { NotchInputWindowApp } from "./components/notch-input/NotchInputWindowApp";
+import { LauncherWindowApp } from "./components/launcher/LauncherWindowApp";
 import { SmartCapture } from "./components/SmartCapture";
 import { EnvironmentDeleteDialog } from "./components/EnvironmentDeleteDialog";
 import type { ParsedCapture } from "./utils/smartParse";
@@ -1367,6 +1368,7 @@ function App() {
 	if (mode === "notch") return <NotchApp />;
 	if (mode === "actions") return <ActionEditorWindowApp />;
 	if (mode === "notch-input") return <NotchInputWindowApp />;
+	if (mode === "launcher") return <LauncherWindowApp />;
 	return <MainAtlasApp />;
 }
 

@@ -151,6 +151,46 @@ export type EnvironmentHotkeySetResult =
 	| { ok: true; accelerator: string; registered: true }
 	| { ok: false; accelerator: string; registered: boolean; error: string };
 
+// The launcher's own rebindable global hotkey (WP-2.1) -- a SEPARATE binding
+// from the environment switcher's above, with its own accelerator and its own
+// conflict reporting. See electron/services/launcher-hotkey.cjs.
+export type LauncherHotkeyBinding = {
+	accelerator: string;
+	registered: boolean;
+};
+
+export type LauncherHotkeySetResult =
+	| { ok: true; accelerator: string; registered: true }
+	| { ok: false; accelerator: string; registered: boolean; error: string };
+
+// A single launcher result row. `kind` is deliberately just `string` (not a
+// union) -- WP-2.1 only ever produces "action" (the fixed stub list in
+// electron/services/launcher-providers.cjs); the real providers WP-2.2+ add
+// bring their own kinds (task, note, app, file, ...) without a shape change
+// here.
+export type LauncherResult = {
+	id: string;
+	kind: string;
+	title: string;
+	subtitle?: string | null;
+};
+
+export type LauncherExecuteResult = {
+	ok: boolean;
+	resultId: string;
+	title?: string | null;
+	modifier?: string | null;
+};
+
+// What main.cjs's `launcher:show` message carries: `firedAtMs` is a plain
+// `Date.now()` wall-clock timestamp taken the instant the hotkey callback
+// ran, in the MAIN process. The renderer is a separate OS process with its
+// own `performance.now()` epoch, so wall-clock time is what makes the two
+// sides comparable at all -- see LauncherWindowApp.tsx's header.
+export type LauncherOpenMeta = {
+	firedAtMs: number;
+};
+
 export type Session = {
 	id: string;
 	environment_id: string;

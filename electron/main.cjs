@@ -18,6 +18,10 @@ const {
 } = require("./services/environment-switch.cjs");
 const { createEnvironmentHotkeyManager } = require("./services/environment-hotkey.cjs");
 const { register: registerHotkeyIpc } = require("./ipc/hotkey.cjs");
+const { createLauncherHotkeyManager } = require("./services/launcher-hotkey.cjs");
+const { register: registerLauncherIpc } = require("./ipc/launcher.cjs");
+const { search: searchLauncher, execute: executeLauncherResult } = require("./services/launcher-providers.cjs");
+const { createLauncherWindow: createLauncherWindowModule } = require("./windows/launcher-window.cjs");
 const { createTrayManager } = require("./services/tray.cjs");
 const { createSettingsWindow: createSettingsWindowModule } = require("./windows/settings-window.cjs");
 const {
@@ -74,6 +78,12 @@ let notchInputWindow = null;
 // popup once it loads, since a freshly created window can't receive it on the
 // constructor.
 let pendingNotchInputPayload = null;
+// WP-2.1: the launcher's pre-created popup. Unlike every window above, this
+// is constructed exactly ONCE (createLauncherWindowOnce(), called during
+// app.whenReady()) and never nulled out on close -- see
+// windows/launcher-window.cjs's header for why the sub-50ms open budget
+// depends on that.
+let launcherWindow = null;
 let isQuitting = false;
 let db = null;
 let tracker = null;
@@ -82,6 +92,11 @@ let eventLog = null;
 const isDev = !app.isPackaged;
 const isMac = process.platform === "darwin";
 const isWindows = process.platform === "win32";
+// WP-2.1: gates runLauncherSelfCheck() below, the launcher's equivalent of
+// runWindowSelfCheck() -- boots, simulates the hotkey trigger, and reports
+// the measured hotkey->first-paint latency instead of waiting for a real key
+// press. See scripts/measure-launcher-open.cjs.
+const launcherSelfCheckActive = process.env.ATLAS_LAUNCHER_SELFCHECK === "1";
 
 // Windows draws its own minimize/maximize/close glyphs into our frameless
 // window via titleBarOverlay, so unlike the rest of the UI those buttons
@@ -136,6 +151,12 @@ function setGlobalThemePreference(theme) {
 // singleton, like `trayManager`/`notchWindowManager` below); loaded and
 // registered during app.whenReady(), unregistered on quit.
 const environmentHotkeyManager = createEnvironmentHotkeyManager();
+
+// WP-2.1: the launcher's own global hotkey -- a second, INDEPENDENT
+// globalShortcut registration/binding from the environment-switcher one
+// above (own accelerator, own persisted file, own conflict reporting), so
+// rebinding one can never touch the other.
+const launcherHotkeyManager = createLauncherHotkeyManager();
 
 if (isDev) {
 	// Keep development state fully isolated from the installed production app.
@@ -373,6 +394,85 @@ function createNotchInputWindow(payload) {
 		},
 	});
 	return notchInputWindow;
+}
+
+// WP-2.1: constructs the launcher's ONE popup window, hidden, ONCE. Called
+// from app.whenReady() -- NOT a lazy per-call factory like
+// createNotchInputWindow above -- so the whole BrowserWindow-construction +
+// page-load cost happens well before any user ever presses the launcher
+// hotkey, leaving only `.show()` + `.focus()` on that path (see
+// openLauncher() below).
+function createLauncherWindowOnce() {
+	launcherWindow = createLauncherWindowModule({
+		isDev,
+		paths: secondaryWindowPaths,
+		getIsQuitting: () => isQuitting,
+	});
+	return launcherWindow;
+}
+
+// What the launcher's global hotkey actually does. `firedAtMs` is a plain
+// wall-clock timestamp (not `performance.now()`, which has an independent
+// epoch per process) so the renderer -- a separate process -- can subtract
+// it from its OWN `Date.now()` at first paint and get a meaningful
+// hotkey -> visible latency; see
+// src/components/launcher/LauncherWindowApp.tsx and the acceptance
+// criterion this measures (sub-50ms open).
+function openLauncher() {
+	if (!launcherWindow || launcherWindow.isDestroyed()) {
+		// Pre-created at boot; nothing recreates it on the hotkey path itself --
+		// that would defeat the whole point of pre-creating it.
+		return;
+	}
+	const firedAtMs = Date.now();
+	launcherWindow.webContents.send("launcher:show", { firedAtMs });
+	launcherWindow.show();
+	launcherWindow.focus();
+}
+
+// Hides (never closes/destroys) the pre-created launcher window -- what Esc
+// and a successful execute both go through, via launcher:hide (ipc/launcher.cjs).
+function hideLauncherWindow() {
+	if (launcherWindow && !launcherWindow.isDestroyed()) {
+		launcherWindow.hide();
+	}
+	return true;
+}
+
+// ATLAS_LAUNCHER_SELFCHECK's runner: boots normally, then simulates the
+// hotkey trigger itself (openLauncher()) instead of waiting for a real key
+// press, and relies on the renderer reporting its own measured latency back
+// over launcher:reportOpenLatency -- wired (in wireIpc(), below) to call
+// app.exit() the instant that report lands.
+//
+// The trigger waits for the launcher window's FIRST page load to actually
+// finish (rather than a fixed delay from boot) before simulating the hotkey:
+// a real user can never press the hotkey before Atlas has finished starting,
+// but a fixed short delay here could fire before the pre-created window's
+// initial content has even loaded -- especially in dev mode, where Vite
+// transforms the module graph lazily on first request rather than serving a
+// prebuilt bundle. Sending launcher:show before anything is listening for it
+// would just silently drop the message and hang this self-check forever, so
+// this waits for `did-finish-load` (or fires immediately if it already
+// happened) plus a small buffer for React to mount and subscribe.
+//
+// The second timer is a safety net so a renderer that never loads at all (no
+// dev server, a build error) fails fast instead of hanging the process.
+function runLauncherSelfCheck() {
+	const trigger = () => setTimeout(() => openLauncher(), 150);
+
+	if (launcherWindow && !launcherWindow.isDestroyed() && !launcherWindow.webContents.isLoading()) {
+		trigger();
+	} else if (launcherWindow && !launcherWindow.isDestroyed()) {
+		launcherWindow.webContents.once("did-finish-load", trigger);
+	} else {
+		trigger();
+	}
+
+	setTimeout(() => {
+		console.error("[Atlas] Launcher self-check timed out waiting for a reported open latency.");
+		app.exit(1);
+	}, 20000);
 }
 
 function hasAnyEnvironments() {
@@ -746,6 +846,20 @@ function wireIpc() {
 		getBinding: environmentHotkeyManager.getBinding,
 		setBinding: environmentHotkeyManager.setAccelerator,
 	});
+
+	registerLauncherIpc(ipcMain, {
+		getBinding: launcherHotkeyManager.getBinding,
+		setBinding: launcherHotkeyManager.setAccelerator,
+		search: searchLauncher,
+		execute: executeLauncherResult,
+		hideLauncherWindow,
+		getEventLog: () => eventLog,
+		getCurrentEnvironmentId: () => currentEnvironmentId,
+		// Only set under ATLAS_LAUNCHER_SELFCHECK -- see runLauncherSelfCheck()
+		// above -- so a normal run never has anything listening here beyond the
+		// console.log/event-log recording ipc/launcher.cjs always does.
+		onOpenLatencyReported: launcherSelfCheckActive ? () => app.exit(0) : undefined,
+	});
 }
 
 app.whenReady().then(async () => {
@@ -764,6 +878,15 @@ app.whenReady().then(async () => {
 	// rather than this being a silent dead key.
 	environmentHotkeyManager.load();
 	environmentHotkeyManager.register(openEnvironmentSwitcher);
+
+	// WP-2.1: pre-create the launcher's popup now, hidden, and register its
+	// own hotkey -- both as early as possible in boot, well before a user
+	// could plausibly press it, so the sub-50ms open budget only ever has to
+	// cover `.show()` + `.focus()` (see createLauncherWindowOnce()/
+	// openLauncher() above).
+	createLauncherWindowOnce();
+	launcherHotkeyManager.load();
+	launcherHotkeyManager.register(openLauncher);
 
 	const iconPath = isDev
 		? path.join(__dirname, "..", "src", "assets", "logosmall.png")
@@ -862,6 +985,10 @@ app.whenReady().then(async () => {
 	if (process.env.ATLAS_WINDOW_SELFCHECK === "1") {
 		runWindowSelfCheck();
 	}
+
+	if (launcherSelfCheckActive) {
+		runLauncherSelfCheck();
+	}
 });
 
 // Opens every window type once and reports whether each was actually created,
@@ -891,6 +1018,10 @@ function runWindowSelfCheck() {
 
 	createNotchInputWindow({ kind: "task" });
 	record("notch input", alive(notchInputWindow));
+
+	// Pre-created during app.whenReady() itself (WP-2.1), not on demand like
+	// every window above -- this just confirms that startup path didn't fail.
+	record("launcher (pre-created)", alive(launcherWindow));
 
 	// The notch is only expected to exist when preferences say it should be
 	// active, so an inactive notch is a pass, not a missing window.
@@ -932,4 +1063,5 @@ app.on("before-quit", () => {
 	// process is shutting down (matters for smoke:windows, which boots and
 	// tears down a real Electron process every run).
 	environmentHotkeyManager.unregisterAll();
+	launcherHotkeyManager.unregisterAll();
 });

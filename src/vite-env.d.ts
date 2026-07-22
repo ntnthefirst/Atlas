@@ -23,6 +23,11 @@ import type {
 	EnvironmentHotkeySetResult,
 	IsolationAllowlistEntry,
 	IsolationMode,
+	LauncherExecuteResult,
+	LauncherHotkeyBinding,
+	LauncherHotkeySetResult,
+	LauncherOpenMeta,
+	LauncherResult,
 	NoteItem,
 	NotchInputPayload,
 	NotchLayoutResolution,
@@ -112,6 +117,13 @@ declare global {
 			onAccentChanged: (callback: (value: string) => void) => () => void;
 			getEnvironmentHotkey: () => Promise<EnvironmentHotkeyBinding>;
 			setEnvironmentHotkey: (accelerator: string) => Promise<EnvironmentHotkeySetResult>;
+			getLauncherHotkey: () => Promise<LauncherHotkeyBinding>;
+			setLauncherHotkey: (accelerator: string) => Promise<LauncherHotkeySetResult>;
+			queryLauncher: (query: string) => Promise<LauncherResult[]>;
+			executeLauncherResult: (resultId: string, modifier?: string | null) => Promise<LauncherExecuteResult>;
+			hideLauncherWindow: () => Promise<boolean>;
+			reportLauncherOpenLatency: (latencyMs: number) => Promise<boolean>;
+			onLauncherShow: (callback: (meta: LauncherOpenMeta) => void) => () => void;
 
 			getNotchPreferences: () => Promise<NotchPreferences>;
 			setNotchPreferences: (preferences: Partial<NotchPreferences>) => Promise<NotchPreferences>;
