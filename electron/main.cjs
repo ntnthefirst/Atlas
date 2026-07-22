@@ -989,6 +989,14 @@ app.whenReady().then(async () => {
 	// reassigned, so there's no stale-capture risk in passing them directly --
 	// exactly the same split registerWindowsIpc/registerEnvironmentIpc below
 	// already rely on.
+	//
+	// WP-2.9: adds getTracker/getMiniWindow/getWelcomeWindow/createSettingsWindow
+	// for the "commands" provider's start/stop-timer and open-Settings commands.
+	// `getTracker`/`getMiniWindow`/`getWelcomeWindow` are getters for the same
+	// reason `getMainWindow` is -- `tracker`, `miniWindow`, and `welcomeWindow`
+	// are all `let`s reassigned later (tracker isn't even created until a few
+	// lines below this call); `createSettingsWindow` is a plain `function`
+	// declaration, never reassigned, exactly like `showMainWindow` above.
 	initLauncherProviders({
 		getDb: () => db,
 		getEventLog: () => eventLog,
@@ -996,6 +1004,10 @@ app.whenReady().then(async () => {
 		showMainWindow,
 		navigate: navigateMainWindow,
 		switchEnvironment: setActiveEnvironment,
+		getTracker: () => tracker,
+		getMiniWindow: () => miniWindow,
+		getWelcomeWindow: () => welcomeWindow,
+		createSettingsWindow,
 	});
 
 	tracker = new ActivityTracker(db, eventLog);

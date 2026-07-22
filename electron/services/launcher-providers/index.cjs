@@ -96,13 +96,31 @@
 //    *   one currently active (e.g. the "data" provider's environment results,
 //    *   or defensive re-scoping if the active environment changed between
 //    *   query and execute).
+//    * @property {(() => import("../activity-tracker.cjs")|null)} getTracker
+//    *   WP-2.9: the same ActivityTracker instance electron/ipc/sessions.cjs's
+//    *   `session:start`/`session:pause`/`session:stop` handlers call
+//    *   (setCurrentSession/closeOpenBlockNow/clearCurrentSession) -- lets the
+//    *   "commands" provider start/stop the timer through the identical
+//    *   sequence those channels use, instead of leaving the tracker's notion
+//    *   of "current session" out of sync with the database.
+//    * @property {(() => import("electron").BrowserWindow|null)} getMiniWindow
+//    *   WP-2.9: mirrors `session:stop`'s own close-the-mini-window side effect
+//    *   (electron/ipc/sessions.cjs) when a provider stops the timer.
+//    * @property {(() => import("electron").BrowserWindow|null)} getWelcomeWindow
+//    *   WP-2.9: the same fallback `window:openSettings` (electron/ipc/windows.cjs)
+//    *   falls back to when no main window exists yet (pre-first-environment).
+//    * @property {((parentWindow: import("electron").BrowserWindow|null) =>
+//    *   import("electron").BrowserWindow)} createSettingsWindow
+//    *   WP-2.9: main.cjs's own `createSettingsWindow` wrapper -- the exact
+//    *   function `window:openSettings` calls, which already shows+focuses an
+//    *   existing Settings window instead of opening a second one.
 //    *
-//    * These four default to inert no-ops (`getMainWindow`/`switchEnvironment`/
-//    * `navigate` returning null/false, `showMainWindow` doing nothing) until
-//    * `init()` wires them up, exactly like `getDb`/`getEventLog` already did --
-//    * a provider's execute() must degrade safely, never throw, if called
-//    * before boot has wired the registry up (or in a test that never calls
-//    * init()).
+//    * These eight default to inert no-ops (the getters returning null,
+//    * `switchEnvironment`/`navigate` returning false, `showMainWindow` doing
+//    * nothing, `createSettingsWindow` returning undefined) until `init()`
+//    * wires them up, exactly like `getDb`/`getEventLog` already did -- a
+//    * provider's execute() must degrade safely, never throw, if called before
+//    * boot has wired the registry up (or in a test that never calls init()).
 //    */
 //
 // -- Adding a provider (WP-2.3+) ---------------------------------------------
@@ -200,6 +218,13 @@ function createLauncherProviderRegistry() {
 	let showMainWindow = () => {};
 	let navigate = () => false;
 	let switchEnvironment = () => false;
+	// WP-2.9: the "commands" provider's own execute-time needs -- same inert-
+	// no-op-until-init() treatment as the quartet above (see this file's
+	// header, LauncherExecuteContext).
+	let getTracker = () => null;
+	let getMiniWindow = () => null;
+	let getWelcomeWindow = () => null;
+	let createSettingsWindow = () => undefined;
 
 	// Called once at boot (electron/main.cjs, after `db`/`eventLog` exist) --
 	// see this file's header for why these are getters, not values: both are
@@ -222,6 +247,18 @@ function createLauncherProviderRegistry() {
 		}
 		if (typeof deps.switchEnvironment === "function") {
 			switchEnvironment = deps.switchEnvironment;
+		}
+		if (typeof deps.getTracker === "function") {
+			getTracker = deps.getTracker;
+		}
+		if (typeof deps.getMiniWindow === "function") {
+			getMiniWindow = deps.getMiniWindow;
+		}
+		if (typeof deps.getWelcomeWindow === "function") {
+			getWelcomeWindow = deps.getWelcomeWindow;
+		}
+		if (typeof deps.createSettingsWindow === "function") {
+			createSettingsWindow = deps.createSettingsWindow;
 		}
 	}
 
@@ -329,9 +366,11 @@ function createLauncherProviderRegistry() {
 
 		const target = cached?.localResult ?? { id: split?.localId ?? resultId };
 
-		// WP-2.3: the LauncherExecuteContext this file's header documents --
-		// built fresh per call (mirrors search()'s richContext), from whatever
-		// init() last wired up. `options` itself is untouched (still exactly
+		// WP-2.3 (getMainWindow/showMainWindow/navigate/switchEnvironment) and
+		// WP-2.9 (getTracker/getMiniWindow/getWelcomeWindow/createSettingsWindow)
+		// -- the LauncherExecuteContext this file's header documents, built
+		// fresh per call (mirrors search()'s richContext), from whatever init()
+		// last wired up. `options` itself is untouched (still exactly
 		// `{environmentId, modifier}`, as WP-2.2 shipped it); the new
 		// capabilities live only in this third argument.
 		const executeContext = {
@@ -341,6 +380,10 @@ function createLauncherProviderRegistry() {
 			showMainWindow,
 			navigate,
 			switchEnvironment,
+			getTracker,
+			getMiniWindow,
+			getWelcomeWindow,
+			createSettingsWindow,
 		};
 
 		try {
@@ -360,6 +403,7 @@ function createLauncherProviderRegistry() {
 const registry = createLauncherProviderRegistry();
 registry.registerProvider(require("./actions-provider.cjs"));
 registry.registerProvider(require("./data-provider.cjs"));
+registry.registerProvider(require("./commands-provider.cjs"));
 
 module.exports = {
 	// Exposed so tests (and, if ever needed, a future WP) can build an

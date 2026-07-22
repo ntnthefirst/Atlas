@@ -313,9 +313,15 @@ describe("frecency lookup -- per-environment scoping", () => {
 });
 
 describe("the production singleton -- 'actions' provider wired in by default", () => {
-	it("returns the full actions list for an empty/blank query", async () => {
+	// WP-2.9 registers a THIRD provider ("commands", also non-empty on a blank
+	// query -- see commands-provider.cjs) alongside "actions" and "data", so a
+	// blank query's full result set is a superset of ACTIONS now rather than
+	// exactly equal to it. This asserts the "actions" SUBSET is still exactly
+	// ACTIONS, which is the invariant this test actually cares about.
+	it("includes the full actions list (and nothing but ACTIONS under the actions:: prefix) for an empty/blank query", async () => {
 		const results = await search("", { environmentId: null });
-		expect(results.map((r) => r.id).sort()).toEqual(ACTIONS.map((a) => `actions::${a.id}`).sort());
+		const actionsOnly = results.filter((r) => r.id.startsWith("actions::"));
+		expect(actionsOnly.map((r) => r.id).sort()).toEqual(ACTIONS.map((a) => `actions::${a.id}`).sort());
 	});
 
 	it("filters case-insensitively on title, through the registry's ranking", async () => {
