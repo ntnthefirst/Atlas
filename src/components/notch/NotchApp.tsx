@@ -116,6 +116,20 @@ import { PRIORITY_META } from "../main-content/taskMeta";
 // window, since there's no IPC broadcast for those.
 const POLL_MS = 1500;
 
+// WP-3.5: suggestions poll far more slowly than everything else above, and
+// deliberately so. Tasks, sessions and CPU stats change constantly and the
+// user expects the Notch to keep up, which is what justifies 1.5s for them. A
+// suggestion is the opposite kind of data: it changes at most a handful of
+// times a DAY (suggestion-prefs.cjs caps it at one per session and three per
+// day by default), and getCurrentSuggestion is not a cheap read -- it runs
+// eligibility selection plus the rate-limit history query against the
+// database. Polling that at 1.5s would mean tens of thousands of database
+// round-trips a day, per notch window, to observe at most three changes.
+// A minute is still far faster than the cap allows anything new to appear,
+// and a suggestion that shows up a few seconds later is entirely in keeping
+// with a feature whose whole design rule is "quiet, never interrupts".
+const SUGGESTION_POLL_MS = 60_000;
+
 // How much of the card stays visible (the accent line plus a sliver of background)
 // when it's retracted out of view.
 const PEEK_PX = 16;
@@ -608,7 +622,7 @@ export function NotchApp() {
 				.catch(() => undefined);
 		};
 		sync();
-		const interval = window.setInterval(sync, POLL_MS);
+		const interval = window.setInterval(sync, SUGGESTION_POLL_MS);
 		return () => window.clearInterval(interval);
 	}, [activeEnvId]);
 
