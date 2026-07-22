@@ -80,6 +80,7 @@ import {
 	VideoCameraIcon,
 	WifiIcon,
 	WrenchIcon,
+	XMarkIcon,
 } from "@heroicons/react/24/outline";
 import { LockClosedIcon as LockClosedIconSolid, PlayCircleIcon as PlayCircleIconSolid } from "@heroicons/react/24/solid";
 import * as HeroIconsSolid from "@heroicons/react/24/solid";
@@ -93,6 +94,7 @@ import type {
 	NotchWidgetId,
 	NotchWidgetPlacement,
 	Session,
+	SurfacedSuggestion,
 	TaskColumn,
 	TaskItem,
 } from "../../types";
@@ -423,6 +425,13 @@ export function NotchApp() {
 	const [memoryHistory, setMemoryHistory] = useState<number[]>([]);
 	const [runningApps, setRunningApps] = useState<Array<{ name: string; path: string | null }>>([]);
 	const [appIcons, setAppIcons] = useState<Record<string, string | null>>({});
+	// WP-3.5: the current suggestion to surface, if any -- see the polling
+	// effect below for how this stays null almost all of the time by design.
+	const [currentSuggestion, setCurrentSuggestion] = useState<SurfacedSuggestion | null>(null);
+	// Ids already accepted/dismissed from THIS window, so a poll response that
+	// was already in flight when the user clicked can never resurrect a
+	// suggestion the user just acted on (see the polling effect below).
+	const resolvedSuggestionIdsRef = useRef<Set<string>>(new Set());
 
 	// Transparent backdrop for the floating window; follow the app's light/dark theme.
 	useEffect(() => {
@@ -558,6 +567,43 @@ export function NotchApp() {
 					const today = new Date();
 					setTodaySessions(sessions.filter((session) => isSameDay(session.started_at, today)));
 					setTotalSessionCount(sessions.length);
+				})
+				.catch(() => undefined);
+		};
+		sync();
+		const interval = window.setInterval(sync, POLL_MS);
+		return () => window.clearInterval(interval);
+	}, [activeEnvId]);
+
+	// WP-3.5: the current suggestion to surface, if any -- polled exactly like
+	// every other ambient value above. Never opens a window, never calls
+	// `.focus()`: this only ever changes what's already-rendered inside the
+	// existing (already on-screen, non-activating) notch card, so there is
+	// nothing here that could steal focus or block input. The main process
+	// (suggestion-manager.cjs) only ever returns non-null when suggestions are
+	// enabled, the hard per-session/per-day rate limits allow it, and there is
+	// a genuinely eligible finding -- this effect just displays whatever it
+	// says, or nothing.
+	useEffect(() => {
+		setCurrentSuggestion(null);
+		if (!activeEnvId) {
+			return;
+		}
+		const sync = () => {
+			window.atlas
+				.getCurrentSuggestion(activeEnvId)
+				.then((suggestion) => {
+					// A poll dispatched before the user clicked accept/dismiss can
+					// still resolve afterward; ignore it if so, rather than reviving a
+					// suggestion the user already acted on (see the ref's own comment).
+					if (suggestion && resolvedSuggestionIdsRef.current.has(suggestion.id)) {
+						return;
+					}
+					// `null` means "nothing NEW to show right now", not "take away
+					// what's already showing" -- a suggestion stays visible until the
+					// user accepts/dismisses it, not until the next poll happens to
+					// disagree.
+					setCurrentSuggestion((current) => suggestion ?? current);
 				})
 				.catch(() => undefined);
 		};
@@ -963,6 +1009,39 @@ export function NotchApp() {
 		setTasks((current) =>
 			current.map((task) => (task.id === taskId ? { ...task, status: nextStatus } : task)),
 		);
+	};
+
+	// One-click accept/dismiss (WP-3.5) -- both route through the EXACT SAME
+	// findings:accept/findings:ignore IPC channels WP-3.4 already built (see
+	// electron/ipc/findings.cjs and finding-lifecycle-service.cjs), never a
+	// parallel path of their own. The local state clears immediately
+	// (optimistic -- the notch never waits on the round trip before hiding the
+	// suggestion), and the id is remembered so a late/racing poll response
+	// can't bring it back (see the polling effect above).
+	const onAcceptSuggestion = async () => {
+		if (!currentSuggestion) return;
+		const { id } = currentSuggestion;
+		resolvedSuggestionIdsRef.current.add(id);
+		setCurrentSuggestion(null);
+		try {
+			await window.atlas.acceptFinding(id);
+		} catch {
+			// Best-effort: the notch never blocks on this or shows an error dialog
+			// over the user's work -- a failed accept just means the suggestion
+			// quietly stays gone.
+		}
+	};
+
+	const onDismissSuggestion = async () => {
+		if (!currentSuggestion) return;
+		const { id } = currentSuggestion;
+		resolvedSuggestionIdsRef.current.add(id);
+		setCurrentSuggestion(null);
+		try {
+			await window.atlas.dismissFinding(id);
+		} catch {
+			// Ignore -- see onAcceptSuggestion.
+		}
 	};
 
 	const onSwitchEnvironment = (envId: string) => {
@@ -1706,6 +1785,49 @@ export function NotchApp() {
 					<div
 						className={`notch-no-drag flex items-center gap-4 whitespace-nowrap ${isVertical ? "flex-col py-3" : "flex-row px-3"}`}
 					>
+						{currentSuggestion ? (
+							<>
+								<div
+									className={`notch-no-drag flex items-center gap-1.5 whitespace-nowrap ${isVertical ? "flex-col" : "flex-row"}`}
+								>
+									<LightBulbIcon
+										className="h-4 w-4 shrink-0 text-amber-500"
+										aria-hidden="true"
+									/>
+									<span
+										className="max-w-36 truncate text-[12px] text-neutral-700 dark:text-neutral-100"
+										title={currentSuggestion.description}
+									>
+										{currentSuggestion.description}
+									</span>
+									<button
+										type="button"
+										className={`${ICON_BUTTON_CLASSES} h-6 w-6`}
+										title="Accept suggestion"
+										aria-label="Accept suggestion"
+										onClick={() => void onAcceptSuggestion()}
+									>
+										<CheckIcon className="h-4 w-4" />
+									</button>
+									<button
+										type="button"
+										className={`${ICON_BUTTON_CLASSES} h-6 w-6`}
+										title="Dismiss suggestion"
+										aria-label="Dismiss suggestion"
+										onClick={() => void onDismissSuggestion()}
+									>
+										<XMarkIcon className="h-4 w-4" />
+									</button>
+								</div>
+
+								<span
+									className={`flex-shrink-0 bg-neutral-200 dark:bg-neutral-600 ${
+										isVertical ? "my-0.5 h-px w-4" : "mx-0.5 h-4 w-px"
+									}`}
+								/>
+							</>
+						) : null}
+
 						{activeInfoItem ? (
 							<>
 								<div

@@ -260,4 +260,17 @@ contextBridge.exposeInMainWorld("atlas", {
 		ipcRenderer.on("context:changed", listener);
 		return () => ipcRenderer.removeListener("context:changed", listener);
 	},
+
+	// WP-3.5: suggestion surfacing -- the Notch's own quiet affordance.
+	// `getCurrentSuggestion` is polled from the Notch exactly like every other
+	// ambient value it reads; the main process returns null immediately
+	// (nothing computed) whenever surfacing is off. Accept/dismiss are
+	// deliberately NOT new channels -- they reuse the EXACT SAME
+	// findings:accept / findings:ignore handlers WP-3.4 already registered
+	// (see electron/ipc/findings.cjs), never a second, parallel path.
+	getSuggestionPreferences: () => ipcRenderer.invoke("suggestions:getPreferences"),
+	setSuggestionPreferences: (patch) => ipcRenderer.invoke("suggestions:setPreferences", patch),
+	getCurrentSuggestion: (environmentId) => ipcRenderer.invoke("suggestions:getCurrent", environmentId),
+	acceptFinding: (findingId) => ipcRenderer.invoke("findings:accept", findingId),
+	dismissFinding: (findingId) => ipcRenderer.invoke("findings:ignore", findingId),
 });

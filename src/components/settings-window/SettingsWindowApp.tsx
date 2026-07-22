@@ -30,6 +30,7 @@ import type {
 	NotchInfoItemConfig,
 	NotchPosition,
 	NotchPreferences,
+	SuggestionPreferences,
 	UpdateCheckResult,
 } from "../../types";
 import logo from "../../assets/logosmall.png";
@@ -199,6 +200,11 @@ export function SettingsWindowApp() {
 			{ id: "todo", enabled: true },
 		],
 	});
+	const [suggestionPrefs, setSuggestionPrefs] = useState<SuggestionPreferences>({
+		enabled: true,
+		maxPerSession: 1,
+		maxPerDay: 3,
+	});
 	const [displays, setDisplays] = useState<DisplaySummary[]>([]);
 	const [environments, setEnvironments] = useState<Environment[]>([]);
 	const [fileIndexPrefs, setFileIndexPrefs] = useState<FileIndexPreferences>(EMPTY_FILE_INDEX_PREFS);
@@ -297,6 +303,15 @@ export function SettingsWindowApp() {
 			.catch(() => undefined);
 		const unsubscribe = window.atlas.onNotchPreferencesChanged?.(setNotchPrefs);
 		return () => unsubscribe?.();
+	}, []);
+
+	// WP-3.5: no live broadcast for this (unlike notch preferences above) --
+	// fetched once, since only this window's own toggle below ever changes it.
+	useEffect(() => {
+		window.atlas
+			.getSuggestionPreferences()
+			.then(setSuggestionPrefs)
+			.catch(() => undefined);
 	}, []);
 
 	useEffect(() => {
@@ -499,6 +514,11 @@ export function SettingsWindowApp() {
 	const updateNotch = (patch: Partial<NotchPreferences>) => {
 		setNotchPrefs((current) => ({ ...current, ...patch }));
 		void window.atlas.setNotchPreferences(patch);
+	};
+
+	const updateSuggestionPrefs = (patch: Partial<SuggestionPreferences>) => {
+		setSuggestionPrefs((current) => ({ ...current, ...patch }));
+		void window.atlas.setSuggestionPreferences(patch);
 	};
 
 	// Empty selection means "primary display only" by convention.
@@ -1066,6 +1086,35 @@ export function SettingsWindowApp() {
 
 												<div className="atlas-settings-card-stack grid gap-3">
 													<NotchTabsEditor />
+												</div>
+
+												<div className="atlas-settings-card-stack grid gap-2">
+													<span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
+														Suggestions
+													</span>
+													<p className="m-0 text-xs text-neutral-500 dark:text-neutral-300">
+														Atlas occasionally notices a repeated pattern and offers to automate it —
+														shown quietly in the notch, never as a popup, at most a few times a day.
+													</p>
+													<Toggle
+														label="Suggest automations"
+														description="Offer one-click automations for patterns Atlas notices"
+														checked={suggestionPrefs.enabled}
+														onChange={(value) => updateSuggestionPrefs({ enabled: value })}
+													/>
+													{suggestionPrefs.enabled && (
+														<Select
+															label="Daily limit"
+															value={String(suggestionPrefs.maxPerDay)}
+															onChange={(value) => updateSuggestionPrefs({ maxPerDay: Number(value) })}
+															options={[
+																{ value: "1", label: "1 per day", description: "The quietest setting" },
+																{ value: "2", label: "2 per day" },
+																{ value: "3", label: "3 per day" },
+																{ value: "5", label: "5 per day" },
+															]}
+														/>
+													)}
 												</div>
 											</>
 										)}

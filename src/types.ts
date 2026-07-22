@@ -813,3 +813,38 @@ export type ContextStatus = {
 	 */
 	layoutId?: string | null;
 };
+
+// WP-3.5: suggestion surfacing. Mirrors electron/config/suggestion-prefs.cjs's
+// own normalized shape -- the global "stop suggesting things" switch plus the
+// plan's own two hard rate limits (at most one per session, a global cap per
+// day), both kept configurable.
+export type SuggestionPreferences = {
+	enabled: boolean;
+	maxPerSession: number;
+	maxPerDay: number;
+};
+
+// What the Notch actually renders for a currently-surfaced suggestion --
+// deliberately just enough to show and act on it (a plain-language
+// description built server-side from the finding's trigger/follow event
+// types), never the finding's raw evidence.
+export type SurfacedSuggestion = {
+	id: string;
+	environmentId: string;
+	patternType: string;
+	description: string;
+	confidence: number;
+	occurrences: number;
+	suggestedAt: string;
+};
+
+// The shape electron/services/pattern-miner/finding-lifecycle-service.cjs's
+// acceptFinding()/ignoreFinding() resolve to (accessed here through the exact
+// same findings:accept/findings:ignore channels WP-3.4 registered) -- the
+// Notch only ever reads `ok`, so the rest stays loosely typed.
+export type FindingActionResult = {
+	ok: boolean;
+	error?: string;
+	reason?: string;
+	[key: string]: unknown;
+};

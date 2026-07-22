@@ -83,6 +83,8 @@ const { createPatternMiner } = require("./services/pattern-miner/miner.cjs");
 const { register: registerPatternMinerIpc } = require("./ipc/pattern-miner.cjs");
 const { createFindingLifecycleManager } = require("./services/pattern-miner/finding-lifecycle-manager.cjs");
 const { register: registerFindingsIpc } = require("./ipc/findings.cjs");
+const { createSuggestionManager } = require("./services/suggestion-surfacing/suggestion-manager.cjs");
+const { register: registerSuggestionsIpc } = require("./ipc/suggestions.cjs");
 
 let mainWindow = null;
 let miniWindow = null;
@@ -261,6 +263,27 @@ const patternMiner = createPatternMiner({
 // a boot-time timer).
 const findingLifecycleManager = createFindingLifecycleManager({
 	getDb: () => db,
+});
+
+// WP-3.5: suggestion surfacing -- decides WHETHER a finding may be shown in
+// the Notch right now (the global on/off switch, plus the plan's own hard
+// rate limits: at most one per session, and a global cap per day). Never
+// decides whether an accept/ignore itself is legal -- that stays
+// findingLifecycleManager's (and, underneath it, finding-lifecycle-
+// service.cjs's) job alone, reused verbatim through `markSuggested()`. No
+// `sessionStartMs` override is passed here -- this module-level `require`
+// runs once per process, so the default (this manager's own construction
+// time, effectively "when this run of Atlas started") is exactly what
+// suggestion-manager.cjs's own header describes as "session" for the
+// per-session cap. Preferences load in app.whenReady() below, same as every
+// sibling manager; getSuggestionToSurface() is only ever invoked through an
+// explicit `suggestions:getCurrent` poll from the Notch (see
+// suggestion-manager.cjs's own header for why nothing here may run on a
+// boot-time timer).
+const suggestionManager = createSuggestionManager({
+	getDb: () => db,
+	getEventLog: () => eventLog,
+	lifecycleManager: findingLifecycleManager,
 });
 
 if (isDev) {
@@ -970,7 +993,13 @@ function wireIpc() {
 	registerContextIpc(ipcMain, { contextService });
 	registerSmartFunctionsIpc(ipcMain, { getDb: () => db, engine: smartFunctionsEngine });
 	registerPatternMinerIpc(ipcMain, { miner: patternMiner, getDb: () => db });
-	registerFindingsIpc(ipcMain, { manager: findingLifecycleManager, engine: smartFunctionsEngine });
+	registerFindingsIpc(ipcMain, {
+		manager: findingLifecycleManager,
+		engine: smartFunctionsEngine,
+		getDb: () => db,
+		getEventLog: () => eventLog,
+	});
+	registerSuggestionsIpc(ipcMain, { manager: suggestionManager });
 
 	registerHotkeyIpc(ipcMain, {
 		getBinding: environmentHotkeyManager.getBinding,
@@ -1008,6 +1037,10 @@ app.whenReady().then(async () => {
 	// thresholds -- never accepts, ignores, expires, or resurfaces anything
 	// (see finding-lifecycle-manager.cjs's own header).
 	findingLifecycleManager.loadPreferences();
+	// WP-3.5: same deal again for the suggestion-surfacing on/off switch and
+	// rate limits -- never surfaces, marks-suggested, or computes anything
+	// (see suggestion-manager.cjs's own header).
+	suggestionManager.loadPreferences();
 	startFocusEngine();
 	autoUpdater.autoDownload = false;
 	autoUpdater.autoInstallOnAppQuit = true;

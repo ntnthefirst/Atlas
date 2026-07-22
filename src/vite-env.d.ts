@@ -38,6 +38,9 @@ import type {
 	NotchInputPayload,
 	NotchLayoutResolution,
 	NotchPreferences,
+	SuggestionPreferences,
+	SurfacedSuggestion,
+	FindingActionResult,
 	Session,
 	TaskItem,
 	TaskStatus,
@@ -203,6 +206,15 @@ declare global {
 			startContextDetection: () => Promise<ContextStatus>;
 			stopContextDetection: () => Promise<ContextStatus>;
 			onContextChanged: (callback: (status: ContextStatus) => void) => () => void;
+
+			// WP-3.5: suggestion surfacing. Accept/dismiss reuse the exact same
+			// findings:accept/findings:ignore channels WP-3.4 registered -- see
+			// electron/ipc/findings.cjs and electron/preload.cjs.
+			getSuggestionPreferences: () => Promise<SuggestionPreferences>;
+			setSuggestionPreferences: (patch: Partial<SuggestionPreferences>) => Promise<SuggestionPreferences>;
+			getCurrentSuggestion: (environmentId: string) => Promise<SurfacedSuggestion | null>;
+			acceptFinding: (findingId: string) => Promise<FindingActionResult>;
+			dismissFinding: (findingId: string) => Promise<FindingActionResult>;
 		};
 	}
 }
