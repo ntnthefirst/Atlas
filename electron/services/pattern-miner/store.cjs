@@ -134,8 +134,32 @@ function upsertFindings(db, findings) {
 
 	db.transaction(() => {
 		for (const finding of findings) {
-			if (!finding || finding.environmentId === undefined || !finding.trigger || !finding.follow) {
-				continue; // malformed entry -- never worth aborting the whole run over
+			// `== null` deliberately, catching BOTH undefined and null. Undefined
+			// is a malformed entry; null is a real, reachable case that this
+			// table cannot store: `findings.environment_id` is NOT NULL
+			// (migration 012 chose that deliberately, unlike `files` and
+			// `smart_functions`), while the miner genuinely produces a "no
+			// environment" bucket -- listDistinctEventEnvironmentIds maps a NULL
+			// `events.environment_id` to null, and miner.cjs tags that bucket's
+			// findings `environmentId: null`. Events with no environment are
+			// ordinary (anything recorded before the first environment switch,
+			// `file_index.crawl_completed`, ...), so this is not hypothetical.
+			//
+			// Skipping matters far more than it looks: miner.cjs collects EVERY
+			// bucket's findings and calls this function ONCE, inside a single
+			// transaction. A NOT NULL violation here would therefore abort the
+			// whole run's writes -- one unstorable finding silently discarding
+			// every other environment's results. The comment below was already
+			// right that a malformed entry is "never worth aborting the whole
+			// run over"; this makes it true for the null case too.
+			//
+			// The cost is that patterns found outside any environment are not
+			// surfaced. That follows from migration 012's NOT NULL choice, and
+			// changing it would mean a table rebuild (SQLite cannot drop a NOT
+			// NULL constraint in place) -- worth revisiting deliberately, not as
+			// a side effect of a crash fix.
+			if (!finding || finding.environmentId == null || !finding.trigger || !finding.follow) {
+				continue; // malformed or unstorable -- never worth aborting the whole run over
 			}
 			const existing = findExistingFinding(db, finding);
 			const now = nowIso();

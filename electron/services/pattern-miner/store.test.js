@@ -51,6 +51,39 @@ function sampleFinding(overrides = {}) {
 	};
 }
 
+describe("upsertFindings -- an unstorable finding must not destroy the run", () => {
+	// miner.cjs collects EVERY environment bucket's findings and calls
+	// upsertFindings ONCE, in a single transaction. `findings.environment_id`
+	// is NOT NULL (migration 012), but the miner genuinely produces a "no
+	// environment" bucket for events recorded outside any environment. Without
+	// the null guard that combination throws mid-transaction and discards every
+	// other environment's results too -- so this fixture deliberately puts the
+	// null finding FIRST, where an abort would take the good ones down with it.
+	it("skips a null-environment finding and still stores every other bucket's findings", async () => {
+		const db = await createDb();
+		const result = upsertFindings(db, [
+			sampleFinding({ environmentId: null }),
+			sampleFinding({ environmentId: "env-a" }),
+			sampleFinding({ environmentId: "env-b" }),
+		]);
+
+		expect(result).toEqual({ created: 2, updated: 0 });
+		expect(listFindingsForEnvironment(db, "env-a").length).toBe(1);
+		expect(listFindingsForEnvironment(db, "env-b").length).toBe(1);
+	});
+
+	it("skips an undefined-environment finding the same way", async () => {
+		const db = await createDb();
+		const result = upsertFindings(db, [
+			sampleFinding({ environmentId: undefined }),
+			sampleFinding({ environmentId: "env-a" }),
+		]);
+
+		expect(result).toEqual({ created: 1, updated: 0 });
+		expect(listFindingsForEnvironment(db, "env-a").length).toBe(1);
+	});
+});
+
 describe("upsertFindings", () => {
 	it("creates a new finding row plus its evidence rows", async () => {
 		const db = await createDb();
