@@ -15,6 +15,7 @@ import type {
 	FileIndexPreferences,
 	FileIndexStats,
 	FileIndexStatus,
+	FileIndexWatchStatus,
 	FocusConfig,
 	FocusState,
 	Environment,
@@ -188,6 +189,10 @@ declare global {
 			getFileIndexStats: () => Promise<FileIndexStats>;
 			pickFileIndexFolder: () => Promise<string | null>;
 			onFileIndexProgress: (callback: (status: FileIndexStatus) => void) => () => void;
+			startFileIndexWatch: () => Promise<FileIndexWatchStatus>;
+			stopFileIndexWatch: () => Promise<FileIndexWatchStatus>;
+			getFileIndexWatchStatus: () => Promise<FileIndexWatchStatus>;
+			onFileIndexWatchStatus: (callback: (status: FileIndexWatchStatus) => void) => () => void;
 		};
 	}
 }

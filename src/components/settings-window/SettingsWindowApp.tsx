@@ -24,6 +24,7 @@ import type {
 	FileIndexPreferences,
 	FileIndexStats,
 	FileIndexStatus,
+	FileIndexWatchStatus,
 	NotchActivation,
 	NotchIdleOpacity,
 	NotchInfoItemConfig,
@@ -65,6 +66,17 @@ const EMPTY_FILE_INDEX_STATUS: FileIndexStatus = {
 	error: null,
 };
 
+const EMPTY_FILE_INDEX_WATCH_STATUS: FileIndexWatchStatus = {
+	state: "stopped",
+	startedAt: null,
+	lastEventAt: null,
+	lastFlushAt: null,
+	pendingCount: 0,
+	rootsWatched: 0,
+	onBattery: false,
+	error: null,
+};
+
 function formatFileIndexState(status: FileIndexStatus): string {
 	switch (status.state) {
 		case "running":
@@ -77,6 +89,17 @@ function formatFileIndexState(status: FileIndexStatus): string {
 			return status.error ? `Failed: ${status.error}` : "Failed";
 		default:
 			return "Never scanned";
+	}
+}
+
+function formatFileIndexWatchState(status: FileIndexWatchStatus): string {
+	switch (status.state) {
+		case "watching":
+			return status.pendingCount > 0 ? `Watching… (${status.pendingCount} change(s) pending)` : "Watching for changes";
+		case "error":
+			return status.error ? `Not watching: ${status.error}` : "Not watching";
+		default:
+			return "Not watching";
 	}
 }
 
@@ -181,6 +204,9 @@ export function SettingsWindowApp() {
 	const [fileIndexPrefs, setFileIndexPrefs] = useState<FileIndexPreferences>(EMPTY_FILE_INDEX_PREFS);
 	const [fileIndexStatus, setFileIndexStatus] = useState<FileIndexStatus>(EMPTY_FILE_INDEX_STATUS);
 	const [fileIndexStats, setFileIndexStats] = useState<FileIndexStats | null>(null);
+	const [fileIndexWatchStatus, setFileIndexWatchStatus] = useState<FileIndexWatchStatus>(
+		EMPTY_FILE_INDEX_WATCH_STATUS,
+	);
 	const [aiConfig, setAiConfig] = useState<AiPublicConfig | null>(null);
 	const [aiKeyDrafts, setAiKeyDrafts] = useState<Record<AiProvider, string>>({
 		anthropic: "",
@@ -312,6 +338,30 @@ export function SettingsWindowApp() {
 		});
 		return () => unsubscribe?.();
 	}, [refreshFileIndexStats]);
+
+	useEffect(() => {
+		window.atlas
+			.getFileIndexWatchStatus()
+			.then(setFileIndexWatchStatus)
+			.catch(() => undefined);
+		const unsubscribe = window.atlas.onFileIndexWatchStatus?.((status) => {
+			setFileIndexWatchStatus(status);
+			// A batch just landed -- the totals in the "Index status" card
+			// (getIndexStats) may have changed just like a crawl completing does.
+			refreshFileIndexStats();
+		});
+		return () => unsubscribe?.();
+	}, [refreshFileIndexStats]);
+
+	const handleStartFileIndexWatch = async () => {
+		const status = await window.atlas.startFileIndexWatch();
+		setFileIndexWatchStatus(status);
+	};
+
+	const handleStopFileIndexWatch = async () => {
+		const status = await window.atlas.stopFileIndexWatch();
+		setFileIndexWatchStatus(status);
+	};
 
 	const updateFileIndexPrefs = async (patch: Partial<FileIndexPreferences>) => {
 		const next = await window.atlas.setFileIndexPreferences(patch);
@@ -1130,6 +1180,37 @@ export function SettingsWindowApp() {
 											<p className="m-0 text-xs text-neutral-500 dark:text-neutral-400">
 												{(fileIndexStats?.totalFiles ?? 0).toLocaleString()} files indexed
 											</p>
+										</div>
+
+										<div className="atlas-settings-card-stack grid gap-2">
+											<div className="flex items-center justify-between">
+												<span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
+													Live watching
+												</span>
+												{fileIndexWatchStatus.state === "watching" ? (
+													<button type="button" className="action-btn" onClick={() => void handleStopFileIndexWatch()}>
+														Stop watching
+													</button>
+												) : (
+													<button type="button" className="action-btn" onClick={() => void handleStartFileIndexWatch()}>
+														Start watching
+													</button>
+												)}
+											</div>
+											<p className="m-0 text-xs text-neutral-500 dark:text-neutral-300">
+												Keeps the index current between scans by reacting to file changes under the enabled
+												roots above, instead of waiting for the next "Run a scan now". Off by default — turning
+												it on only takes effect for this app session, exactly like a scan does.
+											</p>
+											<p className="m-0 text-sm text-neutral-700 dark:text-neutral-200">
+												{formatFileIndexWatchState(fileIndexWatchStatus)}
+											</p>
+											{fileIndexWatchStatus.state === "watching" && (
+												<p className="m-0 text-xs text-neutral-500 dark:text-neutral-400">
+													{fileIndexWatchStatus.rootsWatched.toLocaleString()} root(s) watched
+													{fileIndexWatchStatus.onBattery ? " · on battery (checking less often)" : ""}
+												</p>
+											)}
 										</div>
 									</div>
 								)}

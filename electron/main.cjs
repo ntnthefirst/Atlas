@@ -72,6 +72,7 @@ const { register: registerAiIpc } = require("./ipc/ai.cjs");
 const { register: registerSystemIpc } = require("./ipc/system.cjs");
 const { register: registerIsolationIpc } = require("./ipc/isolation.cjs");
 const { createFileIndexCrawler } = require("./services/file-index/crawler.cjs");
+const { createFileIndexWatcher } = require("./services/file-index/watcher.cjs");
 const { register: registerFileIndexIpc } = require("./ipc/file-index.cjs");
 
 let mainWindow = null;
@@ -171,6 +172,22 @@ const launcherHotkeyManager = createLauncherHotkeyManager();
 // scan now" button) -- never automatically at boot, see crawler.cjs's header
 // for why.
 const fileIndexCrawler = createFileIndexCrawler();
+
+// WP-2.6: the file index watcher -- a singleton exactly like the crawler
+// above, sharing that SAME crawler's own preferences (roots/exclusions/
+// caps, see watcher.cjs's header on why this must not load or normalize a
+// second copy of its own). Like the crawler, watching itself only ever
+// starts from an explicit `fileIndex:startWatch` IPC call -- never
+// automatically at boot, see watcher.cjs's header for why.
+const fileIndexWatcher = createFileIndexWatcher({
+	getDb: () => db,
+	getPreferences: () => fileIndexCrawler.getPreferences(),
+	getEventLog: () => eventLog,
+	// If a watched root's handle fails at runtime, fall back to a fresh
+	// crawl rather than silently leaving the index stale -- see watcher.cjs's
+	// header on "graceful degradation on a watch failure".
+	triggerRecrawl: () => fileIndexCrawler.startCrawl(),
+});
 
 if (isDev) {
 	// Keep development state fully isolated from the installed production app.
@@ -875,7 +892,7 @@ function wireIpc() {
 
 	registerIsolationIpc(ipcMain);
 
-	registerFileIndexIpc(ipcMain, { crawler: fileIndexCrawler, getDb: () => db });
+	registerFileIndexIpc(ipcMain, { crawler: fileIndexCrawler, watcher: fileIndexWatcher, getDb: () => db });
 
 	registerHotkeyIpc(ipcMain, {
 		getBinding: environmentHotkeyManager.getBinding,
@@ -1147,4 +1164,8 @@ app.on("before-quit", () => {
 	// process is shutting down (matters for smoke:windows, which boots and
 	// tears down a real Electron process every run).
 	fileIndexCrawler.shutdown();
+	// WP-2.6: closes every fs.watch handle and clears the pending debounce
+	// timer -- a leaked watch handle would otherwise keep the process alive
+	// past this point, exactly the failure mode smoke:windows exists to catch.
+	fileIndexWatcher.shutdown();
 });

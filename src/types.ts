@@ -769,3 +769,22 @@ export type FileIndexStats = {
 	totalFiles: number;
 	perRoot: FileIndexRootStat[];
 };
+
+// ---------------------------------------------------------------------------
+// File index watcher (WP-2.6) -- mirrors electron/services/file-index/
+// watcher.cjs's own status object exactly, the same discipline
+// FileIndexStatus above follows for the crawler.
+// ---------------------------------------------------------------------------
+
+export type FileIndexWatchState = "stopped" | "watching" | "error";
+
+export type FileIndexWatchStatus = {
+	state: FileIndexWatchState;
+	startedAt: number | null;
+	lastEventAt: number | null;
+	lastFlushAt: number | null;
+	pendingCount: number;
+	rootsWatched: number;
+	onBattery: boolean;
+	error: string | null;
+};

@@ -1,5 +1,7 @@
 "use strict";
 
+const path = require("node:path");
+
 // ---------------------------------------------------------------------------
 // The file index store (WP-2.5) -- every write and read against the `files`
 // / `files_fts` tables (electron/migrations/009_file_index.cjs) lives here.
@@ -120,6 +122,110 @@ function rebuildFtsIndex(db) {
 	});
 }
 
+// -- Incremental FTS maintenance (WP-2.6, the watcher) -----------------------
+//
+// rebuildFtsIndex above is exactly right for the CRAWLER (wipe + repopulate
+// wholesale, once per full run) and completely wrong for a watcher reacting
+// to individual filesystem events: rebuilding a potentially 100k-row
+// `files_fts` on every single change would be absurd. `syncFtsForPath` is the
+// single-path primitive that keeps it correct without ever touching a row
+// that isn't this exact path -- precisely the two operations migration 009's
+// header says `files_fts` ever needs outside a full crawl: delete whatever
+// row currently matches `filePath` (idempotent even if there wasn't one),
+// then re-insert one iff the file still exists (`name` is a non-empty
+// string; omit/pass null for a removal). A pure metadata refresh (size/mtime
+// changed, but the path itself was already indexed) must call neither half
+// of this at all -- a file's `name` can never change for an existing `path`
+// (name is derived from path, and path is `files`' own PRIMARY KEY, see
+// migration 009's header), so an existing path's `files_fts` row is already
+// exactly right. `applyWatcherBatch` below is the only caller, and it is
+// what decides whether a given upsert is genuinely a new path or just a
+// refresh -- this function itself has no way to know.
+function syncFtsForPath(db, filePath, name) {
+	db.run("DELETE FROM files_fts WHERE path = ?", [filePath]);
+	if (typeof name === "string" && name) {
+		db.run("INSERT INTO files_fts (name, path) VALUES (?, ?)", [name, filePath]);
+	}
+}
+
+// One transactional write per debounced batch of filesystem-watcher events
+// (electron/services/file-index/watcher.cjs) -- mirrors upsertFilesBatch's
+// batching discipline (everything in ONE `db.transaction()`) while also
+// keeping `files_fts` in step incrementally via syncFtsForPath, and
+// respecting the SAME `maxFiles` budget the crawler enforces (see
+// file-index-prefs.cjs) so a watcher left running indefinitely can never
+// grow the index past the size the user configured.
+//
+// `upserts` are rows shaped exactly like upsertFilesBatch's (a path the
+// watcher confirmed still exists on disk, freshly stat()'d); `removals` are
+// plain path strings the watcher confirmed are now gone (it could not
+// stat() them -- ENOENT). A removal deletes both the exact path AND anything
+// nested under it (`substr(path, 1, N) = prefix`, a plain literal-prefix
+// comparison, never a LIKE pattern, so a path containing `%`/`_` can never
+// be misread as a wildcard) -- covers the common case of a whole directory
+// disappearing in one filesystem operation (e.g. dragged to the Recycle
+// Bin), which was never itself a `files` row, but whose contents were.
+function applyWatcherBatch(db, { upserts = [], removals = [], maxFiles = Infinity } = {}, seenAtMs) {
+	if (!db) {
+		return { upserted: 0, removed: 0, skippedAtCap: 0 };
+	}
+	let upserted = 0;
+	let removed = 0;
+	let skippedAtCap = 0;
+
+	db.transaction(() => {
+		for (const target of removals) {
+			if (typeof target !== "string" || !target) {
+				continue;
+			}
+			const prefix = `${target}${path.sep}`;
+			const before = db.first("SELECT COUNT(*) as count FROM files WHERE path = ? OR substr(path, 1, ?) = ?", [
+				target,
+				prefix.length,
+				prefix,
+			]);
+			removed += before?.count ?? 0;
+			db.run("DELETE FROM files_fts WHERE path = ? OR substr(path, 1, ?) = ?", [target, prefix.length, prefix]);
+			db.run("DELETE FROM files WHERE path = ? OR substr(path, 1, ?) = ?", [target, prefix.length, prefix]);
+		}
+
+		let totalFiles = db.first("SELECT COUNT(*) as count FROM files")?.count ?? 0;
+
+		for (const row of upserts) {
+			if (!row || typeof row.path !== "string" || !row.path) {
+				continue;
+			}
+			const existing = db.first("SELECT 1 as found FROM files WHERE path = ?", [row.path]);
+			if (!existing && totalFiles >= maxFiles) {
+				// Never grow the index past the crawler's own budget -- an
+				// existing path can still be refreshed (it doesn't grow the
+				// table), and removals above always apply regardless of the cap.
+				skippedAtCap += 1;
+				continue;
+			}
+			db.run(UPSERT_SQL, [
+				row.path,
+				typeof row.name === "string" ? row.name : "",
+				row.ext ?? null,
+				Number.isFinite(row.size) ? row.size : 0,
+				Number.isFinite(row.mtime) ? row.mtime : 0,
+				row.environmentId ?? null,
+				row.root,
+				seenAtMs,
+			]);
+			upserted += 1;
+			if (!existing) {
+				totalFiles += 1;
+				syncFtsForPath(db, row.path, row.name);
+			}
+			// else: same path, refreshed metadata only -- see this function's
+			// header on why that needs no files_fts write at all.
+		}
+	});
+
+	return { upserted, removed, skippedAtCap };
+}
+
 // -- Search -----------------------------------------------------------------
 //
 // Turns free text into an FTS5 MATCH expression: every whitespace-delimited
@@ -214,6 +320,8 @@ module.exports = {
 	upsertFilesBatch,
 	pruneStaleRows,
 	rebuildFtsIndex,
+	syncFtsForPath,
+	applyWatcherBatch,
 	searchFiles,
 	sanitizeMatchQuery,
 	getIndexStats,

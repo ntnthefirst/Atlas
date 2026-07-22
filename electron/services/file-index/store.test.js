@@ -1,9 +1,18 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AtlasDatabase } from "../../db.cjs";
-import { getIndexStats, pruneStaleRows, rebuildFtsIndex, sanitizeMatchQuery, searchFiles, upsertFilesBatch } from "./store.cjs";
+import {
+	applyWatcherBatch,
+	getIndexStats,
+	pruneStaleRows,
+	rebuildFtsIndex,
+	sanitizeMatchQuery,
+	searchFiles,
+	syncFtsForPath,
+	upsertFilesBatch,
+} from "./store.cjs";
 
 // ---------------------------------------------------------------------------
 // The file index store (WP-2.5) -- batched upsert, per-root pruning, the
@@ -185,6 +194,168 @@ describe("rebuildFtsIndex + searchFiles", () => {
 		expect(sanitizeMatchQuery("   ")).toBeNull();
 		expect(sanitizeMatchQuery("???")).toBeNull();
 		expect(sanitizeMatchQuery(null)).toBeNull();
+	});
+});
+
+describe("syncFtsForPath", () => {
+	it("inserts a files_fts row for a path that did not have one", async () => {
+		const db = await createDb();
+		syncFtsForPath(db, "C:\\a\\new-file.txt", "new-file.txt");
+		expect(db.all("SELECT path FROM files_fts WHERE path = ?", ["C:\\a\\new-file.txt"])).toHaveLength(1);
+	});
+
+	it("removes the files_fts row for a path when called with no name (a deletion)", async () => {
+		const db = await createDb();
+		syncFtsForPath(db, "C:\\a\\gone.txt", "gone.txt");
+		expect(db.all("SELECT path FROM files_fts WHERE path = ?", ["C:\\a\\gone.txt"])).toHaveLength(1);
+		syncFtsForPath(db, "C:\\a\\gone.txt", null);
+		expect(db.all("SELECT path FROM files_fts WHERE path = ?", ["C:\\a\\gone.txt"])).toHaveLength(0);
+	});
+
+	it("never leaves a duplicate row when called twice for the same path", async () => {
+		const db = await createDb();
+		syncFtsForPath(db, "C:\\a\\dup.txt", "dup.txt");
+		syncFtsForPath(db, "C:\\a\\dup.txt", "dup.txt");
+		expect(db.all("SELECT path FROM files_fts WHERE path = ?", ["C:\\a\\dup.txt"])).toHaveLength(1);
+	});
+});
+
+describe("applyWatcherBatch", () => {
+	it("upserts a genuinely new path into both files AND files_fts", async () => {
+		const db = await createDb();
+		const result = applyWatcherBatch(db, { upserts: [fileRow({ path: "C:\\a\\brand-new.txt", name: "brand-new.txt" })] }, 1000);
+		expect(result).toMatchObject({ upserted: 1, removed: 0 });
+		expect(db.all("SELECT path FROM files WHERE path = ?", ["C:\\a\\brand-new.txt"])).toHaveLength(1);
+		expect(searchFiles(db, "brand-new", null, 10).map((r) => r.path)).toEqual(["C:\\a\\brand-new.txt"]);
+	});
+
+	// This is the exact behaviour the watcher exists to get right: a
+	// metadata-only refresh (the overwhelmingly common case -- an editor
+	// saving a file it already indexed) must touch `files` but leave
+	// files_fts's row for that path completely alone, not delete-then-
+	// reinsert it. Proven by spying on every SQL statement `db.run` executes
+	// during the refresh and asserting NONE of them touch `files_fts` at
+	// all -- deliberately not a `rowid`-equality check, since SQLite's own
+	// rowid-reuse-after-delete behaviour on a small table can coincidentally
+	// hand back the same rowid even when a real delete+insert did happen,
+	// which would make that assertion pass vacuously regardless of whether
+	// the optimization actually fired.
+	it("does NOT touch files_fts for a metadata-only refresh of an already-indexed path", async () => {
+		const db = await createDb();
+		const target = fileRow({ path: "C:\\a\\existing.txt", name: "existing.txt", size: 10 });
+		applyWatcherBatch(db, { upserts: [target] }, 1000);
+		expect(db.all("SELECT path FROM files_fts WHERE path = ?", ["C:\\a\\existing.txt"])).toHaveLength(1);
+
+		const runSpy = vi.spyOn(db, "run");
+		// A second "upsert" for the SAME path, just a bigger size (as if the
+		// file's content changed but its name/path did not).
+		applyWatcherBatch(db, { upserts: [{ ...target, size: 999 }] }, 2000);
+
+		const ftsWrites = runSpy.mock.calls.filter(([sql]) => sql.includes("files_fts"));
+		expect(ftsWrites).toHaveLength(0); // not one DELETE or INSERT against files_fts
+		runSpy.mockRestore();
+
+		const row = db.first("SELECT size FROM files WHERE path = ?", ["C:\\a\\existing.txt"]);
+		expect(row.size).toBe(999); // files WAS refreshed
+		expect(db.all("SELECT path FROM files_fts WHERE path = ?", ["C:\\a\\existing.txt"])).toHaveLength(1); // still exactly one row
+	});
+
+	it("removes a deleted path from both files and files_fts", async () => {
+		const db = await createDb();
+		applyWatcherBatch(db, { upserts: [fileRow({ path: "C:\\a\\doomed.txt", name: "doomed.txt" })] }, 1000);
+		expect(db.all("SELECT path FROM files WHERE path = ?", ["C:\\a\\doomed.txt"])).toHaveLength(1);
+
+		const result = applyWatcherBatch(db, { removals: ["C:\\a\\doomed.txt"] }, 2000);
+		expect(result).toMatchObject({ upserted: 0, removed: 1 });
+		expect(db.all("SELECT path FROM files WHERE path = ?", ["C:\\a\\doomed.txt"])).toHaveLength(0);
+		expect(db.all("SELECT path FROM files_fts WHERE path = ?", ["C:\\a\\doomed.txt"])).toHaveLength(0);
+	});
+
+	it("removing a directory path also removes every file nested under it, even though the directory itself was never a row", async () => {
+		const db = await createDb();
+		applyWatcherBatch(
+			db,
+			{
+				upserts: [
+					fileRow({ path: "C:\\proj\\sub\\one.txt", name: "one.txt" }),
+					fileRow({ path: "C:\\proj\\sub\\deep\\two.txt", name: "two.txt" }),
+					fileRow({ path: "C:\\proj\\outside.txt", name: "outside.txt" }),
+				],
+			},
+			1000,
+		);
+
+		// "C:\\proj\\sub" itself is never a `files` row -- only files are
+		// indexed -- but removing it (e.g. the whole folder was dragged to the
+		// Recycle Bin in one filesystem operation) must still purge everything
+		// that lived underneath it.
+		const result = applyWatcherBatch(db, { removals: ["C:\\proj\\sub"] }, 2000);
+		expect(result.removed).toBe(2);
+		expect(db.all("SELECT path FROM files ORDER BY path").map((r) => r.path)).toEqual(["C:\\proj\\outside.txt"]);
+		expect(db.all("SELECT path FROM files_fts").map((r) => r.path)).toEqual(["C:\\proj\\outside.txt"]);
+	});
+
+	it("a removal for a similarly-prefixed sibling path does not remove the sibling itself", async () => {
+		const db = await createDb();
+		applyWatcherBatch(
+			db,
+			{
+				upserts: [
+					fileRow({ path: "C:\\proj\\sub\\file.txt", name: "file.txt" }),
+					fileRow({ path: "C:\\proj\\sub-other\\file.txt", name: "file.txt" }),
+				],
+			},
+			1000,
+		);
+
+		applyWatcherBatch(db, { removals: ["C:\\proj\\sub"] }, 2000);
+		expect(db.all("SELECT path FROM files ORDER BY path").map((r) => r.path)).toEqual([
+			"C:\\proj\\sub-other\\file.txt",
+		]);
+	});
+
+	it("respects maxFiles: refuses to insert a genuinely NEW path once the cap is reached, but still allows refreshes and removals", async () => {
+		const db = await createDb();
+		applyWatcherBatch(
+			db,
+			{
+				upserts: [
+					fileRow({ path: "C:\\a\\1.txt", name: "1.txt" }),
+					fileRow({ path: "C:\\a\\2.txt", name: "2.txt" }),
+				],
+				maxFiles: 2,
+			},
+			1000,
+		);
+		expect(db.all("SELECT path FROM files")).toHaveLength(2);
+
+		// maxFiles=2 has already been reached -- a third, brand-new path must
+		// be refused...
+		const result = applyWatcherBatch(
+			db,
+			{
+				upserts: [
+					fileRow({ path: "C:\\a\\3.txt", name: "3.txt" }),
+					fileRow({ path: "C:\\a\\1.txt", name: "1.txt", size: 55 }), // ...but refreshing an EXISTING path still works
+				],
+				maxFiles: 2,
+			},
+			2000,
+		);
+		expect(result.skippedAtCap).toBe(1);
+		expect(result.upserted).toBe(1);
+		expect(db.all("SELECT path FROM files")).toHaveLength(2);
+		expect(db.all("SELECT path FROM files WHERE path = ?", ["C:\\a\\3.txt"])).toHaveLength(0);
+		expect(db.first("SELECT size FROM files WHERE path = ?", ["C:\\a\\1.txt"]).size).toBe(55);
+
+		// Removals are never blocked by the cap.
+		const removalResult = applyWatcherBatch(db, { removals: ["C:\\a\\2.txt"], maxFiles: 2 }, 3000);
+		expect(removalResult.removed).toBe(1);
+		expect(db.all("SELECT path FROM files")).toHaveLength(1);
+	});
+
+	it("does nothing for an empty batch", () => {
+		expect(applyWatcherBatch(null, {}, 1000)).toEqual({ upserted: 0, removed: 0, skippedAtCap: 0 });
 	});
 });
 

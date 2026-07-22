@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { Worker } from "node:worker_threads";
 import { afterEach, describe, expect, it } from "vitest";
-import { runCrawl, shouldExcludeName, toFileRecord } from "./crawl-worker.cjs";
+import { isPathAllowed, runCrawl, shouldExcludeName, toFileRecord } from "./crawl-worker.cjs";
 
 // ---------------------------------------------------------------------------
 // The filesystem walk (WP-2.5) -- runCrawl() itself is exercised directly
@@ -64,6 +64,45 @@ describe("shouldExcludeName", () => {
 		expect(shouldExcludeName("Node_Modules", set)).toBe(true);
 		expect(shouldExcludeName(".GIT", set)).toBe(true);
 		expect(shouldExcludeName("src", set)).toBe(false);
+	});
+});
+
+describe("isPathAllowed", () => {
+	const root = "C:\\Users\\tester\\Desktop";
+
+	it("allows a file directly under the root", () => {
+		expect(isPathAllowed(root, `${root}\\a.txt`, new Set(), 12)).toBe(true);
+	});
+
+	it("allows a file nested within maxDepth", () => {
+		expect(isPathAllowed(root, `${root}\\a\\b\\file.txt`, new Set(), 12)).toBe(true);
+	});
+
+	it("rejects a file whose containing directory exceeds maxDepth -- the crawler would never have descended that far", () => {
+		// "a" is depth 1, "b" is depth 2 -- with maxDepth=1 the walk would never
+		// have pushed "b" onto its stack, so a watcher event for a file inside
+		// it must be rejected the same way.
+		expect(isPathAllowed(root, `${root}\\a\\b\\file.txt`, new Set(), 1)).toBe(false);
+		expect(isPathAllowed(root, `${root}\\a\\mid.txt`, new Set(), 1)).toBe(true);
+	});
+
+	it("rejects a path with an excluded directory segment anywhere along it", () => {
+		const exclusions = new Set(["node_modules"]);
+		expect(isPathAllowed(root, `${root}\\node_modules\\pkg\\index.js`, exclusions, 12)).toBe(false);
+		expect(isPathAllowed(root, `${root}\\proj\\node_modules\\deep\\file.js`, exclusions, 12)).toBe(false);
+		expect(isPathAllowed(root, `${root}\\proj\\keep.js`, exclusions, 12)).toBe(true);
+	});
+
+	it("rejects a file itself matching an excluded name, exactly like shouldExcludeName does for dirents", () => {
+		expect(isPathAllowed(root, `${root}\\.git`, new Set([".git"]), 12)).toBe(false);
+	});
+
+	it("rejects the root path itself (nothing to index there directly)", () => {
+		expect(isPathAllowed(root, root, new Set(), 12)).toBe(false);
+	});
+
+	it("rejects a path outside the root entirely", () => {
+		expect(isPathAllowed(root, "C:\\Users\\tester\\Documents\\other.txt", new Set(), 12)).toBe(false);
 	});
 });
 

@@ -80,6 +80,39 @@ function shouldExcludeName(name, exclusionSet) {
 	return exclusionSet.has(String(name).toLowerCase());
 }
 
+// Shared with the watcher (WP-2.6, electron/services/file-index/watcher.cjs)
+// -- the single-PATH version of the exact same exclusion-name and depth
+// rules walkRoot() enforces while walking a directory tree, so a filesystem
+// CHANGE event for a path the crawler would never have visited in the first
+// place (inside an excluded directory, or past `maxDepth`) is never written
+// to the index by the watcher either -- one predicate, not two copies of the
+// same policy that could quietly drift apart.
+//
+// `rootPath`/`fullPath` are both absolute. Every path segment between the
+// root and `fullPath` (including `fullPath`'s own final segment, exactly
+// like walkRoot() checking `shouldExcludeName(dirent.name, ...)` on both
+// directories and files alike) is checked against `exclusionSet`; and the
+// number of directories separating `fullPath` from `rootPath` must not
+// exceed `maxDepth` -- mirroring walkRoot()'s own `depth + 1 <= ctx.maxDepth`
+// guard on ever descending into a subdirectory in the first place.
+function isPathAllowed(rootPath, fullPath, exclusionSet, maxDepth) {
+	const relative = path.relative(rootPath, fullPath);
+	if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+		return false; // outside the root entirely, or exactly the root itself
+	}
+	const segments = relative.split(path.sep).filter(Boolean);
+	if (segments.length === 0) {
+		return false;
+	}
+	if (segments.some((segment) => shouldExcludeName(segment, exclusionSet))) {
+		return false;
+	}
+	// segments.length - 1 is how many directories separate `fullPath` from
+	// `rootPath` -- exactly the depth walkRoot() would have had to descend to
+	// reach the directory this path lives in.
+	return segments.length - 1 <= maxDepth;
+}
+
 function toFileRecord(root, fullPath, name, stat) {
 	const ext = path.extname(name).slice(1).toLowerCase() || null;
 	const mtimeMs = Number.isFinite(stat?.mtimeMs) ? stat.mtimeMs : 0;
@@ -308,6 +341,7 @@ if (!isMainThread && parentPort) {
 module.exports = {
 	runCrawl,
 	shouldExcludeName,
+	isPathAllowed,
 	toFileRecord,
 	DEFAULT_BATCH_SIZE,
 	DEFAULT_MAX_DEPTH,

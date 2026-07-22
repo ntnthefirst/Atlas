@@ -230,4 +230,17 @@ contextBridge.exposeInMainWorld("atlas", {
 		ipcRenderer.on("fileIndex:progress", listener);
 		return () => ipcRenderer.removeListener("fileIndex:progress", listener);
 	},
+
+	// WP-2.6: file index watcher -- start/stop is the ONLY way watching ever
+	// begins (see electron/services/file-index/watcher.cjs's header).
+	startFileIndexWatch: () => ipcRenderer.invoke("fileIndex:startWatch"),
+	stopFileIndexWatch: () => ipcRenderer.invoke("fileIndex:stopWatch"),
+	getFileIndexWatchStatus: () => ipcRenderer.invoke("fileIndex:getWatchStatus"),
+	// Fires on every status change (started/stopped/error/each debounced
+	// flush) -- see watcher.cjs's broadcast().
+	onFileIndexWatchStatus: (callback) => {
+		const listener = (_event, status) => callback(status);
+		ipcRenderer.on("fileIndex:watchStatus", listener);
+		return () => ipcRenderer.removeListener("fileIndex:watchStatus", listener);
+	},
 });
