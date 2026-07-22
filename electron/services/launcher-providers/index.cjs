@@ -433,6 +433,7 @@ const registry = createLauncherProviderRegistry();
 registry.registerProvider(require("./data-provider.cjs"));
 registry.registerProvider(require("./commands-provider.cjs"));
 registry.registerProvider(require("./apps-provider.cjs"));
+registry.registerProvider(require("./files-provider.cjs"));
 
 module.exports = {
 	// Exposed so tests (and, if ever needed, a future WP) can build an
