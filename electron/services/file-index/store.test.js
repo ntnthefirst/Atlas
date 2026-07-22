@@ -6,6 +6,7 @@ import { AtlasDatabase } from "../../db.cjs";
 import {
 	applyWatcherBatch,
 	getIndexStats,
+	parseFileSearchFilters,
 	pruneStaleRows,
 	rebuildFtsIndex,
 	sanitizeMatchQuery,
@@ -373,5 +374,289 @@ describe("getIndexStats", () => {
 			{ root: "root-a", count: 1, lastSeenAt: 1000 },
 			{ root: "root-b", count: 1, lastSeenAt: 1000 },
 		]);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Filters (WP-2.7): ext:<value> / in:<value>, parsed out of the query
+// string, applied as SQL constraints, and composable with each other and
+// with free text.
+// ---------------------------------------------------------------------------
+
+describe("parseFileSearchFilters", () => {
+	it("parses a bare ext: filter and leaves no residual text", () => {
+		expect(parseFileSearchFilters("ext:pdf")).toEqual({ ext: "pdf", in: null, residualText: "" });
+	});
+
+	it("parses a bare in: filter and leaves no residual text", () => {
+		expect(parseFileSearchFilters("in:work")).toEqual({ ext: null, in: "work", residualText: "" });
+	});
+
+	it("composes ext: and in: together with free text, regardless of order", () => {
+		expect(parseFileSearchFilters("ext:pdf in:work report")).toEqual({
+			ext: "pdf",
+			in: "work",
+			residualText: "report",
+		});
+		expect(parseFileSearchFilters("report ext:pdf in:work")).toEqual({
+			ext: "pdf",
+			in: "work",
+			residualText: "report",
+		});
+	});
+
+	it("normalizes ext: to lowercase and strips a leading dot", () => {
+		expect(parseFileSearchFilters("ext:.PDF")).toEqual({ ext: "pdf", in: null, residualText: "" });
+	});
+
+	it("normalizes in: to lowercase", () => {
+		expect(parseFileSearchFilters("IN:Work")).toEqual({ ext: null, in: "work", residualText: "" });
+	});
+
+	it("a filter token with no value is dropped and never breaks parsing", () => {
+		expect(parseFileSearchFilters("ext: report")).toEqual({ ext: null, in: null, residualText: "report" });
+		expect(parseFileSearchFilters("in:")).toEqual({ ext: null, in: null, residualText: "" });
+	});
+
+	it("keeps the LAST occurrence when a filter key is repeated", () => {
+		expect(parseFileSearchFilters("ext:pdf ext:docx")).toEqual({ ext: "docx", in: null, residualText: "" });
+	});
+
+	it("does not treat a mid-word colon as a filter (only a whole whitespace-delimited token counts)", () => {
+		expect(parseFileSearchFilters("reportext:pdf")).toEqual({ ext: null, in: null, residualText: "reportext:pdf" });
+	});
+
+	it("returns an all-empty shape for a blank query", () => {
+		expect(parseFileSearchFilters("")).toEqual({ ext: null, in: null, residualText: "" });
+		expect(parseFileSearchFilters(null)).toEqual({ ext: null, in: null, residualText: "" });
+	});
+});
+
+describe("searchFiles filters", () => {
+	async function createFilterFixtureDb() {
+		const db = await createDb();
+		upsertFilesBatch(
+			db,
+			[
+				fileRow({
+					path: "C:\\Users\\me\\work\\reports\\report.pdf",
+					name: "report.pdf",
+					ext: "pdf",
+					root: "root-work",
+				}),
+				fileRow({
+					path: "C:\\Users\\me\\work\\reports\\report.docx",
+					name: "report.docx",
+					ext: "docx",
+					root: "root-work",
+				}),
+				fileRow({
+					path: "C:\\Users\\me\\personal\\report.pdf",
+					name: "report.pdf",
+					ext: "pdf",
+					root: "root-personal",
+				}),
+			],
+			1000,
+		);
+		rebuildFtsIndex(db);
+		return db;
+	}
+
+	it("ext: restricts results to files with that extension (a real SQL WHERE constraint, not a JS filter)", async () => {
+		const db = await createFilterFixtureDb();
+		const results = searchFiles(db, "ext:pdf report", null, 10);
+		expect(results.length).toBeGreaterThan(0); // non-vacuous: something actually matched
+		expect(results.every((r) => r.ext === "pdf")).toBe(true);
+		expect(results.some((r) => r.ext === "docx")).toBe(false);
+	});
+
+	it("in: restricts results to files under a matching path segment", async () => {
+		const db = await createFilterFixtureDb();
+		const results = searchFiles(db, "in:work report", null, 10);
+		expect(results.length).toBeGreaterThan(0);
+		expect(results.every((r) => r.path.includes("\\work\\"))).toBe(true);
+		expect(results.some((r) => r.path.includes("\\personal\\"))).toBe(false);
+	});
+
+	it("in: also matches a file's configured root id, not only its literal path", async () => {
+		const db = await createFilterFixtureDb();
+		const results = searchFiles(db, "in:root-personal report", null, 10);
+		expect(results.length).toBe(1);
+		expect(results[0].path).toBe("C:\\Users\\me\\personal\\report.pdf");
+	});
+
+	it("ext: and in: COMPOSE: both constraints apply together, narrowing further than either alone", async () => {
+		const db = await createFilterFixtureDb();
+		// Both "in:work" alone (2 hits: report.pdf AND report.docx) and
+		// "ext:pdf" alone (2 hits: work's report.pdf AND personal's report.pdf)
+		// return more than one row -- proving this isn't a vacuous fixture --
+		// but composed together only ONE file satisfies both.
+		const inOnly = searchFiles(db, "in:work report", null, 10);
+		const extOnly = searchFiles(db, "ext:pdf report", null, 10);
+		expect(inOnly.length).toBe(2);
+		expect(extOnly.length).toBe(2);
+
+		const composed = searchFiles(db, "ext:pdf in:work report", null, 10);
+		expect(composed).toHaveLength(1);
+		expect(composed[0].path).toBe("C:\\Users\\me\\work\\reports\\report.pdf");
+	});
+
+	it("a filter with no value (ext:) does not break the query -- falls back to plain free-text search", async () => {
+		const db = await createFilterFixtureDb();
+		expect(() => searchFiles(db, "ext: report", null, 10)).not.toThrow();
+		const results = searchFiles(db, "ext: report", null, 10);
+		expect(results.length).toBe(3); // every "report*" file, ext: was dropped entirely
+	});
+
+	it("a filters-only query (no free text at all) still returns matching rows", async () => {
+		const db = await createFilterFixtureDb();
+		const results = searchFiles(db, "ext:docx", null, 10);
+		expect(results).toHaveLength(1);
+		expect(results[0].name).toBe("report.docx");
+	});
+
+	it("escapes LIKE wildcard characters in an in: value so they cannot be used to widen matches unexpectedly", async () => {
+		const db = await createFilterFixtureDb();
+		// "%" and "_" are SQL LIKE wildcards -- a filter value containing them
+		// must be treated as a LITERAL folder name, not a wildcard pattern.
+		const results = searchFiles(db, "in:100% report", null, 10);
+		expect(results).toEqual([]);
+	});
+
+	it("still enforces environment scoping when a filter is present -- filters never widen visibility", async () => {
+		const db = await createDb();
+		upsertFilesBatch(
+			db,
+			[
+				fileRow({
+					path: "C:\\envA\\work\\secret.pdf",
+					name: "secret.pdf",
+					ext: "pdf",
+					environmentId: "env-a",
+					root: "root-a",
+				}),
+			],
+			1000,
+		);
+		rebuildFtsIndex(db);
+		expect(searchFiles(db, "ext:pdf in:work secret", "env-b", 10)).toEqual([]);
+		expect(searchFiles(db, "ext:pdf in:work secret", "env-a", 10).map((r) => r.path)).toEqual([
+			"C:\\envA\\work\\secret.pdf",
+		]);
+	});
+});
+
+describe("searchFiles ranking", () => {
+	it("ranks a more recently modified, equally-matching file above a stale one", async () => {
+		const db = await createDb();
+		const now = Date.parse("2026-07-21T12:00:00.000Z");
+		upsertFilesBatch(
+			db,
+			[
+				fileRow({
+					path: "C:\\a\\notes-stale.txt",
+					name: "project-notes.txt",
+					ext: "txt",
+					mtime: now - 200 * 24 * 60 * 60 * 1000,
+				}),
+				fileRow({ path: "C:\\a\\notes-fresh.txt", name: "project-notes-fresh.txt", ext: "txt", mtime: now }),
+			],
+			1000,
+		);
+		rebuildFtsIndex(db);
+		const results = searchFiles(db, "project", null, 10, { now });
+		expect(results).toHaveLength(2); // non-vacuous: both rows actually matched
+		expect(results[0].path).toBe("C:\\a\\notes-fresh.txt");
+	});
+
+	it("caps results at the requested limit even though ranking widens the internal candidate pool", async () => {
+		const db = await createDb();
+		const rows = Array.from({ length: 12 }, (_, i) =>
+			fileRow({ path: `C:\\a\\report-${i}.txt`, name: `report-${i}.txt`, ext: "txt" }),
+		);
+		upsertFilesBatch(db, rows, 1000);
+		rebuildFtsIndex(db);
+		const results = searchFiles(db, "report", null, 5);
+		expect(results).toHaveLength(5);
+	});
+
+	// Isolated proof that frecency is wired end-to-end through the REAL events
+	// table (not just unit-tested in file-ranking.cjs with a hand-built
+	// frecencyByPath map): launcher.execute events are recorded with the
+	// provider-namespaced id ("files::<path>", see launcher-providers/
+	// index.cjs's header), so this seeds exactly that shape directly into
+	// `events` and expects searchFiles() to read it back out via its own
+	// loadFileFrecency().
+	it("promotes a heavily-and-recently-executed file over a fresher never-executed one, via real events rows", async () => {
+		const db = await createDb();
+		const now = Date.parse("2026-07-21T12:00:00.000Z");
+		const heavilyUsedPath = "C:\\a\\quarterly-summary.txt";
+		const neverUsedPath = "C:\\a\\quarterly-draft.txt";
+		upsertFilesBatch(
+			db,
+			[
+				fileRow({ path: heavilyUsedPath, name: "quarterly-summary.txt", ext: "txt", mtime: now - 90 * 24 * 60 * 60 * 1000 }),
+				fileRow({ path: neverUsedPath, name: "quarterly-draft.txt", ext: "txt", mtime: now }),
+			],
+			1000,
+		);
+		rebuildFtsIndex(db);
+
+		// Baseline: with no execution history at all, the fresher (never-used)
+		// file wins on recency alone -- the control this test's real assertion
+		// is measured against.
+		const baseline = searchFiles(db, "quarterly", "env-x", 10, { now });
+		expect(baseline).toHaveLength(2);
+		expect(baseline[0].path).toBe(neverUsedPath);
+
+		for (let i = 0; i < 15; i += 1) {
+			db.run("INSERT INTO events (ts, environment_id, type, subject, payload, session_id) VALUES (?, ?, ?, ?, ?, ?)", [
+				new Date(now - i * 24 * 60 * 60 * 1000).toISOString(),
+				"env-x",
+				"launcher.execute",
+				`files::${heavilyUsedPath}`,
+				null,
+				null,
+			]);
+		}
+
+		const ranked = searchFiles(db, "quarterly", "env-x", 10, { now });
+		expect(ranked[0].path).toBe(heavilyUsedPath);
+	});
+
+	// A DIFFERENT environment's frecency history for the exact same file must
+	// never leak into this environment's ranking (WP-0.8's per-environment
+	// frecency scoping, mirrored from launcher-providers/index.cjs's own
+	// loadFrecency()).
+	it("never uses another environment's execution history when ranking for this environment", async () => {
+		const db = await createDb();
+		const now = Date.parse("2026-07-21T12:00:00.000Z");
+		const targetPath = "C:\\a\\quarterly-summary.txt";
+		upsertFilesBatch(
+			db,
+			[
+				fileRow({ path: targetPath, name: "quarterly-summary.txt", ext: "txt", mtime: now - 90 * 24 * 60 * 60 * 1000 }),
+				fileRow({ path: "C:\\a\\quarterly-draft.txt", name: "quarterly-draft.txt", ext: "txt", mtime: now }),
+			],
+			1000,
+		);
+		rebuildFtsIndex(db);
+
+		for (let i = 0; i < 15; i += 1) {
+			db.run("INSERT INTO events (ts, environment_id, type, subject, payload, session_id) VALUES (?, ?, ?, ?, ?, ?)", [
+				new Date(now - i * 24 * 60 * 60 * 1000).toISOString(),
+				"env-other",
+				"launcher.execute",
+				`files::${targetPath}`,
+				null,
+				null,
+			]);
+		}
+
+		const ranked = searchFiles(db, "quarterly", "env-x", 10, { now });
+		// Still the fresher file -- env-other's heavy usage of targetPath must
+		// not be visible while ranking for env-x.
+		expect(ranked[0].path).toBe("C:\\a\\quarterly-draft.txt");
 	});
 });

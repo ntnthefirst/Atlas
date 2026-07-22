@@ -1,6 +1,8 @@
 "use strict";
 
 const path = require("node:path");
+const { countEventsBySubject } = require("../event-log.cjs");
+const { rankFileResults } = require("./file-ranking.cjs");
 
 // ---------------------------------------------------------------------------
 // The file index store (WP-2.5) -- every write and read against the `files`
@@ -254,6 +256,161 @@ function sanitizeMatchQuery(query) {
 		.join(" ");
 }
 
+// -- Filters: ext:<value> and in:<value> (WP-2.7) ---------------------------
+//
+// Recognized as whitespace-delimited tokens of the form `key:value` anywhere
+// in the query string -- `ext:pdf in:work report` parses to
+// `{ ext: "pdf", in: "work", residualText: "report" }`. Tokens are matched
+// on the RAW (unsplit-by-colon) word boundary, so a token has to be the
+// WHOLE thing between spaces; "report ext:pdf" and "ext:pdf report" parse
+// identically, and "reportext:pdf" (no space) is left alone as ordinary free
+// text, never accidentally parsed as a filter. Composes because every
+// recognized filter token is REMOVED from the text that becomes the FTS5
+// MATCH query -- residualText is what's left after every `ext:`/`in:` token
+// is stripped out, so `ext:pdf in:work report` and a plain `report` search
+// go through the exact same MATCH-building path below, just with extra SQL
+// constraints layered on.
+//
+// A filter key with no value (`ext:`, `in:`) is dropped silently -- neither
+// applied as a constraint nor kept as residual text (a bare "ext:" is
+// meaningless as free text either way) -- so a stray/incomplete filter token
+// can never break the query. A repeated key (`ext:pdf ext:docx`) keeps the
+// LAST occurrence, the simplest, most predictable behaviour for a single-line
+// search box (no OR-of-extensions support here).
+const FILTER_TOKEN_RE = /^(ext|in):(.*)$/iu;
+
+function parseFileSearchFilters(query) {
+	const text = typeof query === "string" ? query : "";
+	const tokens = text.split(/\s+/u).filter(Boolean);
+	const filters = { ext: null, in: null };
+	const residualTokens = [];
+
+	for (const token of tokens) {
+		const match = token.match(FILTER_TOKEN_RE);
+		if (!match) {
+			residualTokens.push(token);
+			continue;
+		}
+		const key = match[1].toLowerCase();
+		let value = match[2].trim();
+		if (!value) {
+			continue; // "ext:"/"in:" with no value -- silently dropped, never breaks the query
+		}
+		value = value.toLowerCase();
+		if (key === "ext") {
+			value = value.replace(/^\.+/u, "");
+			if (!value) {
+				continue; // "ext:." (a dot with nothing after it) -- likewise meaningless
+			}
+		}
+		filters[key] = value;
+	}
+
+	return { ext: filters.ext, in: filters.in, residualText: residualTokens.join(" ") };
+}
+
+// `ext` is a real, indexed column (migration 009) -- filtered with a plain
+// parameterized equality, never a LIKE scan. Stored values are already
+// lower-cased, dot-free (see crawl-worker.cjs's own `path.extname(...).slice
+// (1).toLowerCase()`), so `ext:.PDF` and `ext:pdf` both normalize to the
+// same "pdf" comparison here.
+function buildExtClause(ext) {
+	if (!ext) {
+		return { clause: "", params: [] };
+	}
+	const normalized = ext.replace(/^\.+/u, "");
+	if (!normalized) {
+		return { clause: "", params: [] };
+	}
+	return { clause: " AND f.ext = ?", params: [normalized] };
+}
+
+// SQLite LIKE wildcards (`%`, `_`) in a user-typed filter value must never be
+// interpreted as wildcards -- escaped with `!` (not `\`, which is also the
+// path separator this same pattern embeds as a literal delimiter; using it
+// as the ESCAPE character too would make the delimiter's own backslashes
+// ambiguous with an escape sequence).
+function escapeLikeValue(value) {
+	return value.replace(/[!%_]/gu, (ch) => `!${ch}`);
+}
+
+// `in:<value>` matches a file whose path contains `value` as a whole path
+// SEGMENT (bounded by path separators on both sides -- so `in:doc` does NOT
+// match a file merely named "document.txt" sitting directly in some other
+// folder), OR whose configured root id/label contains `value` -- covers both
+// "a folder literally named work/project somewhere in the path" and "a
+// user-configured index root whose id/label is work/project" (root ids come
+// from electron/config/file-index-prefs.cjs; the three seeded defaults are
+// `default:desktop`/`default:documents`/`default:downloads`, so `in:documents`
+// matches through the root id even for a file whose actual OS path doesn't
+// contain the word "Documents", e.g. after a user retargets that root
+// elsewhere). Both comparisons are still plain indexed-adjacent LIKE scans
+// against real columns -- never an over-fetch-then-filter-in-JS.
+function buildInClause(inValue) {
+	if (!inValue) {
+		return { clause: "", params: [] };
+	}
+	const escaped = escapeLikeValue(inValue);
+	const segmentPattern = `%${path.sep}${escaped}${path.sep}%`;
+	const rootPattern = `%${escaped}%`;
+	return {
+		clause: " AND (f.path LIKE ? ESCAPE '!' OR f.root LIKE ? ESCAPE '!')",
+		params: [segmentPattern, rootPattern],
+	};
+}
+
+// -- Ranking inputs: frecency (WP-2.7) ---------------------------------------
+//
+// Mirrors electron/services/launcher-providers/index.cjs's own loadFrecency()
+// exactly (same event type, same "no db/environmentId -> empty Map, any
+// query failure -> degrade to ranking without frecency" contract) but scoped
+// to THIS provider's results: `launcher:execute` records the event's
+// `subject` as the namespaced result id the renderer was actually given
+// (`${provider.name}::${id}`, see launcher-providers/index.cjs's header) --
+// for the files provider (electron/services/launcher-providers/
+// files-provider.cjs) that is `files::<absolute path>`. There is no shared
+// cache to reuse here (the registry computes ITS OWN frecency map from the
+// same underlying event rows, for the cross-provider blend that runs after
+// this module returns) -- this is a second, independently-scoped read of the
+// same indexed query, not a second event-log design.
+const FRECENCY_EVENT_TYPE = "launcher.execute";
+const FILE_RESULT_NAMESPACE = "files"; // must match files-provider.cjs's registered provider `name`
+
+function loadFileFrecency(db, environmentId) {
+	if (!db || !environmentId) {
+		return new Map();
+	}
+	try {
+		const rows = countEventsBySubject(db, FRECENCY_EVENT_TYPE, environmentId);
+		const prefix = `${FILE_RESULT_NAMESPACE}::`;
+		const map = new Map();
+		for (const row of rows) {
+			if (typeof row.subject === "string" && row.subject.startsWith(prefix)) {
+				map.set(row.subject.slice(prefix.length), { count: row.count, lastTs: row.lastTs });
+			}
+		}
+		return map;
+	} catch (error) {
+		console.error("[Atlas] file-index frecency lookup failed (ranking by match/recency only):", error);
+		return new Map();
+	}
+}
+
+// A candidate pool wider than the caller's requested display `limit` --
+// ranking (fuzzy name match, recency, frecency, path depth, environment
+// association) runs in JS on this pool, since none of those besides ext/in
+// are expressible as SQL constraints, but the pool itself is STILL produced
+// entirely by SQL (env scope + ext/in filters + FTS5 MATCH + bm25 pre-sort),
+// never an unconstrained table scan -- this is the standard "cheap indexed
+// pre-filter, then re-rank a bounded candidate set" shape, not the
+// over-fetch-then-filter-in-JS anti-pattern the ext/in filters themselves
+// must avoid. CANDIDATE_POOL_CAP bounds the worst case (a filters-only query
+// against a huge index, or a very high caller-requested limit) so this can
+// never approach a full scan regardless of how it's called.
+const CANDIDATE_MULTIPLIER = 5;
+const CANDIDATE_POOL_MIN = 50;
+const CANDIDATE_POOL_CAP = 300;
+
 // Environment scoping (WP-0.8): a row whose `environment_id` names a
 // DIFFERENT environment than `environmentId` is never returned, regardless of
 // isolation mode -- isolation.cjs's own policy comment is explicit that a
@@ -267,37 +424,88 @@ function sanitizeMatchQuery(query) {
 // screen, before any environment has ever been chosen), only those global,
 // unassigned-root rows are visible -- there is no environment to match
 // against, so nothing environment-specific can be shown.
-function searchFiles(db, query, environmentId, limit = 20) {
+//
+// THIS clause is never weakened into a ranking signal (see file-ranking.cjs's
+// header for the boost that IS allowed): it is the one thing standing
+// between "visible" and "invisible", applied identically whether the query
+// has free text, filters, both, or (after filter-stripping) neither.
+//
+// `ext:`/`in:` filters (WP-2.7, above) are additional SQL constraints layered
+// on top of this same WHERE clause -- never a second, separate query, and
+// never applied by over-fetching every environment-visible row and filtering
+// in JS.
+function searchFiles(db, query, environmentId, limit = 20, options = {}) {
 	if (!db) {
 		return [];
 	}
-	const matchQuery = sanitizeMatchQuery(query);
-	if (!matchQuery) {
+
+	const { ext, in: inValue, residualText } = parseFileSearchFilters(query);
+	const matchQuery = sanitizeMatchQuery(residualText);
+	if (!matchQuery && !ext && !inValue) {
+		// Nothing usable at all (blank query, pure punctuation, or only a
+		// dropped/empty filter token) -- "no search", same as before WP-2.7.
 		return [];
 	}
+
 	const boundedLimit = Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), 200) : 20;
+	const candidateLimit = Math.min(Math.max(boundedLimit * CANDIDATE_MULTIPLIER, CANDIDATE_POOL_MIN), CANDIDATE_POOL_CAP);
 
 	const envClause = environmentId ? "(f.environment_id = ? OR f.environment_id IS NULL)" : "f.environment_id IS NULL";
-	const params = environmentId
-		? [matchQuery, environmentId, boundedLimit]
-		: [matchQuery, boundedLimit];
+	const envParams = environmentId ? [environmentId] : [];
+	const extClause = buildExtClause(ext);
+	const inClause = buildInClause(inValue);
 
-	try {
-		return db.all(
-			`SELECT f.path, f.name, f.ext, f.size, f.mtime, f.environment_id
+	const whereExtra = `${envClause}${extClause.clause}${inClause.clause}`;
+
+	let sql;
+	let params;
+	if (matchQuery) {
+		sql = `SELECT f.path, f.name, f.ext, f.size, f.mtime, f.environment_id, files_fts.rank AS bm25Rank
 			 FROM files_fts
 			 JOIN files f ON f.path = files_fts.path
-			 WHERE files_fts MATCH ? AND ${envClause}
+			 WHERE files_fts MATCH ? AND ${whereExtra}
 			 ORDER BY rank
-			 LIMIT ?`,
-			params,
-		);
+			 LIMIT ?`;
+		params = [matchQuery, ...envParams, ...extClause.params, ...inClause.params, candidateLimit];
+	} else {
+		// Filters only, no free text (e.g. "ext:pdf" alone) -- no MATCH clause
+		// is possible (or needed); pre-sort by recency so the candidate pool
+		// handed to rankFileResults() is already a reasonable "most likely
+		// relevant" slice of a potentially much larger matching set.
+		sql = `SELECT f.path, f.name, f.ext, f.size, f.mtime, f.environment_id
+			 FROM files f
+			 WHERE ${whereExtra}
+			 ORDER BY f.mtime DESC
+			 LIMIT ?`;
+		params = [...envParams, ...extClause.params, ...inClause.params, candidateLimit];
+	}
+
+	let rows;
+	try {
+		rows = db.all(sql, params);
 	} catch (error) {
 		// A malformed MATCH expression must never break the launcher's search --
 		// degrade to "no file results this query" instead.
 		console.error("[Atlas] file-index search failed:", error);
 		return [];
 	}
+
+	const frecencyByPath = loadFileFrecency(db, environmentId);
+	const ranked = rankFileResults(rows, {
+		query: residualText,
+		environmentId,
+		frecencyByPath,
+		now: options.now,
+	});
+
+	return ranked.slice(0, boundedLimit).map(({ path: p, name, ext: e, size, mtime, environment_id }) => ({
+		path: p,
+		name,
+		ext: e,
+		size,
+		mtime,
+		environment_id,
+	}));
 }
 
 // Backs the Settings surface's "N files indexed" summary -- one query, no
@@ -324,5 +532,6 @@ module.exports = {
 	applyWatcherBatch,
 	searchFiles,
 	sanitizeMatchQuery,
+	parseFileSearchFilters,
 	getIndexStats,
 };
