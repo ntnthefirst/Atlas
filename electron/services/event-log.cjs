@@ -289,6 +289,35 @@ function listEventsByEnvironment(db, environmentId, options = {}) {
 	return db.all(sql, params).map(parseEventRow);
 }
 
+// Aggregate lookup for frecency (WP-2.2): for one event `type` scoped to one
+// `environmentId`, how many times has each `subject` occurred, and when was
+// the most recent one? ONE indexed GROUP BY query -- never a per-subject
+// query in a loop -- so a launcher-sized result list can be ranked without
+// the frecency lookup itself becoming the slow part. Rows with a null
+// `subject` are excluded (nothing to key a frecency score by); ordered by
+// count descending only for readability -- callers key off `subject`, not
+// row order.
+//
+// `environmentId` is REQUIRED, not optional -- mirroring
+// electron/data/scoped.cjs's own `requireEnvironmentId` discipline ("refuse
+// to build an unscoped accessor") so this aggregate can never accidentally
+// run across every environment at once and leak one environment's frecency
+// into another's ranking.
+function countEventsBySubject(db, type, environmentId, options = {}) {
+	if (!environmentId) {
+		throw new Error("countEventsBySubject() requires an environmentId; refusing to aggregate unscoped.");
+	}
+	return db.all(
+		`SELECT subject, COUNT(*) AS count, MAX(ts) AS lastTs
+     FROM events
+     WHERE type = ? AND environment_id = ? AND subject IS NOT NULL
+     GROUP BY subject
+     ORDER BY count DESC
+     LIMIT ?`,
+		[type, environmentId, normalizeLimit(options.limit)],
+	);
+}
+
 // Sequence lookup: everything that happened after event `eventId`, within
 // `withinMinutes` of it. This is what lets the miner ask "what tends to
 // follow a task.complete?" or "does app.focus on X precede session.stop?".
@@ -328,6 +357,7 @@ module.exports = {
 	listEventsByType,
 	listEventsByEnvironment,
 	listEventsFollowing,
+	countEventsBySubject,
 	DEFAULT_FLUSH_INTERVAL_MS,
 	DEFAULT_MAX_BUFFER,
 	DEFAULT_RETENTION_DAYS,

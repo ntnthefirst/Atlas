@@ -108,9 +108,10 @@ contextBridge.exposeInMainWorld("atlas", {
 	// electron/services/launcher-hotkey.cjs).
 	getLauncherHotkey: () => ipcRenderer.invoke("launcher:getHotkeyBinding"),
 	setLauncherHotkey: (accelerator) => ipcRenderer.invoke("launcher:setHotkeyBinding", accelerator),
-	// Results/execution go through the WP-2.2 provider seam (electron/services/
-	// launcher-providers.cjs) -- a fixed stub list filtered by `query` in
-	// WP-2.1, real providers later, same two channels either way.
+	// Results/execution go through the provider registry (electron/services/
+	// launcher-providers/index.cjs, WP-2.2) -- a fixed stub list filtered by
+	// `query` in WP-2.1, a registry of real providers from WP-2.2 on, same
+	// two channels either way.
 	queryLauncher: (query) => ipcRenderer.invoke("launcher:query", query),
 	executeLauncherResult: (resultId, modifier) => ipcRenderer.invoke("launcher:execute", resultId, modifier),
 	hideLauncherWindow: () => ipcRenderer.invoke("launcher:hide"),

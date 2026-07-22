@@ -10,6 +10,7 @@ import {
 	listEventsByType,
 	listEventsByEnvironment,
 	listEventsFollowing,
+	countEventsBySubject,
 } from "./event-log.cjs";
 
 // This suite is ESM (the package is `type: module`) even though the module
@@ -529,5 +530,74 @@ describe("query helpers", () => {
 
 		const [event] = listEventsByType(db, "session.start");
 		expect(event.payload).toBeNull();
+	});
+});
+
+describe("countEventsBySubject() (WP-2.2 -- launcher frecency)", () => {
+	it("aggregates count and most-recent timestamp per subject, for one type", async () => {
+		const db = await createDb();
+		const t0 = Date.now();
+		seedEvents(db, [
+			{ ts: new Date(t0).toISOString(), type: "launcher.execute", environmentId: "env-a", subject: "actions::open-settings" },
+			{
+				ts: new Date(t0 + 1000).toISOString(),
+				type: "launcher.execute",
+				environmentId: "env-a",
+				subject: "actions::open-settings",
+			},
+			{
+				ts: new Date(t0 + 2000).toISOString(),
+				type: "launcher.execute",
+				environmentId: "env-a",
+				subject: "actions::new-task",
+			},
+		]);
+
+		const rows = countEventsBySubject(db, "launcher.execute", "env-a");
+		const bySubject = Object.fromEntries(rows.map((r) => [r.subject, r]));
+
+		expect(bySubject["actions::open-settings"].count).toBe(2);
+		expect(bySubject["actions::open-settings"].lastTs).toBe(new Date(t0 + 1000).toISOString());
+		expect(bySubject["actions::new-task"].count).toBe(1);
+	});
+
+	it("only counts events of the requested type", async () => {
+		const db = await createDb();
+		seedEvents(db, [
+			{ ts: new Date().toISOString(), type: "launcher.execute", environmentId: "env-a", subject: "actions::x" },
+			{ ts: new Date().toISOString(), type: "launcher.query", environmentId: "env-a", subject: "actions::x" },
+		]);
+
+		const rows = countEventsBySubject(db, "launcher.execute", "env-a");
+		expect(rows).toHaveLength(1);
+		expect(rows[0].count).toBe(1);
+	});
+
+	it("is scoped per environment -- the same subject in two environments never mixes counts", async () => {
+		const db = await createDb();
+		seedEvents(db, [
+			{ ts: new Date().toISOString(), type: "launcher.execute", environmentId: "env-a", subject: "actions::x" },
+			{ ts: new Date().toISOString(), type: "launcher.execute", environmentId: "env-a", subject: "actions::x" },
+			{ ts: new Date().toISOString(), type: "launcher.execute", environmentId: "env-b", subject: "actions::x" },
+		]);
+
+		const envA = countEventsBySubject(db, "launcher.execute", "env-a");
+		const envB = countEventsBySubject(db, "launcher.execute", "env-b");
+
+		expect(envA.find((r) => r.subject === "actions::x").count).toBe(2);
+		expect(envB.find((r) => r.subject === "actions::x").count).toBe(1);
+	});
+
+	it("excludes rows with a null subject", async () => {
+		const db = await createDb();
+		seedEvents(db, [{ ts: new Date().toISOString(), type: "launcher.execute", environmentId: "env-a", subject: null }]);
+
+		expect(countEventsBySubject(db, "launcher.execute", "env-a")).toEqual([]);
+	});
+
+	it("refuses to run unscoped -- throws without an environmentId", async () => {
+		const db = await createDb();
+		expect(() => countEventsBySubject(db, "launcher.execute", null)).toThrow(/requires an environmentId/i);
+		expect(() => countEventsBySubject(db, "launcher.execute", undefined)).toThrow(/requires an environmentId/i);
 	});
 });

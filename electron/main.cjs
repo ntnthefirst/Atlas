@@ -20,7 +20,11 @@ const { createEnvironmentHotkeyManager } = require("./services/environment-hotke
 const { register: registerHotkeyIpc } = require("./ipc/hotkey.cjs");
 const { createLauncherHotkeyManager } = require("./services/launcher-hotkey.cjs");
 const { register: registerLauncherIpc } = require("./ipc/launcher.cjs");
-const { search: searchLauncher, execute: executeLauncherResult } = require("./services/launcher-providers.cjs");
+const {
+	search: searchLauncher,
+	execute: executeLauncherResult,
+	init: initLauncherProviders,
+} = require("./services/launcher-providers/index.cjs");
 const { createLauncherWindow: createLauncherWindowModule } = require("./windows/launcher-window.cjs");
 const { createTrayManager } = require("./services/tray.cjs");
 const { createSettingsWindow: createSettingsWindowModule } = require("./windows/settings-window.cjs");
@@ -947,6 +951,14 @@ app.whenReady().then(async () => {
 		console.error("[Atlas] Event log retention prune failed:", error);
 	}
 	eventLog.start();
+
+	// WP-2.2: hand the launcher provider registry a way to reach `db`/
+	// `eventLog` lazily -- both are `let`s that don't hold their real values
+	// until this point, well after the registry module itself was required
+	// (see electron/services/launcher-providers/index.cjs's header). Must run
+	// before wireIpc() so launcher:query's first call already has frecency
+	// available.
+	initLauncherProviders({ getDb: () => db, getEventLog: () => eventLog });
 
 	tracker = new ActivityTracker(db, eventLog);
 	tracker.start();

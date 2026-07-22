@@ -164,15 +164,25 @@ export type LauncherHotkeySetResult =
 	| { ok: false; accelerator: string; registered: boolean; error: string };
 
 // A single launcher result row. `kind` is deliberately just `string` (not a
-// union) -- WP-2.1 only ever produces "action" (the fixed stub list in
-// electron/services/launcher-providers.cjs); the real providers WP-2.2+ add
-// bring their own kinds (task, note, app, file, ...) without a shape change
-// here.
+// union) -- WP-2.1 only ever produced "action" (the fixed stub list); the
+// provider registry (electron/services/launcher-providers/index.cjs,
+// WP-2.2+) brings its own kinds (task, note, app, file, ...) without a shape
+// change here.
+//
+// `providerName`, `score`, and `icon` are new in WP-2.2 -- ADDITIVE fields
+// only, so nothing that already destructured just {id, kind, title,
+// subtitle} (see launcherResults.ts's reconciliation logic) breaks. `score`
+// is the ranked, blended match+frecency score the registry computed (see
+// launcher-providers/ranking.cjs) -- carried through mainly for debugging/
+// future UI, never required for the list to render or reorder correctly.
 export type LauncherResult = {
 	id: string;
 	kind: string;
 	title: string;
 	subtitle?: string | null;
+	providerName?: string;
+	score?: number;
+	icon?: string | null;
 };
 
 export type LauncherExecuteResult = {

@@ -2,8 +2,8 @@
 // Launcher IPC handlers (launcher:*) (WP-2.1).
 //
 // The input surface and result-list SHELL only -- `search`/`execute` are the
-// WP-2.2 seam (see electron/services/launcher-providers.cjs's header) handed
-// in as plain function values, exactly like `applyNotchPreferences` elsewhere:
+// WP-2.2 seam (see electron/services/launcher-providers/index.cjs's header)
+// handed in as plain function values, exactly like `applyNotchPreferences` elsewhere:
 // both are `function` declarations that are never reassigned, so there's no
 // stale-capture risk in holding onto them directly.
 //

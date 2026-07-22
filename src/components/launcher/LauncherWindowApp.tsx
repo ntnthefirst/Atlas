@@ -12,9 +12,10 @@ import { clampSelectedIndex, moveSelection, reconcileLauncherResults } from "./l
 // closes the window, only hides it (window.atlas.hideLauncherWindow()),
 // mirroring how the window factory hides rather than destroys on blur.
 //
-// Results currently come from a fixed stub list (electron/services/
-// launcher-providers.cjs) filtered by the query -- WP-2.2 replaces that
-// provider without any change needed here; this component only ever calls
+// Results come from the provider registry (electron/services/
+// launcher-providers/index.cjs, WP-2.2) -- a fixed stub list filtered by the
+// query in WP-2.1, a ranked registry of real providers from WP-2.2 on, with
+// no change needed here either time; this component only ever calls
 // window.atlas.queryLauncher/executeLauncherResult, whatever answers them.
 //
 // Two things this file exists to get right, both acceptance criteria:
