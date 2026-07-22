@@ -214,4 +214,20 @@ contextBridge.exposeInMainWorld("atlas", {
 	closeMiniWindow: () => ipcRenderer.invoke("window:closeMini"),
 	windowToggleMaximize: () => ipcRenderer.invoke("window:toggleMaximize"),
 	windowClose: () => ipcRenderer.invoke("window:close"),
+
+	// WP-2.5: file index crawl/store -- the Settings surface's "Files" tab.
+	getFileIndexPreferences: () => ipcRenderer.invoke("fileIndex:getPreferences"),
+	setFileIndexPreferences: (patch) => ipcRenderer.invoke("fileIndex:setPreferences", patch),
+	startFileIndexCrawl: () => ipcRenderer.invoke("fileIndex:startCrawl"),
+	cancelFileIndexCrawl: () => ipcRenderer.invoke("fileIndex:cancelCrawl"),
+	getFileIndexStatus: () => ipcRenderer.invoke("fileIndex:getStatus"),
+	getFileIndexStats: () => ipcRenderer.invoke("fileIndex:getStats"),
+	pickFileIndexFolder: () => ipcRenderer.invoke("fileIndex:pickFolder"),
+	// Fires on every progress tick AND on start/finish/cancel -- see
+	// electron/services/file-index/crawler.cjs's broadcast().
+	onFileIndexProgress: (callback) => {
+		const listener = (_event, status) => callback(status);
+		ipcRenderer.on("fileIndex:progress", listener);
+		return () => ipcRenderer.removeListener("fileIndex:progress", listener);
+	},
 });

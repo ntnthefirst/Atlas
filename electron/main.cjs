@@ -71,6 +71,8 @@ const { register: registerNotchIpc } = require("./ipc/notch.cjs");
 const { register: registerAiIpc } = require("./ipc/ai.cjs");
 const { register: registerSystemIpc } = require("./ipc/system.cjs");
 const { register: registerIsolationIpc } = require("./ipc/isolation.cjs");
+const { createFileIndexCrawler } = require("./services/file-index/crawler.cjs");
+const { register: registerFileIndexIpc } = require("./ipc/file-index.cjs");
 
 let mainWindow = null;
 let miniWindow = null;
@@ -161,6 +163,14 @@ const environmentHotkeyManager = createEnvironmentHotkeyManager();
 // above (own accelerator, own persisted file, own conflict reporting), so
 // rebinding one can never touch the other.
 const launcherHotkeyManager = createLauncherHotkeyManager();
+
+// WP-2.5: the file index crawler/preferences manager -- a singleton exactly
+// like the two hotkey managers above. Preferences are loaded during
+// app.whenReady() (see below); a crawl itself only ever starts from an
+// explicit `fileIndex:startCrawl` IPC call (the Settings surface's "Run a
+// scan now" button) -- never automatically at boot, see crawler.cjs's header
+// for why.
+const fileIndexCrawler = createFileIndexCrawler();
 
 if (isDev) {
 	// Keep development state fully isolated from the installed production app.
@@ -865,6 +875,8 @@ function wireIpc() {
 
 	registerIsolationIpc(ipcMain);
 
+	registerFileIndexIpc(ipcMain, { crawler: fileIndexCrawler, getDb: () => db });
+
 	registerHotkeyIpc(ipcMain, {
 		getBinding: environmentHotkeyManager.getBinding,
 		setBinding: environmentHotkeyManager.setAccelerator,
@@ -890,6 +902,10 @@ app.whenReady().then(async () => {
 	loadDashboardPreferences();
 	loadFocusPreferences();
 	loadAiPreferences();
+	// WP-2.5: only loads the persisted roots/exclusions/caps from disk --
+	// never starts a crawl (see fileIndexCrawler's own header for why an
+	// autostart here would be unsafe for `npm run smoke`/`smoke:windows`).
+	fileIndexCrawler.loadPreferences();
 	startFocusEngine();
 	autoUpdater.autoDownload = false;
 	autoUpdater.autoInstallOnAppQuit = true;
@@ -1126,4 +1142,9 @@ app.on("before-quit", () => {
 	// tears down a real Electron process every run).
 	environmentHotkeyManager.unregisterAll();
 	launcherHotkeyManager.unregisterAll();
+	// WP-2.5: terminates any in-flight crawl worker and detaches the
+	// powerMonitor battery listeners, so nothing is left running while this
+	// process is shutting down (matters for smoke:windows, which boots and
+	// tears down a real Electron process every run).
+	fileIndexCrawler.shutdown();
 });
