@@ -58,10 +58,51 @@
 //    * @property {(query: string, context: LauncherSearchContext) =>
 //    *   (LauncherProviderResult[] | Promise<LauncherProviderResult[]>)} search
 //    * @property {(result: LauncherProviderResult, options: {environmentId:
-//    *   string|null, modifier: string|null}) =>
+//    *   string|null, modifier: string|null}, context: LauncherExecuteContext) =>
 //    *   (LauncherProviderExecuteResult | Promise<LauncherProviderExecuteResult>)} execute
 //    * @property {number} [timeoutMs]  Per-provider override of
 //    *   DEFAULT_PROVIDER_TIMEOUT_MS below.
+//    *
+//    * @typedef {Object} LauncherExecuteContext
+//    * @property {(() => import("../../db.cjs").AtlasDatabase|null)} getDb
+//    * @property {(() => import("../event-log.cjs").EventLog|null)} getEventLog
+//    * @property {(() => import("electron").BrowserWindow|null)} getMainWindow
+//    *   WP-2.3: added alongside the three below so a provider's execute() can
+//    *   actually DO something -- open/focus a window, navigate it somewhere --
+//    *   instead of only ever reporting whether an id was recognized (all
+//    *   WP-2.2's "actions" provider needed). Every one of these four is a thin
+//    *   wrapper around something electron/main.cjs already exposes to its own
+//    *   IPC modules (electron/ipc/windows.cjs, electron/ipc/environments.cjs);
+//    *   nothing here is a new capability, only a new seam handing the SAME
+//    *   capabilities to a provider's execute(), which -- unlike an IPC handler
+//    *   -- has no `ipcMain`/`ipcRenderer` of its own to reach them through.
+//    * @property {(() => void)} showMainWindow  Creates/restores/focuses the
+//    *   main window (or the welcome window, if no environment exists yet) --
+//    *   identical to the `window:showMain` channel's own handler.
+//    * @property {((view: string) => boolean)} navigate  Shows the main window
+//    *   and tells it which top-level view (src/types.ts's AtlasView) to land
+//    *   on -- the exact same pair `window:navigate` (electron/ipc/windows.cjs)
+//    *   already does, reused via main.cjs's `navigateMainWindow` rather than
+//    *   reimplemented. Returns whether a window ended up available to send to.
+//    *   Deliberately AtlasView-only (no deeper "and select this exact row"
+//    *   payload) -- that is the full extent of what the existing navigation
+//    *   channel can express; see data-provider.cjs's header for why a provider
+//    *   doesn't invent a second, richer channel just to go further than that.
+//    * @property {((environmentId: string) => boolean)} switchEnvironment
+//    *   Applies an environment switch exactly like the `environment:switch`
+//    *   IPC channel's handler does (main.cjs's `setActiveEnvironment`) -- re-
+//    *   renders the Notch, broadcasts `environment:activated`, the works. Used
+//    *   by a provider whose result belongs to a DIFFERENT environment than the
+//    *   one currently active (e.g. the "data" provider's environment results,
+//    *   or defensive re-scoping if the active environment changed between
+//    *   query and execute).
+//    *
+//    * These four default to inert no-ops (`getMainWindow`/`switchEnvironment`/
+//    * `navigate` returning null/false, `showMainWindow` doing nothing) until
+//    * `init()` wires them up, exactly like `getDb`/`getEventLog` already did --
+//    * a provider's execute() must degrade safely, never throw, if called
+//    * before boot has wired the registry up (or in a test that never calls
+//    * init()).
 //    */
 //
 // -- Adding a provider (WP-2.3+) ---------------------------------------------
@@ -98,6 +139,15 @@
 // `name::` prefix and calls execute() with a minimal `{ id }` stub instead of
 // failing outright -- "routes back correctly" degrades gracefully rather
 // than throwing.
+//
+// Every provider's own execute(target, options, context) is also handed the
+// LauncherExecuteContext documented above (getMainWindow/showMainWindow/
+// navigate/switchEnvironment, alongside getDb/getEventLog) -- built fresh per
+// call from whatever init() wired up, the same way search()'s richContext is
+// built fresh per query. `options` itself (`{environmentId, modifier}`) is
+// UNCHANGED from WP-2.2 -- the new capabilities live entirely in the third
+// argument, so a provider like "actions" that only reads `result` keeps
+// working with no changes of its own.
 // ---------------------------------------------------------------------------
 
 const { rankResults } = require("./ranking.cjs");
@@ -142,6 +192,14 @@ function createLauncherProviderRegistry() {
 	const resultCache = new Map();
 	let getDb = () => null;
 	let getEventLog = () => null;
+	// WP-2.3: the execute-time action quartet (see this file's header,
+	// LauncherExecuteContext) -- inert no-ops until init() wires them up, so a
+	// provider's execute() degrades safely (never throws) if called before
+	// boot finishes, or from a test registry that never calls init() at all.
+	let getMainWindow = () => null;
+	let showMainWindow = () => {};
+	let navigate = () => false;
+	let switchEnvironment = () => false;
 
 	// Called once at boot (electron/main.cjs, after `db`/`eventLog` exist) --
 	// see this file's header for why these are getters, not values: both are
@@ -152,6 +210,18 @@ function createLauncherProviderRegistry() {
 		}
 		if (typeof deps.getEventLog === "function") {
 			getEventLog = deps.getEventLog;
+		}
+		if (typeof deps.getMainWindow === "function") {
+			getMainWindow = deps.getMainWindow;
+		}
+		if (typeof deps.showMainWindow === "function") {
+			showMainWindow = deps.showMainWindow;
+		}
+		if (typeof deps.navigate === "function") {
+			navigate = deps.navigate;
+		}
+		if (typeof deps.switchEnvironment === "function") {
+			switchEnvironment = deps.switchEnvironment;
 		}
 	}
 
@@ -259,8 +329,22 @@ function createLauncherProviderRegistry() {
 
 		const target = cached?.localResult ?? { id: split?.localId ?? resultId };
 
+		// WP-2.3: the LauncherExecuteContext this file's header documents --
+		// built fresh per call (mirrors search()'s richContext), from whatever
+		// init() last wired up. `options` itself is untouched (still exactly
+		// `{environmentId, modifier}`, as WP-2.2 shipped it); the new
+		// capabilities live only in this third argument.
+		const executeContext = {
+			getDb,
+			getEventLog,
+			getMainWindow,
+			showMainWindow,
+			navigate,
+			switchEnvironment,
+		};
+
 		try {
-			const outcome = (await provider.execute(target, options)) ?? {};
+			const outcome = (await provider.execute(target, options, executeContext)) ?? {};
 			return { ...outcome, ok: Boolean(outcome.ok), resultId, modifier };
 		} catch (error) {
 			console.error(`[Atlas] launcher provider "${provider.name}" execute() failed:`, error);
@@ -275,6 +359,7 @@ function createLauncherProviderRegistry() {
 // electron/ipc/launcher.cjs actually use.
 const registry = createLauncherProviderRegistry();
 registry.registerProvider(require("./actions-provider.cjs"));
+registry.registerProvider(require("./data-provider.cjs"));
 
 module.exports = {
 	// Exposed so tests (and, if ever needed, a future WP) can build an

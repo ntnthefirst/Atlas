@@ -185,7 +185,18 @@ describe("execute() -- routing back to the owning provider", () => {
 
 		const outcome = await registry.execute(result.id, { environmentId: "env-1", modifier: null });
 
-		expect(providerExecute).toHaveBeenCalledWith(expect.objectContaining({ id: "42" }), { environmentId: "env-1", modifier: null });
+		expect(providerExecute).toHaveBeenCalledWith(
+			expect.objectContaining({ id: "42" }),
+			{ environmentId: "env-1", modifier: null },
+			expect.objectContaining({
+				getDb: expect.any(Function),
+				getEventLog: expect.any(Function),
+				getMainWindow: expect.any(Function),
+				showMainWindow: expect.any(Function),
+				navigate: expect.any(Function),
+				switchEnvironment: expect.any(Function),
+			}),
+		);
 		expect(outcome).toEqual({ ok: true, receivedId: "42", resultId: "tasks::42", modifier: null });
 	});
 
@@ -198,7 +209,18 @@ describe("execute() -- routing back to the owning provider", () => {
 		// provider's own namespace prefix.
 		const outcome = await registry.execute("tasks::99", { modifier: "ctrl" });
 
-		expect(providerExecute).toHaveBeenCalledWith({ id: "99" }, { modifier: "ctrl" });
+		expect(providerExecute).toHaveBeenCalledWith(
+			{ id: "99" },
+			{ modifier: "ctrl" },
+			expect.objectContaining({
+				getDb: expect.any(Function),
+				getEventLog: expect.any(Function),
+				getMainWindow: expect.any(Function),
+				showMainWindow: expect.any(Function),
+				navigate: expect.any(Function),
+				switchEnvironment: expect.any(Function),
+			}),
+		);
 		expect(outcome).toEqual({ ok: true, receivedId: "99", resultId: "tasks::99", modifier: "ctrl" });
 	});
 

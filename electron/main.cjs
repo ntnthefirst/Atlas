@@ -547,6 +547,25 @@ function showMainWindow() {
 	mainWindow.focus();
 }
 
+// WP-2.3: the launcher's "data" provider (electron/services/launcher-
+// providers/data-provider.cjs) needs to open a result -- show the main window
+// and tell it which view to land on -- but it runs in the main process with
+// no `ipcRenderer` of its own to invoke `window:navigate` through. Rather than
+// give it a second, parallel way to reach the main window, this is the exact
+// same pair that channel's own handler (electron/ipc/windows.cjs) runs, in a
+// plain function both call sites share. Returns whether a window ended up
+// available to send to, so a provider can report execute() failure honestly
+// (e.g. showMainWindow() fell through to the welcome window because no
+// environment exists yet).
+function navigateMainWindow(view) {
+	showMainWindow();
+	if (mainWindow && !mainWindow.isDestroyed()) {
+		mainWindow.webContents.send("window:navigate-changed", view);
+		return true;
+	}
+	return false;
+}
+
 // WP-1.4: what the global hotkey actually does. Reuses the main window's
 // EXISTING environment switcher (AtlasEnvironmentMenu.tsx, opened via
 // App.tsx's `showEnvironmentMenu` state) rather than building a second,
@@ -958,7 +977,26 @@ app.whenReady().then(async () => {
 	// (see electron/services/launcher-providers/index.cjs's header). Must run
 	// before wireIpc() so launcher:query's first call already has frecency
 	// available.
-	initLauncherProviders({ getDb: () => db, getEventLog: () => eventLog });
+	//
+	// WP-2.3: also hands over the execute-time action quartet (getMainWindow/
+	// showMainWindow/navigate/switchEnvironment) so a provider's execute() can
+	// open a result, not just report whether its id was known -- see
+	// electron/services/launcher-providers/index.cjs's LauncherExecuteContext
+	// doc. `getMainWindow` is a getter for the same reason every other
+	// `getMainWindow` in this file is (`mainWindow` is a `let`, reassigned
+	// across the window's lifecycle); `showMainWindow`/`navigateMainWindow`/
+	// `setActiveEnvironment` are plain `function` declarations, never
+	// reassigned, so there's no stale-capture risk in passing them directly --
+	// exactly the same split registerWindowsIpc/registerEnvironmentIpc below
+	// already rely on.
+	initLauncherProviders({
+		getDb: () => db,
+		getEventLog: () => eventLog,
+		getMainWindow: () => mainWindow,
+		showMainWindow,
+		navigate: navigateMainWindow,
+		switchEnvironment: setActiveEnvironment,
+	});
 
 	tracker = new ActivityTracker(db, eventLog);
 	tracker.start();
