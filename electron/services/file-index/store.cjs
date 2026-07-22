@@ -45,13 +45,20 @@ const { rankFileResults } = require("./file-ranking.cjs");
 // -- FTS5: rebuilt wholesale, once per crawl -------------------------------
 // `rebuildFtsIndex` does exactly what migration 009's header describes: wipe
 // `files_fts` and re-populate it from `files` in one `INSERT ... SELECT`,
-// rather than maintaining it incrementally on every single upsert. Measured
-// against a 100k-row `files` table on this machine, the full rebuild takes
-// low tens of milliseconds -- negligible next to the crawl itself (which
-// spends its time in filesystem syscalls, not SQL) and far simpler than
-// tracking which of a batch's paths are genuinely NEW (rather than a refreshed
-// existing row) to decide whether an incremental `files_fts` insert is even
-// needed for it. Called once, by crawler.cjs, when the ENTIRE crawl run (every
+// rather than maintaining it incrementally on every single upsert. Against a
+// 100k-row `files` table the full rebuild measures roughly 390ms
+// (electron/services/file-index/search-performance.test.js builds exactly
+// that corpus) -- still negligible next to the crawl itself, which spends its
+// time in filesystem syscalls rather than SQL and takes tens of seconds at
+// that scale, and far simpler than tracking which of a batch's paths are
+// genuinely NEW (rather than a refreshed existing row) to decide whether an
+// incremental `files_fts` insert is even needed for it. Note this number is
+// ~20x the "low tens of milliseconds" this comment claimed before WP-2.7
+// actually built a 100k corpus and timed it; the design conclusion is
+// unchanged (a once-per-crawl 390ms is still noise against the walk), but the
+// original figure was an estimate written as though it were a measurement.
+// The watcher does NOT use this path at all -- see applyWatcherBatch below.
+// Called once, by crawler.cjs, when the ENTIRE crawl run (every
 // enabled root) finishes -- not per-root and not per-batch -- so a query
 // mid-crawl still sees the last fully-consistent snapshot rather than a
 // partially-rebuilt index.
