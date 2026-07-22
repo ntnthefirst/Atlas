@@ -45,6 +45,10 @@ async function launch() {
 	return { supported: false, launched: false };
 }
 
+async function launchInstalledApp() {
+	return { supported: false, launched: false };
+}
+
 // There is no known set of "shell process" names on a platform we have no
 // implementation for, so there is nothing to correctly ignore -- this is
 // never actually reached in practice, since activity-tracker.cjs's tick()
@@ -62,5 +66,6 @@ module.exports = {
 	listInstalledApps,
 	getSystemStats,
 	launch,
+	launchInstalledApp,
 	isIgnoredProcessName,
 };

@@ -6,6 +6,7 @@ import {
 	listInstalledApps,
 	getSystemStats,
 	launch,
+	launchInstalledApp,
 	isIgnoredProcessName,
 } from "./unsupported.cjs";
 
@@ -45,6 +46,13 @@ describe("unsupported.cjs -- every method reports supported: false, never fabric
 
 	it("launch() never actually spawns anything and reports it didn't", async () => {
 		await expect(launch("notepad.exe")).resolves.toEqual({ supported: false, launched: false });
+	});
+
+	it("launchInstalledApp() never actually launches anything and reports it didn't", async () => {
+		await expect(launchInstalledApp({ kind: "classic", path: "C:\\notepad.exe" })).resolves.toEqual({
+			supported: false,
+			launched: false,
+		});
 	});
 
 	it("isIgnoredProcessName() has no known shell-name data for a platform with no implementation", () => {

@@ -219,14 +219,26 @@ export function LauncherWindowApp() {
 									setSelectedIndex(index);
 								}}
 								onClick={() => void execute(index, null)}
-								className={`mx-1.5 flex cursor-pointer flex-col rounded-xl px-3 py-2 ${
+								className={`mx-1.5 flex cursor-pointer items-center gap-2.5 rounded-xl px-3 py-2 ${
 									index === selectedIndex
 										? "bg-primary/15 text-neutral-900 dark:text-neutral-0"
 										: "text-neutral-600 dark:text-neutral-300"
 								}`}
 							>
-								<span className="text-sm font-medium">{result.title}</span>
-								{result.subtitle ? <span className="text-xs text-neutral-400">{result.subtitle}</span> : null}
+								{/* WP-2.4: the "apps" provider (and, in principle, any future
+								    provider) can carry a per-result icon data URL -- rendered
+								    when present, with a blank same-size spacer otherwise so
+								    results with and without an icon still line up in the same
+								    column. */}
+								{result.icon ? (
+									<img src={result.icon} alt="" className="h-5 w-5 shrink-0 rounded-sm object-contain" />
+								) : (
+									<span className="h-5 w-5 shrink-0" />
+								)}
+								<div className="flex min-w-0 flex-col">
+									<span className="truncate text-sm font-medium">{result.title}</span>
+									{result.subtitle ? <span className="truncate text-xs text-neutral-400">{result.subtitle}</span> : null}
+								</div>
 							</div>
 						))
 					) : (

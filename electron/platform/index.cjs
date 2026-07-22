@@ -54,11 +54,14 @@ module.exports = {
 	listRunningApps: (...args) => impl.listRunningApps(...args),
 
 	// listInstalledApps() -> Promise<
-	//   | { supported: true, apps: Array<{ name: string, path: string | null }> }
+	//   | { supported: true, apps: Array<{ name: string, kind: "classic" | "uwp",
+	//       appId: string, path: string | null }> }
 	//   | { supported: false, apps: [] }
 	// >
-	// Not consumed by anything yet -- added so the interface is complete for
-	// the launcher/app-index work (WP-2.x) that depends on this package.
+	// WP-2.4: backs the launcher's "apps" provider. `path` is the directly
+	// launchable filesystem target (an .exe or .lnk) for a "classic" app, and
+	// `null` for a "uwp" one (see win32.cjs's classifyAppId()) -- `appId` is
+	// always present and is what launchInstalledApp() below actually needs.
 	listInstalledApps: (...args) => impl.listInstalledApps(...args),
 
 	// getSystemStats() -> Promise<
@@ -74,6 +77,15 @@ module.exports = {
 	// Fire-and-forget: resolves once the process has been asked to start, not
 	// once it has actually started successfully.
 	launch: (...args) => impl.launch(...args),
+
+	// launchInstalledApp(target: { kind, path, appId }) -> Promise<
+	//   | { supported: true, launched: boolean }
+	//   | { supported: false, launched: false }
+	// >
+	// WP-2.4: launches one entry exactly as listInstalledApps() returned it
+	// (or as re-derived from a cached one) -- see win32.cjs's own header for
+	// why classic vs uwp need different launch mechanics.
+	launchInstalledApp: (...args) => impl.launchInstalledApp(...args),
 
 	// isIgnoredProcessName(processName: string) -> boolean
 	// Not part of the "OS query" interface above -- see win32.cjs for why

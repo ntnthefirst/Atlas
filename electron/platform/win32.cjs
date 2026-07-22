@@ -209,32 +209,10 @@ foreach ($id in $ids) {
 $results | Sort-Object name -Unique | ConvertTo-Json -Compress
 `;
 
-// New in WP-0.6: no prior implementation existed to move. Enumerates the
-// registry's "Programs and Features" uninstall keys -- the same source
-// Control Panel itself reads -- across both HKLM views (32- and 64-bit) and
-// HKCU (per-user installs). `SystemComponent` entries are filtered out
-// because those are shared runtime pieces (VC++ redistributables, driver
-// packages) rather than things a user would ever want to launch. Deliberately
-// minimal: WP-2.x's app index is where a real ranked, deduplicated,
-// icon-aware launcher surface gets built -- this only has to be an honest,
-// real list, not a polished one.
-const LIST_INSTALLED_APPS_SCRIPT = `
-$paths = @(
-  'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
-  'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
-  'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'
-)
-$results = Get-ItemProperty -Path $paths -ErrorAction SilentlyContinue |
-  Where-Object { $_.DisplayName -and -not $_.SystemComponent } |
-  Select-Object @{Name='name';Expression={$_.DisplayName}}, @{Name='path';Expression={$_.InstallLocation}} |
-  Sort-Object name -Unique
-$results | ConvertTo-Json -Compress
-`;
-
-// Shared by listRunningApps() and listInstalledApps() -- both PowerShell
-// scripts emit the same `{ name, path }[]` JSON shape (ConvertTo-Json emits a
-// bare object rather than a one-element array when exactly one result comes
-// back, hence the Array.isArray normalization).
+// Shared by listRunningApps() -- the PowerShell script above emits the same
+// `{ name, path }[]` JSON shape (ConvertTo-Json emits a bare object rather
+// than a one-element array when exactly one result comes back, hence the
+// Array.isArray normalization).
 function parseAppListOutput(stdout) {
 	const value = (stdout || "").trim();
 	if (!value) {
@@ -258,6 +236,205 @@ async function listRunningApps() {
 	}
 }
 
+// -- listInstalledApps() -------------------------------------------------
+// WP-0.6 shipped a registry-only scrape here. WP-2.4 (the launcher's "apps"
+// provider) broadens it to primarily read Get-StartApps -- the very same
+// source the Windows Start Menu's own search box reads from, and the
+// "cleanest single source" for finding a large majority of what's installed
+// in ONE call: it lists every Start Menu shortcut (classic desktop apps) AND
+// every installed UWP/Store app, each with an AppID. That AppID is either a
+// full filesystem path (almost always to the .lnk shortcut Get-StartApps
+// itself is reading) for a classic app, or a "PackageFamilyName!AppId"
+// identity that isn't a filesystem path at all for a UWP/Store one -- see
+// resolveStartAppPath() below, which tells the two apart, and this file's
+// launchInstalledApp() for why that distinction is exactly what deciding HOW
+// to launch each one needs.
+//
+// The pre-existing registry-uninstall-keys scrape still runs alongside it
+// (same query, same SystemComponent filter as WP-0.6), purely to catch
+// whatever a Start Menu scan alone would miss -- an install that never
+// created a Start Menu shortcut. Both sources come back from the SAME
+// PowerShell invocation (one spawn, not two -- spawning powershell.exe is the
+// expensive part, see this file's header); everything past that -- pulling a
+// launchable path out of a registry entry's DisplayIcon, deciding what counts
+// as a duplicate, classifying classic vs UWP -- happens in plain, pure JS
+// (buildInstalledAppList() below), specifically so that logic is
+// unit-testable against fixture arrays without spawning anything real.
+const LIST_INSTALLED_APPS_SCRIPT = `
+$startApps = Get-StartApps | Select-Object @{Name='name';Expression={$_.Name}}, @{Name='appId';Expression={$_.AppID}}
+
+$uninstallPaths = @(
+  'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
+  'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
+  'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'
+)
+$registryApps = Get-ItemProperty -Path $uninstallPaths -ErrorAction SilentlyContinue |
+  Where-Object { $_.DisplayName -and -not $_.SystemComponent } |
+  Select-Object @{Name='name';Expression={$_.DisplayName}}, @{Name='displayIcon';Expression={$_.DisplayIcon}}
+
+@{ startApps = @($startApps); registryApps = @($registryApps) } | ConvertTo-Json -Compress -Depth 4
+`;
+
+// Pure and exported so it can be unit-tested with fixture stdout strings.
+// `ConvertTo-Json` drops the array wrapper for a single-element collection
+// (same quirk parseAppListOutput above guards against), so each of
+// startApps/registryApps is independently re-wrapped into an array.
+function parseInstalledAppsRawOutput(stdout) {
+	const value = (stdout || "").trim();
+	if (!value) {
+		return { startApps: [], registryApps: [] };
+	}
+	try {
+		const parsed = JSON.parse(value);
+		const toArray = (maybeArrayOrObject) => {
+			if (Array.isArray(maybeArrayOrObject)) return maybeArrayOrObject;
+			return maybeArrayOrObject ? [maybeArrayOrObject] : [];
+		};
+		return { startApps: toArray(parsed?.startApps), registryApps: toArray(parsed?.registryApps) };
+	} catch {
+		return { startApps: [], registryApps: [] };
+	}
+}
+
+// A classic app's Get-StartApps AppID is a real filesystem path; a UWP/Store
+// app's is a package identity ("PackageFamilyName!AppId") with no such shape.
+// Deciding which is which is also, not coincidentally, exactly what
+// launchInstalledApp() needs to decide HOW to launch something: a real
+// filesystem path gets the "classic" (shell.openPath) treatment; anything
+// else falls back to `explorer.exe shell:AppsFolder\<AppID>` (this file's
+// own shell:AppsFolder trick) -- the general-purpose launch mechanism for
+// ANY AppUserModelID Explorer's virtual Apps folder can resolve, valid for
+// every entry Get-StartApps itself produces, not only true UWP packages.
+//
+// The wrinkle (found by this WP's own real-machine verification --
+// scripts/verify-installed-apps.cjs -- not a hypothetical): Get-StartApps
+// does NOT always render a classic app's path with a plain drive letter.
+// Plenty of ordinary desktop installs come back as e.g.
+// "{6D809377-6AF0-444B-8957-A3773F02200E}\7-Zip\7zFM.exe" -- a KNOWNFOLDERID
+// GUID (that one is FOLDERID_ProgramFilesX64, i.e. "Program Files") standing
+// in for the drive-letter prefix. Left unresolved, every one of these was
+// being misclassified as "uwp" -- still launchable (shell:AppsFolder handles
+// it), but with no icon and a wrong subtitle, and on this dev machine that
+// was the SHAPE MOST desktop apps actually came back in (measured: 212 of
+// 251 total apps, before this fix). resolveStartAppPath() below resolves the
+// known-folder GUIDs that actually hold installed applications back to a
+// real absolute path (via the same environment variables Windows itself
+// publishes for each), so those apps get properly classified as classic --
+// see this WP's final report for the measured before/after counts.
+const KNOWN_FOLDER_PATH_PATTERN = /^\{([0-9a-fA-F-]{36})\}\\(.*)$/;
+
+// Deliberately NOT the full KNOWNFOLDERID list (that runs into the hundreds,
+// most of which no application is ever installed under) -- just the handful
+// that actually hold installed applications, each mapped to the plain
+// environment variable(s) Windows itself sets for that folder (first
+// non-empty one wins; e.g. a 32-bit process still gets the real 64-bit
+// Program Files path via ProgramW6432).
+const KNOWN_FOLDER_ENV_VARS = {
+	"6d809377-6af0-444b-8957-a3773f02200e": ["ProgramW6432", "ProgramFiles"], // FOLDERID_ProgramFilesX64
+	"7c5a40ef-a0fb-4bfc-874a-c0f2e0b9fa8e": ["ProgramFiles(x86)"], // FOLDERID_ProgramFilesX86
+	"905e63b6-c1bf-494e-b29c-65b732d3d21a": ["ProgramFiles"], // FOLDERID_ProgramFiles
+	"f7f1ed05-9f6d-47a2-aaae-29d317c6f066": ["CommonProgramW6432", "CommonProgramFiles"], // FOLDERID_ProgramFilesCommonX64
+	"de974d24-d9c6-4d3e-bf91-f4455120b917": ["CommonProgramFiles(x86)"], // FOLDERID_ProgramFilesCommonX86
+	"6365d5a7-0f0d-45e5-87f6-0da56b6a4f7d": ["CommonProgramFiles"], // FOLDERID_ProgramFilesCommon
+	"62ab5d82-fdc1-4dc3-a9dd-070d1d495d97": ["ProgramData", "ALLUSERSPROFILE"], // FOLDERID_ProgramData
+	"f38bf404-1d43-42f2-9305-67de0b28fc23": ["SystemRoot", "windir"], // FOLDERID_Windows
+};
+// FOLDERID_UserProgramFiles (per-user installs, e.g. VS Code/Chrome/Discord
+// under %LocalAppData%\Programs) has no plain env var of its own -- it's
+// always LOCALAPPDATA + "\Programs", handled as a special case below rather
+// than forced into the table above.
+const USER_PROGRAM_FILES_GUID = "5cd7aee2-2219-4a67-b85d-6c9ce15660cb";
+
+// Pure and exported so it's unit-testable without depending on this
+// process's real environment variables (tests inject their own via
+// `env` -- see win32.test.js). Returns a real, absolute, directly-openable
+// path for anything recognizable as a filesystem path (plain drive-letter,
+// OR a resolvable known-folder-GUID-relative one); `null` for anything else
+// (a true UWP PackageFamilyName!AppId, or a known-folder GUID this table
+// doesn't cover) -- the signal buildInstalledAppList() uses to classify
+// classic vs uwp.
+function resolveStartAppPath(appId, env = process.env) {
+	if (typeof appId !== "string" || !appId) {
+		return null;
+	}
+	if (/^[a-zA-Z]:\\/.test(appId)) {
+		return appId; // already a plain absolute path
+	}
+	const match = appId.match(KNOWN_FOLDER_PATH_PATTERN);
+	if (!match) {
+		return null; // not a recognizable file-path shape at all
+	}
+	const [, guid, relativePath] = match;
+	const normalizedGuid = guid.toLowerCase();
+	const basePath =
+		normalizedGuid === USER_PROGRAM_FILES_GUID
+			? env.LOCALAPPDATA
+				? `${env.LOCALAPPDATA}\\Programs`
+				: null
+			: (KNOWN_FOLDER_ENV_VARS[normalizedGuid] || []).map((name) => env[name]).find(Boolean) ?? null;
+	return basePath ? `${basePath}\\${relativePath}` : null;
+}
+
+function normalizeAppName(name) {
+	return typeof name === "string" ? name.trim().toLowerCase() : "";
+}
+
+// A registry uninstall entry's DisplayIcon is often "C:\...\app.exe,0" (a
+// trailing ",<icon resource index>") or quoted, or simply absent/pointing at
+// a bare .dll/.ico with no associated executable. Resolved to a real,
+// directly-launchable .exe path when possible; `null` otherwise so a
+// registry-only entry with no reliable launch target is left out of the
+// merged list entirely rather than shown as a dead result (see
+// buildInstalledAppList() below).
+function resolveRegistryLaunchPath(displayIcon) {
+	if (typeof displayIcon !== "string" || !displayIcon.trim()) {
+		return null;
+	}
+	const withoutIconIndex = displayIcon.trim().replace(/,-?\d+$/, "");
+	const unquoted = withoutIconIndex.replace(/^"(.*)"$/, "$1").trim();
+	return unquoted.toLowerCase().endsWith(".exe") ? unquoted : null;
+}
+
+// Pure merge/dedup/classify pass -- unit-tested directly against fixture
+// `startApps`/`registryApps` arrays (parseInstalledAppsRawOutput()'s own
+// return shape) and an injected `env`, no PowerShell (or dependency on this
+// process's real environment variables) required. Get-StartApps entries
+// always win a name collision (registry entries only fill genuine gaps);
+// within each source, later duplicates of an already-seen name are dropped
+// rather than producing repeat launcher results for the same app.
+function buildInstalledAppList(startApps, registryApps, env = process.env) {
+	const apps = [];
+	const seenNames = new Set();
+
+	for (const entry of Array.isArray(startApps) ? startApps : []) {
+		const name = typeof entry?.name === "string" ? entry.name.trim() : "";
+		const appId = typeof entry?.appId === "string" ? entry.appId.trim() : "";
+		const normalized = normalizeAppName(name);
+		if (!name || !appId || seenNames.has(normalized)) {
+			continue;
+		}
+		const resolvedPath = resolveStartAppPath(appId, env);
+		apps.push({ name, kind: resolvedPath ? "classic" : "uwp", appId, path: resolvedPath });
+		seenNames.add(normalized);
+	}
+
+	for (const entry of Array.isArray(registryApps) ? registryApps : []) {
+		const name = typeof entry?.name === "string" ? entry.name.trim() : "";
+		const normalized = normalizeAppName(name);
+		if (!name || seenNames.has(normalized)) {
+			continue;
+		}
+		const launchPath = resolveRegistryLaunchPath(entry?.displayIcon);
+		if (!launchPath) {
+			continue; // no reliable launch target -- leave it out rather than fabricate one
+		}
+		apps.push({ name, kind: "classic", appId: launchPath, path: launchPath });
+		seenNames.add(normalized);
+	}
+
+	return apps.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 async function listInstalledApps() {
 	try {
 		const { stdout } = await execFileAsync("powershell.exe", [
@@ -265,7 +442,8 @@ async function listInstalledApps() {
 			"-Command",
 			LIST_INSTALLED_APPS_SCRIPT,
 		]);
-		return { supported: true, apps: parseAppListOutput(stdout) };
+		const { startApps, registryApps } = parseInstalledAppsRawOutput(stdout);
+		return { supported: true, apps: buildInstalledAppList(startApps, registryApps) };
 	} catch {
 		return { supported: true, apps: [] };
 	}
@@ -334,6 +512,60 @@ async function launch(command) {
 	return { supported: true, launched: true };
 }
 
+// -- launchInstalledApp() -----------------------------------------------------
+// WP-2.4: launches one entry from listInstalledApps()'s own `apps` array --
+// takes the exact `{ kind, path, appId }` shape those entries carry (see
+// buildInstalledAppList() above), so the "apps" launcher provider never has
+// to build a shell command string of its own (see this file's header: that's
+// exactly the classic Windows-shell-quoting bug source this package exists
+// to keep in ONE place).
+//
+// Classic apps go through Electron's own `shell.openPath` -- a plain string
+// handed straight to the OS, no shell involved at all, so a path containing
+// spaces (nearly every "Program Files" install) needs no quoting/escaping of
+// its own; it also transparently resolves a .lnk shortcut's target, working
+// directory, and arguments exactly like double-clicking it in Explorer would.
+// `electron` is required lazily (inside the function, not at module scope) so
+// that requiring this file outside a real Electron process (e.g. this
+// module's own unit tests, which run under plain Node/vitest) never touches
+// it -- `require("electron")` outside Electron's own process resolves to a
+// plain path STRING, not the module object, and every test that exercises
+// this file only does so through its pure parsing/classification functions.
+//
+// UWP/Store (and any other non-file AppID) apps go through the
+// `explorer.exe shell:AppsFolder\<AppID>` trick instead -- Explorer's own
+// virtual "Apps" folder, which resolves ANY AppUserModelID to its
+// registered launch behaviour. Passed as a single argv entry (not a shell
+// string), so -- unlike `launch()` above -- no `shell: true` and no quoting
+// question at all.
+async function launchInstalledApp(target) {
+	if (!target || typeof target !== "object") {
+		return { supported: true, launched: false };
+	}
+
+	if (target.kind === "uwp") {
+		if (!target.appId) {
+			return { supported: true, launched: false };
+		}
+		spawn("explorer.exe", [`shell:AppsFolder\\${target.appId}`], {
+			detached: true,
+			stdio: "ignore",
+		});
+		return { supported: true, launched: true };
+	}
+
+	if (!target.path) {
+		return { supported: true, launched: false };
+	}
+	try {
+		const { shell } = require("electron");
+		const openPathError = await shell.openPath(target.path);
+		return { supported: true, launched: !openPathError };
+	} catch {
+		return { supported: true, launched: false };
+	}
+}
+
 module.exports = {
 	PLATFORM,
 	getForegroundWindow,
@@ -341,8 +573,13 @@ module.exports = {
 	listInstalledApps,
 	getSystemStats,
 	launch,
+	launchInstalledApp,
 	isIgnoredProcessName,
 	// Exported for unit tests (fixture-string parsing, no real process spawn).
 	parseForegroundWindowOutput,
 	parseAppListOutput,
+	parseInstalledAppsRawOutput,
+	resolveStartAppPath,
+	resolveRegistryLaunchPath,
+	buildInstalledAppList,
 };

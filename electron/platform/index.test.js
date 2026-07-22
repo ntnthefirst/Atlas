@@ -46,7 +46,7 @@ describe("platform/index.cjs -- selectImplementation() (WP-0.6)", () => {
 		expect(selectImplementation("").PLATFORM).toBe("unsupported");
 	});
 
-	it("every implementation exposes the same five-method interface plus isIgnoredProcessName", () => {
+	it("every implementation exposes the same six-method interface plus isIgnoredProcessName", () => {
 		for (const platform of ["win32", "darwin"]) {
 			const impl = selectImplementation(platform);
 			expect(typeof impl.getForegroundWindow).toBe("function");
@@ -54,6 +54,8 @@ describe("platform/index.cjs -- selectImplementation() (WP-0.6)", () => {
 			expect(typeof impl.listInstalledApps).toBe("function");
 			expect(typeof impl.getSystemStats).toBe("function");
 			expect(typeof impl.launch).toBe("function");
+			// WP-2.4: launchInstalledApp() joins the interface alongside launch().
+			expect(typeof impl.launchInstalledApp).toBe("function");
 			expect(typeof impl.isIgnoredProcessName).toBe("function");
 		}
 	});
@@ -65,12 +67,13 @@ describe("platform/index.cjs -- selectImplementation() (WP-0.6)", () => {
 });
 
 describe("platform/index.cjs -- the live, selected module", () => {
-	it("exposes all five interface methods plus the isIgnoredProcessName helper", () => {
+	it("exposes all six interface methods plus the isIgnoredProcessName helper", () => {
 		expect(typeof platformAdapter.getForegroundWindow).toBe("function");
 		expect(typeof platformAdapter.listRunningApps).toBe("function");
 		expect(typeof platformAdapter.listInstalledApps).toBe("function");
 		expect(typeof platformAdapter.getSystemStats).toBe("function");
 		expect(typeof platformAdapter.launch).toBe("function");
+		expect(typeof platformAdapter.launchInstalledApp).toBe("function");
 		expect(typeof platformAdapter.isIgnoredProcessName).toBe("function");
 	});
 

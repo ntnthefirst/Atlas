@@ -23,6 +23,7 @@
 		"smoke:windows": "node scripts/smoke-windows.cjs",
 		"measure:launcher": "node scripts/measure-launcher-open.cjs",
 		"verify:secrets": "electron scripts/verify-secrets.cjs",
+		"verify:installed-apps": "electron scripts/verify-installed-apps.cjs",
 		"preview": "vite preview"
 	},
 	"build": {

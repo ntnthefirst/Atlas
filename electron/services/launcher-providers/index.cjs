@@ -62,6 +62,13 @@
 //    *   (LauncherProviderExecuteResult | Promise<LauncherProviderExecuteResult>)} execute
 //    * @property {number} [timeoutMs]  Per-provider override of
 //    *   DEFAULT_PROVIDER_TIMEOUT_MS below.
+//    * @property {(deps: Object) => void} [init]  WP-2.4: OPTIONAL one-time
+//    *   boot hook, called synchronously (and never awaited) from this
+//    *   registry's own init(deps) -- the same deps main.cjs's
+//    *   initLauncherProviders() call hands this whole module. Only a provider
+//    *   with genuine boot-time setup needs one (apps-provider.cjs's
+//    *   background app-enumeration refresh is the first); "data" and
+//    *   "commands" have none and simply don't define it.
 //    *
 //    * @typedef {Object} LauncherExecuteContext
 //    * @property {(() => import("../../db.cjs").AtlasDatabase|null)} getDb
@@ -260,6 +267,28 @@ function createLauncherProviderRegistry() {
 		if (typeof deps.createSettingsWindow === "function") {
 			createSettingsWindow = deps.createSettingsWindow;
 		}
+
+		// WP-2.4: give every registered provider a chance at its OWN one-time
+		// boot wiring -- added for the "apps" provider, which needs to kick off
+		// its background app-enumeration refresh (see apps-provider.cjs's
+		// init()) exactly once, from the same place every other piece of boot
+		// state gets wired up. Optional (`provider.init` is undefined for
+		// "data"/"commands", both of which have nothing to do at boot) and
+		// never awaited -- a provider's init() must be fire-and-forget, exactly
+		// like this whole function is called synchronously from main.cjs's own
+		// app.whenReady() handler and must never block it. A provider whose
+		// init() throws synchronously is logged and skipped, never allowed to
+		// take the rest of registry init() down with it.
+		for (const provider of providers) {
+			if (typeof provider.init !== "function") {
+				continue;
+			}
+			try {
+				provider.init(deps);
+			} catch (error) {
+				console.error(`[Atlas] launcher provider "${provider.name}" init() failed:`, error);
+			}
+		}
 	}
 
 	function registerProvider(provider) {
@@ -403,6 +432,7 @@ function createLauncherProviderRegistry() {
 const registry = createLauncherProviderRegistry();
 registry.registerProvider(require("./data-provider.cjs"));
 registry.registerProvider(require("./commands-provider.cjs"));
+registry.registerProvider(require("./apps-provider.cjs"));
 
 module.exports = {
 	// Exposed so tests (and, if ever needed, a future WP) can build an
