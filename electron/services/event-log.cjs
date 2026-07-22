@@ -21,6 +21,20 @@
 // error, and a flush failure is logged and the batch dropped rather than
 // retried into an ever-growing buffer or rethrown into a timer/quit handler
 // that isn't expecting it.
+//
+// -- subscribe(): the live half, added for WP-3.1 -----------------------------
+// This module's own header already called it: "the substrate the entire
+// findings engine (Phase 3) will read from". Phase 3's smart functions engine
+// (electron/services/smart-functions/engine.cjs) is the first reader that
+// needs events the moment they happen, not the next time someone queries the
+// table -- a rule reacting to "the environment switched" a minute late would
+// be useless. `record()` already normalizes every event into one shape before
+// buffering it; `subscribe()` adds a synchronous, in-memory notification of
+// that SAME normalized shape to any registered listener, right as `record()`
+// is called -- no polling, no reading the table back, and no change to what
+// gets persisted or when. A listener throwing is caught and logged exactly
+// like a flush failure: nothing outside this module may ever break because a
+// subscriber misbehaved.
 // ---------------------------------------------------------------------------
 
 "use strict";
@@ -111,6 +125,37 @@ class EventLog {
 		this.maxBufferSize = options.maxBufferSize ?? DEFAULT_MAX_BUFFER;
 		this.retentionDays = options.retentionDays ?? DEFAULT_RETENTION_DAYS;
 		this.rowCap = options.rowCap ?? DEFAULT_ROW_CAP;
+		// WP-3.1: live subscribers -- see this file's header. A plain Set, not a
+		// Node EventEmitter, since the only capability needed is "notify every
+		// current listener, in registration order, and let one unsubscribe" --
+		// an EventEmitter's named-event routing would be unused machinery here.
+		this.listeners = new Set();
+	}
+
+	// Registers `listener(event)` to be called synchronously, in registration
+	// order, every time `record()` normalizes a new event -- BEFORE that event
+	// is necessarily flushed to disk (it may still be sitting in the buffer).
+	// Returns an unsubscribe function, so a caller (engine.cjs's start/shutdown)
+	// never has to hold onto `listener` itself to remove it later.
+	subscribe(listener) {
+		if (typeof listener !== "function") {
+			return () => {};
+		}
+		this.listeners.add(listener);
+		return () => this.listeners.delete(listener);
+	}
+
+	// Never throws, regardless of how many listeners are registered or how
+	// badly one of them behaves -- exactly the same defensiveness `record()`
+	// itself already applies to a bad payload or a missing type.
+	notifyListeners(event) {
+		for (const listener of this.listeners) {
+			try {
+				listener(event);
+			} catch (error) {
+				console.error("[Atlas] event-log: a subscriber threw (ignored):", error);
+			}
+		}
 	}
 
 	start() {
@@ -144,14 +189,21 @@ class EventLog {
 				return;
 			}
 			const { environmentId, subject, payload, sessionId } = options || {};
-			this.buffer.push({
+			const normalized = {
 				ts: new Date().toISOString(),
 				environmentId: toNullableText(environmentId),
 				type: type.trim(),
 				subject: toNullableText(subject),
-				payload: serializePayload(payload),
 				sessionId: toNullableText(sessionId),
-			});
+			};
+			this.buffer.push({ ...normalized, payload: serializePayload(payload) });
+
+			// Subscribers get the RAW payload object (never the JSON-string form
+			// just buffered above) -- see this file's header on why: a listener
+			// like the smart-functions engine reads `payload.smartFunctionOrigin`
+			// directly, and re-parsing a string it never needed serialized in the
+			// first place would be pure overhead on every single event.
+			this.notifyListeners({ ...normalized, payload: payload ?? null });
 
 			if (this.buffer.length >= this.maxBufferSize) {
 				this.flushNow();

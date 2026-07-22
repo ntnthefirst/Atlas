@@ -138,6 +138,81 @@ describe("EventLog.record()", () => {
 	});
 });
 
+describe("EventLog.subscribe() (WP-3.1 -- the smart functions engine's trigger source)", () => {
+	it("notifies a subscriber synchronously, with the RAW (unserialized) payload, the instant record() is called", async () => {
+		const db = await createDb();
+		const log = new EventLog(db);
+		const seen = [];
+		log.subscribe((event) => seen.push(event));
+
+		log.record("session.start", { environmentId: "env-a", sessionId: "sess-1", payload: { foo: "bar" } });
+
+		// Synchronous: no flush, no await, nothing async between record() and
+		// the listener firing -- this is what "event-driven, not polling" rests
+		// on for every trigger type that rides the event log.
+		expect(seen).toHaveLength(1);
+		expect(seen[0]).toMatchObject({ type: "session.start", environmentId: "env-a", sessionId: "sess-1" });
+		expect(seen[0].payload).toEqual({ foo: "bar" }); // a plain object, not a JSON string
+	});
+
+	it("notifies every registered subscriber, in registration order", async () => {
+		const db = await createDb();
+		const log = new EventLog(db);
+		const order = [];
+		log.subscribe(() => order.push("first"));
+		log.subscribe(() => order.push("second"));
+
+		log.record("app.focus", { subject: "chrome" });
+
+		expect(order).toEqual(["first", "second"]);
+	});
+
+	it("the returned unsubscribe function stops further notifications for that listener only", async () => {
+		const db = await createDb();
+		const log = new EventLog(db);
+		const seenA = [];
+		const seenB = [];
+		const unsubscribeA = log.subscribe((event) => seenA.push(event));
+		log.subscribe((event) => seenB.push(event));
+
+		log.record("app.focus", { subject: "chrome" });
+		unsubscribeA();
+		log.record("app.focus", { subject: "code" });
+
+		expect(seenA).toHaveLength(1); // stopped after unsubscribing
+		expect(seenB).toHaveLength(2); // never unsubscribed
+	});
+
+	it("a throwing subscriber never breaks record() or any OTHER subscriber", async () => {
+		const db = await createDb();
+		const log = new EventLog(db);
+		const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		const seen = [];
+		log.subscribe(() => {
+			throw new Error("a badly behaved listener");
+		});
+		log.subscribe((event) => seen.push(event));
+
+		expect(() => log.record("app.focus", { subject: "chrome" })).not.toThrow();
+		expect(seen).toHaveLength(1); // the second listener still ran
+		expect(log.pendingCount()).toBe(1); // and the event still got buffered
+		consoleSpy.mockRestore();
+	});
+
+	it("record() calls with an invalid/missing type never notify subscribers -- nothing was actually recorded", async () => {
+		const db = await createDb();
+		const log = new EventLog(db);
+		const seen = [];
+		log.subscribe((event) => seen.push(event));
+
+		log.record();
+		log.record("");
+		log.record("   ");
+
+		expect(seen).toEqual([]);
+	});
+});
+
 describe("EventLog batching", () => {
 	it("writes a large number of buffered events in a single transaction", async () => {
 		const db = await createDb();

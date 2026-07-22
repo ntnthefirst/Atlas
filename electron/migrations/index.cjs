@@ -20,6 +20,7 @@ const MIGRATIONS = [
 	require("./008_environment_scoped_indexes.cjs"),
 	require("./009_file_index.cjs"),
 	require("./010_file_index_ext_index.cjs"),
+	require("./011_smart_functions.cjs"),
 ];
 
 function ensureMigrationsTable(dbLike) {

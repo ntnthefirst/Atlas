@@ -115,6 +115,7 @@ function createTestWatcher({ statMap = new Map(), preferences = defaultPreferenc
 		safetyNetIntervalMs: overrides.safetyNetIntervalMs,
 		setInterval: overrides.setInterval,
 		clearInterval: overrides.clearInterval,
+		onFileEvent: overrides.onFileEvent,
 	});
 	activeWatchers.push(watcher);
 	return { watcher, created: fake.created, statMap };
@@ -454,6 +455,105 @@ describe("createFileIndexWatcher -- environment scoping", () => {
 
 		const row = db.first("SELECT environment_id FROM files WHERE path = ?", ["C:\\root\\scoped.txt"]);
 		expect(row.environment_id).toBe("env-a");
+	});
+});
+
+describe("createFileIndexWatcher -- onFileEvent hook (WP-3.1's 'file changed' trigger)", () => {
+	it("fires once per changed path, with the real path and environmentId, after the index write", async () => {
+		vi.useFakeTimers();
+		const db = await createDb();
+		const statMap = new Map([["C:\\root\\banner.psd", fakeFileStat()]]);
+		const onFileEvent = vi.fn();
+		const { watcher, created } = createTestWatcher({
+			getDb: () => db,
+			statMap,
+			onFileEvent,
+			preferences: defaultPreferences({
+				roots: [{ id: "r1", path: "C:\\root", environmentId: "env-a", enabled: true }],
+			}),
+		});
+		watcher.start();
+
+		created[0].listener("change", "banner.psd");
+		vi.advanceTimersByTime(100);
+		await watcher.waitForIdle();
+
+		expect(onFileEvent).toHaveBeenCalledTimes(1);
+		expect(onFileEvent).toHaveBeenCalledWith({ kind: "changed", path: "C:\\root\\banner.psd", environmentId: "env-a" });
+	});
+
+	it("fires with kind 'removed' for a deleted path, and never touches environmentId (not resolvable for a gone file)", async () => {
+		vi.useFakeTimers();
+		const db = await createDb();
+		const onFileEvent = vi.fn();
+		// No entry in statMap -> statPath() throws ENOENT -> a removal, not an upsert.
+		const { watcher, created } = createTestWatcher({ getDb: () => db, onFileEvent });
+		watcher.start();
+
+		created[0].listener("rename", "gone.txt");
+		vi.advanceTimersByTime(100);
+		await watcher.waitForIdle();
+
+		expect(onFileEvent).toHaveBeenCalledWith({ kind: "removed", path: "C:\\root\\gone.txt", environmentId: null });
+	});
+
+	it("still fires even when there is no db to write to -- the file genuinely changed regardless of index state", async () => {
+		vi.useFakeTimers();
+		const statMap = new Map([["C:\\root\\a.txt", fakeFileStat()]]);
+		const onFileEvent = vi.fn();
+		const { watcher, created } = createTestWatcher({ getDb: () => null, statMap, onFileEvent });
+		watcher.start();
+
+		created[0].listener("change", "a.txt");
+		vi.advanceTimersByTime(100);
+		await watcher.waitForIdle();
+
+		expect(onFileEvent).toHaveBeenCalledTimes(1);
+	});
+
+	it("a throwing onFileEvent hook for ONE path does not stop the hook firing for the OTHER paths in the same batch", async () => {
+		vi.useFakeTimers();
+		const db = await createDb();
+		const statMap = new Map([
+			["C:\\root\\a.txt", fakeFileStat()],
+			["C:\\root\\b.txt", fakeFileStat()],
+		]);
+		const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		const seen = [];
+		const onFileEvent = vi.fn((event) => {
+			seen.push(event.path);
+			if (event.path.endsWith("a.txt")) {
+				throw new Error("a badly behaved subscriber");
+			}
+		});
+		const { watcher, created } = createTestWatcher({ getDb: () => db, statMap, onFileEvent });
+		watcher.start();
+
+		created[0].listener("change", "a.txt");
+		created[0].listener("change", "b.txt");
+		vi.advanceTimersByTime(100);
+		await watcher.waitForIdle();
+		consoleSpy.mockRestore();
+
+		// Without a per-call try/catch, a.txt's throw would abort the loop and
+		// b.txt's hook call would never happen -- proven by disabling it (see
+		// this WP's final report).
+		expect(seen.sort()).toEqual(["C:\\root\\a.txt", "C:\\root\\b.txt"]);
+		expect(db.all("SELECT path FROM files")).toHaveLength(2); // the index write still happened for both
+	});
+
+	it("without onFileEvent configured (the default), nothing extra happens -- every other behaviour is unchanged", async () => {
+		vi.useFakeTimers();
+		const db = await createDb();
+		const statMap = new Map([["C:\\root\\a.txt", fakeFileStat()]]);
+		const { watcher, created } = createTestWatcher({ getDb: () => db, statMap });
+		watcher.start();
+
+		created[0].listener("change", "a.txt");
+		vi.advanceTimersByTime(100);
+		await watcher.waitForIdle();
+
+		expect(db.all("SELECT path FROM files")).toHaveLength(1);
 	});
 });
 

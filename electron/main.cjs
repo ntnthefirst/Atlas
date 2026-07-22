@@ -76,6 +76,9 @@ const { createFileIndexWatcher } = require("./services/file-index/watcher.cjs");
 const { register: registerFileIndexIpc } = require("./ipc/file-index.cjs");
 const { createContextService } = require("./services/context-service.cjs");
 const { register: registerContextIpc } = require("./ipc/context.cjs");
+const { createSmartFunctionsEngine } = require("./services/smart-functions/engine.cjs");
+const { migrateScenes } = require("./services/smart-functions/migrate-scenes.cjs");
+const { register: registerSmartFunctionsIpc } = require("./ipc/smart-functions.cjs");
 
 let mainWindow = null;
 let miniWindow = null;
@@ -189,6 +192,14 @@ const fileIndexWatcher = createFileIndexWatcher({
 	// crawl rather than silently leaving the index stale -- see watcher.cjs's
 	// header on "graceful degradation on a watch failure".
 	triggerRecrawl: () => fileIndexCrawler.startCrawl(),
+	// WP-3.1: the smart functions engine's "file changed" trigger rides this
+	// SAME watcher's own debounced flush -- see engine.cjs's header for why
+	// this is not a second fs.watch. `smartFunctionsEngine` is declared later
+	// in this file, but this callback isn't invoked until a real file change
+	// happens, long after module load finishes, so the forward reference is
+	// safe (same reasoning as `triggerRecrawl` above referencing
+	// `fileIndexCrawler`'s own methods).
+	onFileEvent: (fileEvent) => smartFunctionsEngine.handleFileEvent(fileEvent),
 });
 
 // WP-2.8: work-context adaptation -- a singleton like the two above. Its own
@@ -207,6 +218,23 @@ const contextService = createContextService({
 			}
 		}
 	},
+});
+
+// WP-3.1: the smart functions engine -- a singleton like the three above,
+// subscribing to the event log (electron/services/event-log.cjs's new
+// subscribe()) rather than polling for anything. `switchEnvironment` is
+// `setActiveEnvironment` itself (a plain function declaration below, never
+// reassigned -- see wireIpc()'s own comment on why that's safe to pass
+// directly rather than through a getter). Its own start()/shutdown() are
+// called once db/eventLog actually exist and on quit respectively, exactly
+// like fileIndexWatcher/contextService.
+const smartFunctionsEngine = createSmartFunctionsEngine({
+	getDb: () => db,
+	getEventLog: () => eventLog,
+	getCurrentEnvironmentId: () => currentEnvironmentId,
+	getTracker: () => tracker,
+	switchEnvironment: setActiveEnvironment,
+	platform,
 });
 
 if (isDev) {
@@ -914,6 +942,7 @@ function wireIpc() {
 
 	registerFileIndexIpc(ipcMain, { crawler: fileIndexCrawler, watcher: fileIndexWatcher, getDb: () => db });
 	registerContextIpc(ipcMain, { contextService });
+	registerSmartFunctionsIpc(ipcMain, { getDb: () => db, engine: smartFunctionsEngine });
 
 	registerHotkeyIpc(ipcMain, {
 		getBinding: environmentHotkeyManager.getBinding,
@@ -1025,6 +1054,25 @@ app.whenReady().then(async () => {
 	}
 	eventLog.start();
 
+	// WP-3.1: migrate existing Notch scenes into smart functions. Runs
+	// unconditionally on every boot -- see migrate-scenes.cjs's own header for
+	// why that (not a one-off manual step) is what makes this "automatic", and
+	// why it is always safe to repeat (nothing already migrated is migrated
+	// twice; the original scene is never touched). Must run after `eventLog`
+	// exists (createRule below has nothing to do with the event log directly,
+	// but keeping this near the rest of boot-time db bootstrapping is simplest)
+	// and before smartFunctionsEngine.start() reads the rule table for the
+	// first time.
+	try {
+		const migrationResult = migrateScenes(db);
+		if (migrationResult.migrated > 0) {
+			console.log(`[Atlas] Smart functions: migrated ${migrationResult.migrated} scene(s) from the Notch.`);
+		}
+	} catch (error) {
+		console.error("[Atlas] Smart functions: scene migration failed:", error);
+	}
+	smartFunctionsEngine.start();
+
 	// WP-2.2: hand the launcher provider registry a way to reach `db`/
 	// `eventLog` lazily -- both are `let`s that don't hold their real values
 	// until this point, well after the registry module itself was required
@@ -1090,9 +1138,18 @@ app.whenReady().then(async () => {
 	}
 
 	// Re-sync notch windows whenever a monitor is connected/disconnected so the
-	// selection (and the "always at least one" fallback) stays accurate.
-	screen.on("display-added", () => syncNotchWindows());
-	screen.on("display-removed", () => syncNotchWindows());
+	// selection (and the "always at least one" fallback) stays accurate. Also
+	// records an event-log entry (WP-3.1's "display connected" trigger reacts
+	// to exactly this, through the ordinary event-log subscription -- see
+	// engine.cjs's header -- not a separate wire-up).
+	screen.on("display-added", () => {
+		syncNotchWindows();
+		eventLog?.record("display.connected");
+	});
+	screen.on("display-removed", () => {
+		syncNotchWindows();
+		eventLog?.record("display.disconnected");
+	});
 
 	app.on("activate", () => {
 		if (BrowserWindow.getAllWindows().length === 0) {
@@ -1195,4 +1252,8 @@ app.on("before-quit", () => {
 	fileIndexWatcher.shutdown();
 	// WP-2.8: clears the foreground-probe poll timer, for the same reason.
 	contextService.shutdown();
+	// WP-3.1: unsubscribes from the event log and clears the time-of-day poll
+	// timer, for the same reason (both are already unref'd, but shutting down
+	// explicitly matches every other singleton above).
+	smartFunctionsEngine.shutdown();
 });

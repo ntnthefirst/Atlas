@@ -141,6 +141,17 @@ function createFileIndexWatcher(deps = {}) {
 	const getPreferences =
 		deps.getPreferences ?? (() => ({ roots: [], exclusions: [], maxDepth: 12, maxFiles: 200_000 }));
 	const getEventLog = deps.getEventLog ?? (() => null);
+	// WP-3.1: an optional per-PATH hook for the smart-functions engine's "file
+	// changed" trigger -- see engine.cjs's header for why this rides on the
+	// watcher's own debounced flush instead of a second fs.watch. Deliberately
+	// NOT routed through the event log like every other hook in this file:
+	// `file_index.watch_batch` below stays an AGGREGATE count on purpose (this
+	// file's own header, "files_fts stays incremental" section, and event-
+	// log.cjs's own "never richer than that" discipline) -- a single `npm
+	// install`-sized burst would otherwise write one row per changed path into
+	// a log meant to stay small and bounded. `onFileEvent` gets the real path
+	// directly, in memory only, never persisted by this module.
+	const onFileEvent = deps.onFileEvent ?? null;
 	const power = deps.powerMonitor ?? powerMonitor;
 	const createWatch = deps.createWatch ?? ((dirPath, options, listener) => fs.watch(dirPath, options, listener));
 	const statPath = deps.stat ?? ((target) => fsp.stat(target));
@@ -250,6 +261,29 @@ function createFileIndexWatcher(deps = {}) {
 				result = store.applyWatcherBatch(db, { upserts, removals, maxFiles }, now());
 			} catch (error) {
 				console.error("[Atlas] file-index watcher: failed to write a batch:", error);
+			}
+		}
+
+		// WP-3.1: fire the per-path hook regardless of whether the index write
+		// above succeeded -- the file genuinely changed on disk either way, and
+		// a smart function reacting to that is a separate concern from whether
+		// this module's own index stayed in sync. Guarded like every other
+		// optional hook in this file (getEventLog, triggerRecrawl): a throwing
+		// subscriber must never break the flush.
+		if (onFileEvent) {
+			for (const upsert of upserts) {
+				try {
+					onFileEvent({ kind: "changed", path: upsert.path, environmentId: upsert.environmentId ?? null });
+				} catch (error) {
+					console.error("[Atlas] file-index watcher: onFileEvent hook failed:", error);
+				}
+			}
+			for (const removedPath of removals) {
+				try {
+					onFileEvent({ kind: "removed", path: removedPath, environmentId: null });
+				} catch (error) {
+					console.error("[Atlas] file-index watcher: onFileEvent hook failed:", error);
+				}
 			}
 		}
 
