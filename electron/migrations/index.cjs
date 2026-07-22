@@ -18,6 +18,7 @@ const MIGRATIONS = [
 	require("./006_notch_layouts.cjs"),
 	require("./007_environment_archive.cjs"),
 	require("./008_environment_scoped_indexes.cjs"),
+	require("./009_file_index.cjs"),
 ];
 
 function ensureMigrationsTable(dbLike) {
