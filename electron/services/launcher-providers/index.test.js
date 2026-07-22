@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createLauncherProviderRegistry, search, execute, DEFAULT_PROVIDER_TIMEOUT_MS } from "./index.cjs";
-import { ACTIONS } from "./actions-provider.cjs";
+import { COMMANDS } from "./commands-provider.cjs";
 
 // ---------------------------------------------------------------------------
 // The provider registry (WP-2.2). Every test below builds its OWN registry
@@ -312,30 +312,34 @@ describe("frecency lookup -- per-environment scoping", () => {
 	});
 });
 
-describe("the production singleton -- 'actions' provider wired in by default", () => {
-	// WP-2.9 registers a THIRD provider ("commands", also non-empty on a blank
-	// query -- see commands-provider.cjs) alongside "actions" and "data", so a
-	// blank query's full result set is a superset of ACTIONS now rather than
-	// exactly equal to it. This asserts the "actions" SUBSET is still exactly
-	// ACTIONS, which is the invariant this test actually cares about.
-	it("includes the full actions list (and nothing but ACTIONS under the actions:: prefix) for an empty/blank query", async () => {
+describe("the production singleton -- real providers wired in by default", () => {
+	// The production registry wires in "data" (WP-2.3) and "commands" (WP-2.9)
+	// at require time. With no database bound (init() only runs inside the live
+	// app), "data" yields nothing here, so a blank query surfaces exactly the
+	// "commands" provider's full command list -- the successor to the retired
+	// "actions" stub, which every command now genuinely backs.
+	it("surfaces every launcher command (and nothing but commands) for an empty/blank query", async () => {
 		const results = await search("", { environmentId: null });
-		const actionsOnly = results.filter((r) => r.id.startsWith("actions::"));
-		expect(actionsOnly.map((r) => r.id).sort()).toEqual(ACTIONS.map((a) => `actions::${a.id}`).sort());
+		const commandIds = results.filter((r) => r.id.startsWith("commands::")).map((r) => r.id).sort();
+		expect(commandIds).toEqual(COMMANDS.map((c) => `commands::${c.id}`).sort());
 	});
 
 	it("filters case-insensitively on title, through the registry's ranking", async () => {
 		const results = await search("SETTINGS", { environmentId: null });
-		expect(results.some((r) => r.id === "actions::open-settings")).toBe(true);
+		expect(results.some((r) => r.id === "commands::open-settings")).toBe(true);
 	});
 
-	it("execute() reports ok:true for a known action id", async () => {
-		const outcome = await execute("actions::new-task", { modifier: "ctrl" });
-		expect(outcome).toEqual({ ok: true, title: "Create a new task", resultId: "actions::new-task", modifier: "ctrl" });
+	it("execute() routes a known command id back to its command", async () => {
+		// navigate() is inert until the live app wires it, so ok reflects that
+		// no window was actually driven -- but the echoed title proves the id
+		// routed to the right command and its run() executed.
+		const outcome = await execute("commands::open-dashboard", { modifier: null });
+		expect(outcome.resultId).toBe("commands::open-dashboard");
+		expect(outcome.title).toBe("Opened Dashboard");
 	});
 
 	it("execute() reports ok:false for an unknown id, without throwing", async () => {
-		const outcome = await execute("actions::not-a-real-id", {});
+		const outcome = await execute("commands::not-a-real-id", {});
 		expect(outcome.ok).toBe(false);
 	});
 });

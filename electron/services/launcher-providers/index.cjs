@@ -401,7 +401,6 @@ function createLauncherProviderRegistry() {
 // The production singleton -- everything electron/main.cjs and
 // electron/ipc/launcher.cjs actually use.
 const registry = createLauncherProviderRegistry();
-registry.registerProvider(require("./actions-provider.cjs"));
 registry.registerProvider(require("./data-provider.cjs"));
 registry.registerProvider(require("./commands-provider.cjs"));
 
