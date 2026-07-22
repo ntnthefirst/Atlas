@@ -721,3 +721,51 @@ export type DashboardWidgetPlacement = {
 export type DashboardPreferences = {
 	widgets: DashboardWidgetPlacement[];
 };
+
+// ---------------------------------------------------------------------------
+// File index (WP-2.5) -- mirrors electron/config/file-index-prefs.cjs's
+// normalized shape and electron/services/file-index/crawler.cjs's status
+// object exactly; the renderer never invents a shape of its own for either.
+// ---------------------------------------------------------------------------
+
+export type FileIndexRoot = {
+	id: string;
+	label: string;
+	path: string;
+	// null = global (no environment claims this root, every environment can
+	// find files under it) -- see file-index-prefs.cjs's header.
+	environmentId: string | null;
+	enabled: boolean;
+};
+
+export type FileIndexPreferences = {
+	roots: FileIndexRoot[];
+	exclusions: string[];
+	maxDepth: number;
+	maxFiles: number;
+};
+
+export type FileIndexCrawlState = "idle" | "running" | "completed" | "cancelled" | "error";
+
+export type FileIndexStatus = {
+	state: FileIndexCrawlState;
+	startedAt: number | null;
+	finishedAt: number | null;
+	filesScanned: number;
+	dirsScanned: number;
+	currentRoot: string | null;
+	truncated: boolean;
+	cancelled: boolean;
+	error: string | null;
+};
+
+export type FileIndexRootStat = {
+	root: string;
+	count: number;
+	lastSeenAt: number | null;
+};
+
+export type FileIndexStats = {
+	totalFiles: number;
+	perRoot: FileIndexRootStat[];
+};

@@ -4,11 +4,13 @@ import { ChevronDownIcon, ChevronUpIcon, MinusIcon, XMarkIcon } from "@heroicons
 import {
 	ArrowPathIcon,
 	CommandLineIcon,
+	FolderIcon,
 	PaintBrushIcon,
 	RectangleGroupIcon,
 	SparklesIcon,
 	WrenchScrewdriverIcon,
 } from "@heroicons/react/24/solid";
+import { TrashIcon } from "@heroicons/react/24/outline";
 import { AccentPicker, Select, ThemeModePicker, Toggle } from "../ui";
 import { useAccent } from "../../hooks";
 import { describeIpcError } from "../../utils/ipcError";
@@ -18,6 +20,10 @@ import type {
 	AiPublicConfig,
 	AppRelease,
 	DisplaySummary,
+	Environment,
+	FileIndexPreferences,
+	FileIndexStats,
+	FileIndexStatus,
 	NotchActivation,
 	NotchIdleOpacity,
 	NotchInfoItemConfig,
@@ -27,7 +33,7 @@ import type {
 } from "../../types";
 import logo from "../../assets/logosmall.png";
 
-type SettingsTab = "general" | "appearance" | "notch" | "integrations" | "keybindings" | "updates";
+type SettingsTab = "general" | "appearance" | "notch" | "files" | "integrations" | "keybindings" | "updates";
 
 type ThemeOption = "dark" | "light" | "system";
 
@@ -39,10 +45,40 @@ const settingsTabs: Array<{
 	{ id: "general", label: "General", icon: WrenchScrewdriverIcon },
 	{ id: "appearance", label: "Appearance", icon: PaintBrushIcon },
 	{ id: "notch", label: "Smart Notch", icon: RectangleGroupIcon },
+	{ id: "files", label: "File Index", icon: FolderIcon },
 	{ id: "integrations", label: "Integrations", icon: SparklesIcon },
 	{ id: "keybindings", label: "Keybindings", icon: CommandLineIcon },
 	{ id: "updates", label: "Updates", icon: ArrowPathIcon },
 ];
+
+const EMPTY_FILE_INDEX_PREFS: FileIndexPreferences = { roots: [], exclusions: [], maxDepth: 12, maxFiles: 200_000 };
+
+const EMPTY_FILE_INDEX_STATUS: FileIndexStatus = {
+	state: "idle",
+	startedAt: null,
+	finishedAt: null,
+	filesScanned: 0,
+	dirsScanned: 0,
+	currentRoot: null,
+	truncated: false,
+	cancelled: false,
+	error: null,
+};
+
+function formatFileIndexState(status: FileIndexStatus): string {
+	switch (status.state) {
+		case "running":
+			return "Scanning…";
+		case "completed":
+			return status.truncated ? "Finished (stopped early — file cap reached)" : "Up to date";
+		case "cancelled":
+			return "Cancelled";
+		case "error":
+			return status.error ? `Failed: ${status.error}` : "Failed";
+		default:
+			return "Never scanned";
+	}
+}
 
 const AI_PROVIDER_ORDER: AiProvider[] = ["anthropic", "google", "openai"];
 
@@ -141,6 +177,10 @@ export function SettingsWindowApp() {
 		],
 	});
 	const [displays, setDisplays] = useState<DisplaySummary[]>([]);
+	const [environments, setEnvironments] = useState<Environment[]>([]);
+	const [fileIndexPrefs, setFileIndexPrefs] = useState<FileIndexPreferences>(EMPTY_FILE_INDEX_PREFS);
+	const [fileIndexStatus, setFileIndexStatus] = useState<FileIndexStatus>(EMPTY_FILE_INDEX_STATUS);
+	const [fileIndexStats, setFileIndexStats] = useState<FileIndexStats | null>(null);
 	const [aiConfig, setAiConfig] = useState<AiPublicConfig | null>(null);
 	const [aiKeyDrafts, setAiKeyDrafts] = useState<Record<AiProvider, string>>({
 		anthropic: "",
@@ -239,6 +279,86 @@ export function SettingsWindowApp() {
 			.then(setDisplays)
 			.catch(() => undefined);
 	}, []);
+
+	useEffect(() => {
+		window.atlas
+			.listEnvironments()
+			.then(setEnvironments)
+			.catch(() => undefined);
+	}, []);
+
+	const refreshFileIndexStats = useCallback(() => {
+		window.atlas
+			.getFileIndexStats()
+			.then(setFileIndexStats)
+			.catch(() => undefined);
+	}, []);
+
+	useEffect(() => {
+		window.atlas
+			.getFileIndexPreferences()
+			.then(setFileIndexPrefs)
+			.catch(() => undefined);
+		window.atlas
+			.getFileIndexStatus()
+			.then(setFileIndexStatus)
+			.catch(() => undefined);
+		refreshFileIndexStats();
+		const unsubscribe = window.atlas.onFileIndexProgress?.((status) => {
+			setFileIndexStatus(status);
+			if (status.state === "completed" || status.state === "cancelled") {
+				refreshFileIndexStats();
+			}
+		});
+		return () => unsubscribe?.();
+	}, [refreshFileIndexStats]);
+
+	const updateFileIndexPrefs = async (patch: Partial<FileIndexPreferences>) => {
+		const next = await window.atlas.setFileIndexPreferences(patch);
+		setFileIndexPrefs(next);
+		return next;
+	};
+
+	const handleAddFileIndexRoot = async () => {
+		const picked = await window.atlas.pickFileIndexFolder();
+		if (!picked) {
+			return;
+		}
+		const root = {
+			id: `root:${Date.now()}:${Math.round(Math.random() * 1e6)}`,
+			label: picked.split(/[\\/]/).filter(Boolean).pop() ?? picked,
+			path: picked,
+			environmentId: null,
+			enabled: true,
+		};
+		await updateFileIndexPrefs({ roots: [...fileIndexPrefs.roots, root] });
+	};
+
+	const handleRemoveFileIndexRoot = async (id: string) => {
+		await updateFileIndexPrefs({ roots: fileIndexPrefs.roots.filter((root) => root.id !== id) });
+	};
+
+	const handleToggleFileIndexRoot = async (id: string, enabled: boolean) => {
+		await updateFileIndexPrefs({
+			roots: fileIndexPrefs.roots.map((root) => (root.id === id ? { ...root, enabled } : root)),
+		});
+	};
+
+	const handleSetFileIndexRootEnvironment = async (id: string, environmentId: string | null) => {
+		await updateFileIndexPrefs({
+			roots: fileIndexPrefs.roots.map((root) => (root.id === id ? { ...root, environmentId } : root)),
+		});
+	};
+
+	const handleStartFileIndexCrawl = async () => {
+		const status = await window.atlas.startFileIndexCrawl();
+		setFileIndexStatus(status);
+	};
+
+	const handleCancelFileIndexCrawl = async () => {
+		const status = await window.atlas.cancelFileIndexCrawl();
+		setFileIndexStatus(status);
+	};
 
 	useEffect(() => {
 		window.atlas
@@ -899,6 +1019,118 @@ export function SettingsWindowApp() {
 												</div>
 											</>
 										)}
+									</div>
+								)}
+
+								{activeTab === "files" && (
+									<div className="flex flex-col gap-4">
+										<p className="m-0 text-xs text-neutral-500 dark:text-neutral-300">
+											Atlas indexes file names, extensions, sizes and locations under the roots below so
+											the launcher can find them by typing — never file contents. Excluded folders (
+											{fileIndexPrefs.exclusions.slice(0, 6).join(", ")}
+											{fileIndexPrefs.exclusions.length > 6 ? ", …" : ""}) are skipped everywhere they
+											appear.
+										</p>
+
+										<div className="atlas-settings-card-stack grid gap-2">
+											<div className="flex items-center justify-between">
+												<span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
+													Scan roots
+												</span>
+												<button type="button" className="action-btn" onClick={() => void handleAddFileIndexRoot()}>
+													Add folder
+												</button>
+											</div>
+
+											<div className="grid gap-1.5">
+												{fileIndexPrefs.roots.length === 0 && (
+													<p className="m-0 text-sm text-neutral-500 dark:text-neutral-300">
+														No roots configured yet.
+													</p>
+												)}
+												{fileIndexPrefs.roots.map((root) => (
+													<div
+														key={root.id}
+														className="flex items-center gap-2 rounded-lg border border-neutral-200 px-3 py-2 dark:border-neutral-600"
+													>
+														<button
+															type="button"
+															onClick={() => void handleToggleFileIndexRoot(root.id, !root.enabled)}
+															className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+																root.enabled
+																	? "border-primary bg-primary"
+																	: "border-neutral-300 dark:border-neutral-500"
+															}`}
+															title={root.enabled ? "Disable" : "Enable"}
+															aria-label={root.enabled ? "Disable" : "Enable"}
+														>
+															{root.enabled && <span className="h-2 w-2 rounded-sm bg-white" />}
+														</button>
+														<div className="min-w-0 flex-1">
+															<p className="m-0 truncate text-sm text-neutral-800 dark:text-neutral-100">
+																{root.label}
+															</p>
+															<p className="m-0 truncate text-xs text-neutral-500 dark:text-neutral-400">
+																{root.path}
+															</p>
+														</div>
+														<select
+															value={root.environmentId ?? ""}
+															onChange={(event) =>
+																void handleSetFileIndexRootEnvironment(root.id, event.target.value || null)
+															}
+															className="rounded-lg border border-neutral-200 bg-neutral-0 px-2 py-1 text-xs text-neutral-700 outline-none focus:border-primary dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100"
+														>
+															<option value="">Global</option>
+															{environments.map((environment) => (
+																<option key={environment.id} value={environment.id}>
+																	{environment.name}
+																</option>
+															))}
+														</select>
+														<button
+															type="button"
+															onClick={() => void handleRemoveFileIndexRoot(root.id)}
+															className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-neutral-500 transition-colors hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-700"
+															title="Remove root"
+															aria-label="Remove root"
+														>
+															<TrashIcon className="h-3.5 w-3.5" />
+														</button>
+													</div>
+												))}
+											</div>
+										</div>
+
+										<div className="atlas-settings-card-stack grid gap-2">
+											<div className="flex items-center justify-between">
+												<span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
+													Index status
+												</span>
+												{fileIndexStatus.state === "running" ? (
+													<button type="button" className="action-btn" onClick={() => void handleCancelFileIndexCrawl()}>
+														Cancel scan
+													</button>
+												) : (
+													<button type="button" className="action-btn" onClick={() => void handleStartFileIndexCrawl()}>
+														Run a scan now
+													</button>
+												)}
+											</div>
+											<p className="m-0 text-sm text-neutral-700 dark:text-neutral-200">
+												{formatFileIndexState(fileIndexStatus)}
+											</p>
+											{fileIndexStatus.state === "running" && (
+												<p className="m-0 text-xs text-neutral-500 dark:text-neutral-400">
+													{fileIndexStatus.filesScanned.toLocaleString()} files ·{" "}
+													{fileIndexStatus.dirsScanned.toLocaleString()} folders scanned
+													{fileIndexStatus.currentRoot ? ` · currently in ${fileIndexStatus.currentRoot}` : ""}
+												</p>
+											)}
+											<p className="m-0 text-xs text-neutral-500 dark:text-neutral-400">
+												{(fileIndexStats?.totalFiles ?? 0).toLocaleString()} files indexed
+											</p>
+										</div>
 									</div>
 								)}
 

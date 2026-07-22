@@ -12,6 +12,9 @@ import type {
 	DisplaySummary,
 	DownloadAndInstallResult,
 	DashboardOverview,
+	FileIndexPreferences,
+	FileIndexStats,
+	FileIndexStatus,
 	FocusConfig,
 	FocusState,
 	Environment,
@@ -176,6 +179,15 @@ declare global {
 			closeMiniWindow: () => Promise<boolean>;
 			windowToggleMaximize: () => Promise<boolean>;
 			windowClose: () => Promise<boolean>;
+
+			getFileIndexPreferences: () => Promise<FileIndexPreferences>;
+			setFileIndexPreferences: (patch: Partial<FileIndexPreferences>) => Promise<FileIndexPreferences>;
+			startFileIndexCrawl: () => Promise<FileIndexStatus>;
+			cancelFileIndexCrawl: () => Promise<FileIndexStatus>;
+			getFileIndexStatus: () => Promise<FileIndexStatus>;
+			getFileIndexStats: () => Promise<FileIndexStats>;
+			pickFileIndexFolder: () => Promise<string | null>;
+			onFileIndexProgress: (callback: (status: FileIndexStatus) => void) => () => void;
 		};
 	}
 }
