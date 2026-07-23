@@ -8,6 +8,12 @@ import type {
 	AiContextBudget,
 	AiMemory,
 	AiProviderDescription,
+	McpConnectResult,
+	McpLogEntry,
+	McpServer,
+	McpServerInput,
+	McpStatus,
+	McpTool,
 	AiStreamResult,
 	AiConfigPatch,
 	AiPublicConfig,
@@ -191,6 +197,21 @@ declare global {
 			addAiMemory: (environmentId: string, content: string) => Promise<AiMemory | null>;
 			updateAiMemory: (environmentId: string, id: string, content: string) => Promise<AiMemory | null>;
 			deleteAiMemory: (environmentId: string, id: string) => Promise<boolean>;
+
+			// WP-4.3: MCP servers, all environment-scoped.
+			listMcpServers: (environmentId: string) => Promise<McpServer[]>;
+			createMcpServer: (environmentId: string, input: McpServerInput) => Promise<McpServer | null>;
+			updateMcpServer: (environmentId: string, id: string, patch: McpServerInput) => Promise<McpServer | null>;
+			deleteMcpServer: (environmentId: string, id: string) => Promise<boolean>;
+			connectMcp: (environmentId: string) => Promise<McpConnectResult>;
+			disconnectMcp: () => Promise<boolean>;
+			getMcpStatus: () => Promise<McpStatus>;
+			listMcpTools: () => Promise<McpTool[]>;
+			getMcpLogs: (serverId: string) => Promise<McpLogEntry[]>;
+			callMcpTool: (
+				qualifiedName: string,
+				args: Record<string, unknown>,
+			) => Promise<{ ok: boolean; text?: string; isError?: boolean; error?: string }>;
 			aiStream: (args: AiCompleteArgs, onChunk: (chunk: string) => void) => Promise<AiStreamResult>;
 
 			pickAppFile: () => Promise<string | null>;

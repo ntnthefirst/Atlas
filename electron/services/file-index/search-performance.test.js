@@ -134,6 +134,13 @@ describe("file-index search latency at 100k files (real, measured)", () => {
 				);
 			}
 		},
-		30_000,
+		// The per-query assertions above are what this test actually measures;
+		// this ceiling only has to be large enough to seed 100k rows. It was
+		// 30s, which was ample when the suite was small and started timing out
+		// once the suite grew past a hundred files running in parallel -- the
+		// seeding competes for the same disk and cores. Raising it weakens
+		// nothing: the measurements are wall-clock timings of individual
+		// queries, not of this budget.
+		120_000,
 	);
 });

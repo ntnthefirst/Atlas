@@ -84,6 +84,12 @@ const { register: registerPatternMinerIpc } = require("./ipc/pattern-miner.cjs")
 const { createFindingLifecycleManager } = require("./services/pattern-miner/finding-lifecycle-manager.cjs");
 const { register: registerFindingsIpc } = require("./ipc/findings.cjs");
 const { createSuggestionManager } = require("./services/suggestion-surfacing/suggestion-manager.cjs");
+const { createMcpManager } = require("./services/mcp/manager.cjs");
+const { register: registerMcpIpc } = require("./ipc/mcp.cjs");
+// WP-4.3: MCP servers can carry credentials (an HTTP server's auth header),
+// which go to the same encrypted vault WP-0.4 built for AI keys -- never into
+// the database alongside the rest of the server config.
+const mcpSecrets = require("./services/secrets.cjs");
 const { register: registerSuggestionsIpc } = require("./ipc/suggestions.cjs");
 
 let mainWindow = null;
@@ -284,6 +290,16 @@ const suggestionManager = createSuggestionManager({
 	getDb: () => db,
 	getEventLog: () => eventLog,
 	lifecycleManager: findingLifecycleManager,
+});
+
+// WP-4.3: MCP connections. Constructed here but deliberately NOT connected at
+// boot -- connecting spawns child processes, which would make Atlas's startup
+// depend on other people's software and would have `npm run smoke` spawn them
+// too. Connecting happens on an explicit `mcp:connect`.
+const mcpManager = createMcpManager({
+	getDb: () => db,
+	secrets: mcpSecrets,
+	getEventLog: () => eventLog,
 });
 
 if (isDev) {
@@ -988,7 +1004,8 @@ function wireIpc() {
 	// WP-4.2: the AI handlers now build environment-scoped context, so they need
 	// the database. A getter, for the usual reason -- `db` is assigned during
 	// startup, after this module is required.
-	registerAiIpc(ipcMain, { getDb: () => db });
+	registerAiIpc(ipcMain, { getDb: () => db, mcpManager });
+	registerMcpIpc(ipcMain, { getDb: () => db, getSecrets: () => mcpSecrets, manager: mcpManager });
 
 	registerIsolationIpc(ipcMain);
 

@@ -327,6 +327,12 @@ export type AiCompleteArgs = {
 	/** WP-4.1: tools the model may call. Refused by a provider lacking `tools`. */
 	tools?: AiToolSpec[];
 	/**
+	 * WP-4.3: also offer the tools of whichever MCP servers this environment
+	 * has connected. Opt-in, so a caller that only wants prose is never
+	 * reshaped by whatever happens to be connected.
+	 */
+	useTools?: boolean;
+	/**
 	 * WP-4.2: build this environment's context and prepend it to the system
 	 * prompt. Omitted means no context at all — never "every environment".
 	 */
@@ -365,6 +371,97 @@ export type AiContext = {
 	budget?: AiContextBudget;
 };
 
+// WP-4.3: MCP servers. A server belongs to exactly one environment (migration
+// 016) — there is deliberately no way to express a global one, because a
+// globally-reachable server would let an enclosed environment send its data out
+// through a tool configured somewhere else entirely.
+export type McpTransport = "stdio" | "http";
+
+export type McpStdioConfig = {
+	command: string;
+	args: string[];
+	env: Record<string, string>;
+	cwd: string | null;
+};
+
+export type McpHttpConfig = {
+	url: string;
+	/**
+	 * Non-secret headers only. Anything credential-shaped (Authorization,
+	 * X-API-Key, Cookie, …) is routed to the encrypted vault instead and never
+	 * appears here or in the database.
+	 */
+	headers: Record<string, string>;
+};
+
+export type McpServer = {
+	id: string;
+	environmentId: string;
+	label: string;
+	transport: McpTransport;
+	config: Partial<McpStdioConfig & McpHttpConfig>;
+	enabled: boolean;
+	createdAt: string;
+	updatedAt: string;
+};
+
+export type McpServerInput = {
+	label?: string;
+	transport?: McpTransport;
+	config?: Partial<McpStdioConfig & McpHttpConfig>;
+	enabled?: boolean;
+};
+
+export type McpConnectionState = "idle" | "connecting" | "ready" | "failed" | "closed";
+
+export type McpServerStatus = {
+	id: string;
+	label: string;
+	state: McpConnectionState;
+	error: string | null;
+	serverInfo: { name?: string; version?: string } | null;
+	toolCount: number;
+	pendingCount: number;
+};
+
+export type McpStatus = {
+	environmentId: string | null;
+	servers: McpServerStatus[];
+};
+
+/** One tool from one connected server. `name` is qualified `<serverId>__<tool>`. */
+export type McpTool = {
+	name: string;
+	description: string;
+	parameters: Record<string, unknown>;
+	serverId: string;
+	rawName: string;
+};
+
+export type McpLogEntry = {
+	stream: "stdout" | "stderr" | "http" | "lifecycle" | "protocol";
+	line: string;
+	at: number;
+};
+
+export type McpConnectResult = {
+	connected: number;
+	failures: Array<{ id: string; label: string; error: string }>;
+	error?: string;
+};
+
+/** The outcome of one tool call the model asked for. */
+export type AiToolResult = {
+	id: string;
+	name: string;
+	/** False when the call could not be made at all. */
+	ok: boolean;
+	/** True when the call failed OR the tool itself reported a failure. */
+	isError: boolean;
+	text: string;
+	error: string | null;
+};
+
 /** One durable fact the user taught the assistant, inside one environment. */
 export type AiMemory = {
 	id: string;
@@ -383,6 +480,11 @@ export type AiCompleteResult =
 			model: string;
 			/** WP-4.2: exactly the context that was sent, or null when none was. */
 			context: AiContext | null;
+			/**
+			 * WP-4.3: the outcome of every tool call the model asked for. One
+			 * round only — results are returned, not fed back for a second turn.
+			 */
+			toolResults: AiToolResult[];
 	  }
 	| { ok: false; error: string };
 

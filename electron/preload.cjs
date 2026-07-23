@@ -208,6 +208,21 @@ contextBridge.exposeInMainWorld("atlas", {
 	addAiMemory: (environmentId, content) => ipcRenderer.invoke("ai:addMemory", environmentId, content),
 	updateAiMemory: (environmentId, id, content) => ipcRenderer.invoke("ai:updateMemory", environmentId, id, content),
 	deleteAiMemory: (environmentId, id) => ipcRenderer.invoke("ai:deleteMemory", environmentId, id),
+
+	// WP-4.3: MCP servers. Every one of these takes an environment id, because
+	// a server belongs to exactly one environment (migration 016) -- there is
+	// no unscoped variant anywhere in the chain. Connecting is always explicit:
+	// nothing spawns a server process on its own.
+	listMcpServers: (environmentId) => ipcRenderer.invoke("mcp:listServers", environmentId),
+	createMcpServer: (environmentId, input) => ipcRenderer.invoke("mcp:createServer", environmentId, input),
+	updateMcpServer: (environmentId, id, patch) => ipcRenderer.invoke("mcp:updateServer", environmentId, id, patch),
+	deleteMcpServer: (environmentId, id) => ipcRenderer.invoke("mcp:deleteServer", environmentId, id),
+	connectMcp: (environmentId) => ipcRenderer.invoke("mcp:connect", environmentId),
+	disconnectMcp: () => ipcRenderer.invoke("mcp:disconnect"),
+	getMcpStatus: () => ipcRenderer.invoke("mcp:getStatus"),
+	listMcpTools: () => ipcRenderer.invoke("mcp:listTools"),
+	getMcpLogs: (serverId) => ipcRenderer.invoke("mcp:getLogs", serverId),
+	callMcpTool: (qualifiedName, args) => ipcRenderer.invoke("mcp:callTool", qualifiedName, args),
 	// WP-4.1: streaming. `onChunk` fires per fragment; the promise settles with
 	// the final normalized result. The subscription is set up BEFORE the invoke
 	// and torn down when it settles, so no chunk can arrive unlistened and no

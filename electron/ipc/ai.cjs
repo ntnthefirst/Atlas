@@ -18,6 +18,7 @@
 const { getPublicAiConfig, setAiConfig, aiComplete, aiStream, describeProviders } = require("../ai.cjs");
 const { buildEnvironmentContext } = require("../services/ai/ai-context.cjs");
 const memoryStore = require("../services/ai/memory-store.cjs");
+const { buildToolSpecs, executeToolCalls } = require("../services/ai/tool-runner.cjs");
 
 let nextStreamId = 0;
 
@@ -47,15 +48,34 @@ function withEnvironmentContext(db, args) {
 
 function register(ipcMain, deps = {}) {
 	const getDb = deps.getDb ?? (() => null);
+	// WP-4.3: the MCP manager, so a prompt can be offered the tools the active
+	// environment has connected. Optional -- with none, ai:complete behaves
+	// exactly as it did before MCP existed.
+	const mcpManager = deps.mcpManager ?? null;
 	ipcMain.handle("ai:getConfig", () => getPublicAiConfig());
 	ipcMain.handle("ai:setConfig", (_event, patch) => setAiConfig(patch));
 	ipcMain.handle("ai:complete", async (_event, args) => {
 		try {
 			const { args: prepared, context } = withEnvironmentContext(getDb(), args);
-			const result = await aiComplete(prepared);
+
+			// WP-4.3: offer the connected MCP servers' tools when the caller asks
+			// for them. Opt-in (`useTools`) rather than automatic: a caller that
+			// only wants prose should not have its request reshaped by whichever
+			// servers happen to be connected.
+			const mcpTools = args?.useTools ? buildToolSpecs(mcpManager) : [];
+			const withTools = mcpTools.length > 0 ? { ...prepared, tools: [...(prepared.tools ?? []), ...mcpTools] } : prepared;
+
+			const result = await aiComplete(withTools);
+
+			// Any calls the model asked for are executed and returned alongside
+			// the answer. One round only -- see services/ai/tool-runner.cjs's
+			// header for why feeding results back is WP-4.5's job.
+			const toolResults =
+				result.toolCalls.length > 0 ? await executeToolCalls(mcpManager, result.toolCalls) : [];
+
 			// The context is returned with the answer, so "what was sent" is
 			// always answerable for the request that was actually made.
-			return { ok: true, ...result, context };
+			return { ok: true, ...result, context, toolResults };
 		} catch (error) {
 			return { ok: false, error: error instanceof Error ? error.message : "AI request failed." };
 		}

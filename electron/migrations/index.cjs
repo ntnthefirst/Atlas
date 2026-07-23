@@ -25,6 +25,7 @@ const MIGRATIONS = [
 	require("./013_finding_lifecycle.cjs"),
 	require("./014_finding_label.cjs"),
 	require("./015_ai_memory.cjs"),
+	require("./016_mcp_servers.cjs"),
 ];
 
 function ensureMigrationsTable(dbLike) {
