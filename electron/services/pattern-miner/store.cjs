@@ -88,6 +88,13 @@ function rowToFinding(row) {
 		suggestedAt: row.suggested_at ?? null,
 		decidedAt: row.decided_at ?? null,
 		acceptedRuleId: row.accepted_rule_id ?? null,
+		// WP-3.6 (migration 014) -- the one user-editable field on this row; see
+		// updateFindingLabel's own header for why nothing else here is. `null`
+		// (every pre-014 row, and any finding never edited) means "use the
+		// auto-generated description" (finding-translator.cjs#buildFindingRuleLabel),
+		// read unconditionally exactly like ignoreCount above degrades safely for
+		// a pre-migration row.
+		label: row.label ?? null,
 	};
 }
 
@@ -324,6 +331,42 @@ function updateFindingLifecycle(db, id, patch = {}) {
 	return getFinding(db, id);
 }
 
+// WP-3.6's "edit" operation -- the ONLY finding field a user may hand-edit
+// (migration 014's own header explains why: everything else on this row is a
+// mined fact, and rewriting it would be falsifying evidence). `label` is
+// trimmed and capped defensively (200 chars -- generous for a one-line
+// description, but not unbounded); a blank/non-string value is normalized to
+// `null` ("use the auto-generated description"), never stored as an empty
+// string that would read as a real, deliberately-blank label.
+function updateFindingLabel(db, id, label) {
+	const current = getFinding(db, id);
+	if (!current) {
+		return null;
+	}
+	const normalized = typeof label === "string" && label.trim() ? label.trim().slice(0, 200) : null;
+	db.run("UPDATE findings SET label = ?, updated_at = ? WHERE id = ?", [normalized, nowIso(), id]);
+	return getFinding(db, id);
+}
+
+// WP-3.6's "move between environments" -- the raw column write only, no
+// isolation opinion of its own (exactly like every other raw write in this
+// module). electron/services/pattern-miner/finding-lifecycle-service.cjs#
+// moveFinding is the ONLY legal caller: it is the one place that checks the
+// finding is even movable (finding-lifecycle.cjs#canMoveFinding) and that the
+// move doesn't cross an enclosed environment's isolation boundary
+// (electron/data/isolation.cjs#isFindingMoveAllowed) BEFORE this function
+// ever runs, and it purges this finding's evidence in the SAME transaction --
+// see that function's own header for why the evidence purge is unconditional
+// on every move, not only an enclosure-involving one.
+function moveFindingEnvironment(db, id, environmentId) {
+	const current = getFinding(db, id);
+	if (!current) {
+		return null;
+	}
+	db.run("UPDATE findings SET environment_id = ?, updated_at = ? WHERE id = ?", [environmentId, nowIso(), id]);
+	return getFinding(db, id);
+}
+
 module.exports = {
 	upsertFindings,
 	listFindingsForEnvironment,
@@ -333,5 +376,7 @@ module.exports = {
 	purgeFindingEvidence,
 	deleteFinding,
 	updateFindingLifecycle,
+	updateFindingLabel,
+	moveFindingEnvironment,
 	rowToFinding,
 };

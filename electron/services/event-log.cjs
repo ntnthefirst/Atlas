@@ -467,6 +467,24 @@ function listEventsForMining(db, environmentId, options = {}) {
 	return db.all(sql, params);
 }
 
+// WP-3.6: resolves a small, known set of event ids back to their real rows --
+// electron/services/pattern-miner/finding-evidence.cjs's own "which events
+// produced this finding" drill-down is the only caller, turning
+// findings_evidence's bare `trigger_event_id`/`follow_event_id` pairs into the
+// actual events the user can recognize (type, subject, timestamp) rather than
+// leaving them as opaque numbers. A missing id (already pruned by retention,
+// or -- theoretically -- from a different, deleted environment) is simply
+// absent from the result rather than an error; the caller maps that back to
+// "this event is no longer available" for display, never a crash.
+function listEventsByIds(db, ids) {
+	const unique = [...new Set((Array.isArray(ids) ? ids : []).filter((id) => Number.isFinite(id)))];
+	if (unique.length === 0) {
+		return [];
+	}
+	const placeholders = unique.map(() => "?").join(", ");
+	return db.all(`SELECT * FROM events WHERE id IN (${placeholders})`, unique).map(parseEventRow);
+}
+
 module.exports = {
 	EventLog,
 	pruneEvents,
@@ -474,6 +492,7 @@ module.exports = {
 	listEventsByType,
 	listEventsByEnvironment,
 	listEventsFollowing,
+	listEventsByIds,
 	countEventsBySubject,
 	listDistinctEventEnvironmentIds,
 	listEventsForMining,

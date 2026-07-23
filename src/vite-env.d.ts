@@ -40,7 +40,9 @@ import type {
 	NotchPreferences,
 	SuggestionPreferences,
 	SurfacedSuggestion,
+	Finding,
 	FindingActionResult,
+	FindingEvidence,
 	Session,
 	TaskItem,
 	TaskStatus,
@@ -215,6 +217,18 @@ declare global {
 			getCurrentSuggestion: (environmentId: string) => Promise<SurfacedSuggestion | null>;
 			acceptFinding: (findingId: string) => Promise<FindingActionResult>;
 			dismissFinding: (findingId: string) => Promise<FindingActionResult>;
+
+			// WP-3.6: findings management. Accept/reject are the two lines above,
+			// deliberately not re-declared here -- the management panel calls the
+			// same ones the Notch does.
+			listFindings: (environmentId: string) => Promise<Finding[]>;
+			getFindingEvidence: (findingId: string) => Promise<FindingEvidence>;
+			convertFinding: (findingId: string) => Promise<FindingActionResult>;
+			pauseFinding: (findingId: string) => Promise<FindingActionResult>;
+			unpauseFinding: (findingId: string) => Promise<FindingActionResult>;
+			setFindingLabel: (findingId: string, label: string | null) => Promise<FindingActionResult>;
+			deleteFinding: (findingId: string) => Promise<FindingActionResult>;
+			moveFinding: (findingId: string, environmentId: string) => Promise<FindingActionResult>;
 		};
 	}
 }

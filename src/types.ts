@@ -841,10 +841,87 @@ export type SurfacedSuggestion = {
 // The shape electron/services/pattern-miner/finding-lifecycle-service.cjs's
 // acceptFinding()/ignoreFinding() resolve to (accessed here through the exact
 // same findings:accept/findings:ignore channels WP-3.4 registered) -- the
-// Notch only ever reads `ok`, so the rest stays loosely typed.
+// Notch only ever reads `ok`, so the rest stays loosely typed. WP-3.6's five
+// further operations (convert/pause/unpause/setLabel/delete/move) all resolve
+// to this same shape, with `reason` one of "not_found" | "invalid_transition"
+// | "invalid_environment" | "isolation_blocked".
 export type FindingActionResult = {
 	ok: boolean;
 	error?: string;
 	reason?: string;
 	[key: string]: unknown;
+};
+
+// WP-3.6: the full findings management surface. `FindingStatus` is exactly
+// electron/services/pattern-miner/finding-lifecycle.cjs's STATES -- if a state
+// is ever added there, this union is where the renderer finds out.
+export type FindingStatus = "new" | "suggested" | "accepted" | "ignored" | "expired" | "paused";
+
+// One mined finding, as rowToFinding (electron/services/pattern-miner/
+// store.cjs) hands it back. Every field except `label` is a MINED FACT and is
+// read-only everywhere in the renderer -- see migration 014's header for why
+// letting the user hand-edit a statistic would mean letting them falsify the
+// evidence this whole surface exists to present.
+export type Finding = {
+	id: string;
+	environmentId: string;
+	patternType: string;
+	trigger: { type: string; subject: string | null };
+	follow: { type: string; subject: string | null };
+	windowMinutes: number;
+	occurrences: number;
+	trials: number;
+	confidence: number;
+	baselineProbability: number;
+	lift: number;
+	pValue: number;
+	status: FindingStatus;
+	createdAt: string;
+	updatedAt: string;
+	ignoreCount: number;
+	suppressedUntil: string | null;
+	suggestedAt: string | null;
+	decidedAt: string | null;
+	acceptedRuleId: string | null;
+	/** The one user-editable field; null means "use the generated description". */
+	label: string | null;
+	/**
+	 * Built in the main process (finding-translator.cjs#buildFindingRuleLabel,
+	 * the same phrasing the Notch's suggestion uses) so the two surfaces can
+	 * never describe one finding differently. A set `label` wins over it.
+	 */
+	description: string;
+	/**
+	 * Whether this pattern can become a smart function at all. False for shapes
+	 * the engine has no trigger/action for yet -- accept and convert would both
+	 * refuse, so the UI disables them and says why rather than offering a
+	 * button that cannot work.
+	 */
+	convertible: boolean;
+};
+
+/** One `events` row, resolved from a `findings_evidence` id. */
+export type FindingEvidenceEvent = {
+	id: number;
+	ts: string;
+	environmentId: string | null;
+	type: string;
+	subject: string | null;
+	payload: Record<string, unknown> | null;
+	sessionId: string | null;
+};
+
+// The vision's "see the evidence behind a finding". `reason` distinguishes the
+// three genuinely different empty cases electron/services/pattern-miner/
+// finding-evidence.cjs separates, so the UI can word each one honestly rather
+// than showing one vague "nothing here":
+//   "purged_on_accept" -- accepted, so its evidence was deleted on purpose.
+//   "no_evidence"      -- not accepted, yet has none (also what a moved
+//                         finding shows: moving purges the trail).
+//   "not_found"        -- no such finding.
+export type FindingEvidence = {
+	ok: boolean;
+	error?: string;
+	reason: "purged_on_accept" | "no_evidence" | "not_found" | null;
+	pairs: Array<{ triggerEvent: FindingEvidenceEvent | null; followEvent: FindingEvidenceEvent | null }>;
 };

@@ -155,6 +155,49 @@ function isCrossEnvironmentReadAllowed({ requesterMode, targetMode, signal } = {
 	return true;
 }
 
+// WP-3.6: whether a FINDING (electron/services/pattern-miner/store.cjs) may
+// be relocated from `sourceMode` to `destinationMode` -- the "move between
+// environments" operation the findings management surface offers. A finding
+// is a DERIVED signal mined from exactly one environment's own activity
+// (migration 012's own header: "a pattern is mined from exactly one
+// environment's own events"), so relocating it is itself a cross-environment
+// signal transfer, no different in kind from the dashboard aggregate
+// isCrossEnvironmentReadAllowed already governs above -- this function
+// mirrors that one's "enclosed sees nothing global, nothing global sees it"
+// rule exactly, refusing the move whenever EITHER side is enclosed, not only
+// when the source is:
+//
+//   - source enclosed: the finding (its stats, not merely its raw evidence)
+//     is itself a signal derived from the enclosed environment's activity.
+//     Letting it surface anywhere else would be exactly the leak enclosure
+//     exists to prevent -- "an enclosed environment's data never contributes
+//     to any other environment's aggregates" (this module's own header).
+//   - destination enclosed: the mirror image -- an enclosed environment
+//     "gaining" a pattern mined from a DIFFERENT environment's activity is a
+//     signal arriving from outside it, which "an enclosed environment never
+//     receives... either" (same header) forbids just as absolutely.
+//
+// This says nothing about the finding's raw EVIDENCE (findings_evidence's
+// trigger/follow event ids) -- that is a separate, stricter question the
+// caller (finding-lifecycle-service.cjs#moveFinding) always resolves the same
+// way regardless of this function's answer: evidence is raw event ROW data,
+// which electron/data/scoped.cjs's own discipline never lets cross an
+// environment boundary at all (only the one named, anonymized aggregate on
+// CROSS_ENVIRONMENT_ALLOWLIST does) -- so evidence is purged on every move
+// this function allows, connected-to-connected included, not only when
+// enclosure is involved.
+//
+// Fails closed on an unrecognized mode, exactly like isCrossEnvironmentReadAllowed.
+function isFindingMoveAllowed({ sourceMode, destinationMode } = {}) {
+	if (!isValidIsolationMode(sourceMode) || !isValidIsolationMode(destinationMode)) {
+		return false;
+	}
+	if (sourceMode === ISOLATION_MODES.ENCLOSED || destinationMode === ISOLATION_MODES.ENCLOSED) {
+		return false;
+	}
+	return true;
+}
+
 module.exports = {
 	ISOLATION_MODES,
 	VALID_ISOLATION_MODES,
@@ -166,4 +209,5 @@ module.exports = {
 	isAllowlistedSignal,
 	isCrossEnvironmentReadAllowed,
 	describeAllowlist,
+	isFindingMoveAllowed,
 };

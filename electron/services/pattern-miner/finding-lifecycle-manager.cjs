@@ -27,6 +27,9 @@ const {
 	normalizeFindingLifecyclePreferences,
 } = require("../../config/finding-lifecycle-prefs.cjs");
 const lifecycleService = require("./finding-lifecycle-service.cjs");
+const patternMinerStore = require("./store.cjs");
+const { resolveFindingEvidence } = require("./finding-evidence.cjs");
+const { buildFindingRuleLabel, translateFindingToRuleInput } = require("./finding-translator.cjs");
 
 function createFindingLifecycleManager(deps = {}) {
 	const resolvePrefsPath = deps.getPrefsPath ?? (() => path.join(app.getPath("userData"), FINDING_LIFECYCLE_PREFS_FILE));
@@ -88,6 +91,93 @@ function createFindingLifecycleManager(deps = {}) {
 		return lifecycleService.ignoreFinding(db, findingId, { now: now(), config: preferences });
 	}
 
+	// -- WP-3.6's management operations -------------------------------------
+	// Every one of these follows the identical shape the WP-3.4 three above
+	// already set: resolve the db through the getter, refuse cleanly if it
+	// isn't ready yet, delegate the whole decision to ./finding-lifecycle-
+	// service.cjs. No decision of any kind is made in this file -- it exists to
+	// own preferences and the fs/Electron touchpoints, and nothing else.
+	// Enriched with the two things the management surface needs and cannot
+	// honestly work out for itself:
+	//   `description` -- the SAME plain-language phrasing the Notch's own
+	//     suggestion uses (finding-translator.cjs#buildFindingRuleLabel, via
+	//     suggestion-manager.cjs), built here rather than re-implemented in the
+	//     renderer so the two surfaces can never word the same finding
+	//     differently. A user-set `label` (migration 014) wins over it.
+	//   `convertible` -- whether this pattern can become a smart function at
+	//     all. translateFindingToRuleInput returns null for pattern shapes the
+	//     engine has no trigger/action for yet, and acceptFinding refuses those
+	//     outright; knowing that up front is what lets the UI disable
+	//     accept/convert with an explanation instead of offering a button that
+	//     is guaranteed to fail.
+	function listFindings(environmentId) {
+		const db = getDb();
+		if (!db) {
+			return [];
+		}
+		return patternMinerStore.listFindingsForEnvironment(db, environmentId).map((finding) => ({
+			...finding,
+			description: finding.label || buildFindingRuleLabel(finding),
+			convertible: Boolean(translateFindingToRuleInput(finding)),
+		}));
+	}
+
+	function getFindingEvidence(findingId) {
+		const db = getDb();
+		if (!db) {
+			return { ok: false, error: "Database not ready.", reason: "not_found", pairs: [] };
+		}
+		return resolveFindingEvidence(db, findingId);
+	}
+
+	function convertFinding(findingId) {
+		const db = getDb();
+		if (!db) {
+			return { ok: false, error: "Database not ready." };
+		}
+		return lifecycleService.convertFinding(db, findingId, { now: now() });
+	}
+
+	function pauseFinding(findingId) {
+		const db = getDb();
+		if (!db) {
+			return { ok: false, error: "Database not ready." };
+		}
+		return lifecycleService.pauseFinding(db, findingId);
+	}
+
+	function unpauseFinding(findingId) {
+		const db = getDb();
+		if (!db) {
+			return { ok: false, error: "Database not ready." };
+		}
+		return lifecycleService.unpauseFinding(db, findingId, { now: now() });
+	}
+
+	function setFindingLabel(findingId, label) {
+		const db = getDb();
+		if (!db) {
+			return { ok: false, error: "Database not ready." };
+		}
+		return lifecycleService.setFindingLabel(db, findingId, label);
+	}
+
+	function deleteFinding(findingId) {
+		const db = getDb();
+		if (!db) {
+			return { ok: false, error: "Database not ready." };
+		}
+		return lifecycleService.deleteFinding(db, findingId);
+	}
+
+	function moveFinding(findingId, environmentId) {
+		const db = getDb();
+		if (!db) {
+			return { ok: false, error: "Database not ready." };
+		}
+		return lifecycleService.moveFinding(db, findingId, environmentId);
+	}
+
 	function resurfaceDueFindings() {
 		const db = getDb();
 		if (!db) {
@@ -111,6 +201,14 @@ function createFindingLifecycleManager(deps = {}) {
 		markSuggested,
 		acceptFinding,
 		ignoreFinding,
+		listFindings,
+		getFindingEvidence,
+		convertFinding,
+		pauseFinding,
+		unpauseFinding,
+		setFindingLabel,
+		deleteFinding,
+		moveFinding,
 		resurfaceDueFindings,
 		sweepExpiredFindings,
 	};

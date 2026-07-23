@@ -273,4 +273,20 @@ contextBridge.exposeInMainWorld("atlas", {
 	getCurrentSuggestion: (environmentId) => ipcRenderer.invoke("suggestions:getCurrent", environmentId),
 	acceptFinding: (findingId) => ipcRenderer.invoke("findings:accept", findingId),
 	dismissFinding: (findingId) => ipcRenderer.invoke("findings:ignore", findingId),
+
+	// WP-3.6: findings management -- the vision's full control surface. Accept
+	// and reject are the two channels directly above, reused verbatim rather
+	// than re-declared, so the Notch's one-click answer and the management
+	// panel's are provably the same operation. The rest of the seven follow.
+	listFindings: (environmentId) => ipcRenderer.invoke("findings:list", environmentId),
+	getFindingEvidence: (findingId) => ipcRenderer.invoke("findings:getEvidence", findingId),
+	convertFinding: (findingId) => ipcRenderer.invoke("findings:convert", findingId),
+	pauseFinding: (findingId) => ipcRenderer.invoke("findings:pause", findingId),
+	unpauseFinding: (findingId) => ipcRenderer.invoke("findings:unpause", findingId),
+	setFindingLabel: (findingId, label) => ipcRenderer.invoke("findings:setLabel", findingId, label),
+	deleteFinding: (findingId) => ipcRenderer.invoke("findings:delete", findingId),
+	// Two ids and nothing else: whether this move is allowed is decided in the
+	// main process from the database's own isolation modes, never from
+	// anything the renderer could pass in here.
+	moveFinding: (findingId, environmentId) => ipcRenderer.invoke("findings:move", findingId, environmentId),
 });

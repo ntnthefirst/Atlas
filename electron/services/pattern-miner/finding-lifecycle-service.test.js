@@ -8,7 +8,13 @@ import * as smartFunctionsStore from "../smart-functions/store.cjs";
 import {
 	markSuggested,
 	acceptFinding,
+	convertFinding,
 	ignoreFinding,
+	pauseFinding,
+	unpauseFinding,
+	setFindingLabel,
+	deleteFinding,
+	moveFinding,
 	resurfaceDueFindings,
 	sweepExpiredFindings,
 	migratedFromKeyFor,
@@ -461,5 +467,380 @@ describe("sweepExpiredFindings", () => {
 		const result = sweepExpiredFindings(db, { now: sweepAt, config });
 		expect(result.findingIds).toContain(finding.id);
 		expect(patternMinerStore.getFinding(db, finding.id).status).toBe("expired");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// WP-3.6 -- the five management operations WP-3.4 did not have, driven against
+// the same real temp-file database. The move tests are the important ones:
+// they are where an isolation boundary either holds at the database level or
+// does not, and no amount of renderer-side filtering would substitute.
+// ---------------------------------------------------------------------------
+
+function insertEnvironment(db, id, isolationMode = "connected") {
+	db.run("INSERT INTO environments (id, name, created_at, isolation_mode) VALUES (?, ?, ?, ?)", [
+		id,
+		id,
+		new Date().toISOString(),
+		isolationMode,
+	]);
+}
+
+describe("pauseFinding / unpauseFinding (WP-3.6)", () => {
+	it("holds a suggested finding without touching its ignore count", async () => {
+		const db = await createDb();
+		const finding = seedFinding(db);
+		markSuggested(db, finding.id, { now: Date.parse("2026-01-01T00:00:00Z") });
+
+		const result = pauseFinding(db, finding.id);
+		expect(result.ok).toBe(true);
+		expect(result.finding.status).toBe("paused");
+		// The distinction from ignore: pausing is not evidence against the
+		// pattern, so it must not lengthen a future back-off.
+		expect(result.finding.ignoreCount).toBe(0);
+	});
+
+	it("clears a dismissed finding's back-off window but keeps the count that earned it", async () => {
+		const db = await createDb();
+		const finding = seedFinding(db);
+		markSuggested(db, finding.id, { now: Date.parse("2026-01-01T00:00:00Z") });
+		ignoreFinding(db, finding.id, { now: Date.parse("2026-01-01T00:00:00Z") });
+		expect(patternMinerStore.getFinding(db, finding.id).suppressedUntil).toBeTruthy();
+
+		const result = pauseFinding(db, finding.id);
+		expect(result.ok).toBe(true);
+		expect(result.finding.suppressedUntil).toBeNull();
+		expect(result.finding.ignoreCount).toBe(1);
+	});
+
+	it("refuses to pause an accepted finding", async () => {
+		const db = await createDb();
+		const finding = seedFinding(db);
+		markSuggested(db, finding.id, { now: Date.now() });
+		acceptFinding(db, finding.id, { now: Date.now() });
+
+		const result = pauseFinding(db, finding.id);
+		expect(result.ok).toBe(false);
+		expect(result.reason).toBe("invalid_transition");
+		expect(patternMinerStore.getFinding(db, finding.id).status).toBe("accepted");
+	});
+
+	it("is idempotent -- pausing twice is not an error", async () => {
+		const db = await createDb();
+		const finding = seedFinding(db);
+		pauseFinding(db, finding.id);
+
+		const again = pauseFinding(db, finding.id);
+		expect(again.ok).toBe(true);
+		expect(again.alreadyPaused).toBe(true);
+	});
+
+	it("restarts the expiry clock on resume, so a long pause cannot expire a finding instantly", async () => {
+		const db = await createDb();
+		const finding = seedFinding(db);
+		const suggestedAt = Date.parse("2026-01-01T00:00:00Z");
+		markSuggested(db, finding.id, { now: suggestedAt });
+		pauseFinding(db, finding.id);
+
+		// A year later. If unpausing preserved the original suggestedAt, the
+		// very next expiry sweep would bin this finding on the spot -- which is
+		// exactly what pausing was asked to prevent.
+		const muchLater = suggestedAt + 365 * 24 * 60 * 60 * 1000;
+		const resumed = unpauseFinding(db, finding.id, { now: muchLater });
+		expect(resumed.ok).toBe(true);
+		expect(resumed.finding.status).toBe("suggested");
+		expect(Date.parse(resumed.finding.suggestedAt)).toBe(muchLater);
+
+		const swept = sweepExpiredFindings(db, { now: muchLater });
+		expect(swept.findingIds).not.toContain(finding.id);
+	});
+
+	it("is skipped by the expiry sweep for as long as it is held", async () => {
+		const db = await createDb();
+		const finding = seedFinding(db);
+		const suggestedAt = Date.parse("2026-01-01T00:00:00Z");
+		markSuggested(db, finding.id, { now: suggestedAt });
+		pauseFinding(db, finding.id);
+
+		const wayPastExpiry = suggestedAt + 365 * 24 * 60 * 60 * 1000;
+		expect(sweepExpiredFindings(db, { now: wayPastExpiry }).expiredCount).toBe(0);
+		expect(patternMinerStore.getFinding(db, finding.id).status).toBe("paused");
+	});
+
+	it("refuses to unpause something that is not paused", async () => {
+		const db = await createDb();
+		const finding = seedFinding(db);
+
+		const result = unpauseFinding(db, finding.id, { now: Date.now() });
+		expect(result.ok).toBe(false);
+		expect(result.reason).toBe("invalid_transition");
+	});
+
+	it("a paused finding can be accepted directly, with no separate unpause step", async () => {
+		const db = await createDb();
+		const finding = seedFinding(db);
+		pauseFinding(db, finding.id);
+
+		const result = acceptFinding(db, finding.id, { now: Date.now() });
+		expect(result.ok).toBe(true);
+		expect(patternMinerStore.getFinding(db, finding.id).status).toBe("accepted");
+	});
+});
+
+describe("convertFinding (WP-3.6)", () => {
+	it("creates the smart function DISABLED, where accept creates it live", async () => {
+		const db = await createDb();
+		const converted = seedFinding(db);
+		const convertResult = convertFinding(db, converted.id, { now: Date.now() });
+		expect(convertResult.ok).toBe(true);
+		expect(convertResult.rule.enabled).toBe(false);
+
+		// The contrasting half: same seed shape, accepted instead, must be live.
+		const accepted = seedFinding(db, {
+			environmentId: "env-b",
+			trigger: { type: "app.focus", subject: "Other" },
+		});
+		const acceptResult = acceptFinding(db, accepted.id, { now: Date.now() });
+		expect(acceptResult.ok).toBe(true);
+		expect(acceptResult.rule.enabled).toBe(true);
+	});
+
+	it("still lands the finding in accepted -- converting is a real decision", async () => {
+		const db = await createDb();
+		const finding = seedFinding(db);
+		convertFinding(db, finding.id, { now: Date.now() });
+
+		const stored = patternMinerStore.getFinding(db, finding.id);
+		expect(stored.status).toBe("accepted");
+		expect(stored.acceptedRuleId).toBeTruthy();
+	});
+});
+
+describe("setFindingLabel (WP-3.6)", () => {
+	it("stores a trimmed label and gives it back on the next read", async () => {
+		const db = await createDb();
+		const finding = seedFinding(db);
+
+		const result = setFindingLabel(db, finding.id, "  Open the server when I open the editor  ");
+		expect(result.ok).toBe(true);
+		expect(result.finding.label).toBe("Open the server when I open the editor");
+		expect(patternMinerStore.getFinding(db, finding.id).label).toBe("Open the server when I open the editor");
+	});
+
+	it("normalises a blank label back to null -- use the generated description", async () => {
+		const db = await createDb();
+		const finding = seedFinding(db);
+		setFindingLabel(db, finding.id, "Something");
+
+		expect(setFindingLabel(db, finding.id, "   ").finding.label).toBeNull();
+	});
+
+	it("leaves every mined statistic untouched -- the label is the only editable field", async () => {
+		const db = await createDb();
+		const finding = seedFinding(db);
+		setFindingLabel(db, finding.id, "Renamed");
+
+		const stored = patternMinerStore.getFinding(db, finding.id);
+		expect(stored.occurrences).toBe(finding.occurrences);
+		expect(stored.trials).toBe(finding.trials);
+		expect(stored.confidence).toBe(finding.confidence);
+		expect(stored.lift).toBe(finding.lift);
+		expect(stored.pValue).toBe(finding.pValue);
+		expect(stored.trigger).toEqual(finding.trigger);
+		expect(stored.follow).toEqual(finding.follow);
+	});
+
+	it("carries a renamed finding's own name into the smart function it produces", async () => {
+		const db = await createDb();
+		const finding = seedFinding(db);
+		setFindingLabel(db, finding.id, "My own name for this");
+
+		const result = acceptFinding(db, finding.id, { now: Date.now() });
+		expect(result.ok).toBe(true);
+		expect(result.rule.label).toBe("My own name for this");
+	});
+
+	it("rejects an unknown finding id", async () => {
+		const db = await createDb();
+		expect(setFindingLabel(db, "nope", "x").reason).toBe("not_found");
+	});
+});
+
+describe("deleteFinding (WP-3.6)", () => {
+	it("removes the finding and its evidence, and says so", async () => {
+		const db = await createDb();
+		const finding = seedFinding(db);
+		expect(patternMinerStore.getFindingEvidence(db, finding.id)).toHaveLength(2);
+
+		const result = deleteFinding(db, finding.id);
+		expect(result.ok).toBe(true);
+		expect(patternMinerStore.getFinding(db, finding.id)).toBeNull();
+		expect(patternMinerStore.getFindingEvidence(db, finding.id)).toHaveLength(0);
+	});
+
+	it("leaves the smart function an accepted finding already created alone", async () => {
+		const db = await createDb();
+		const finding = seedFinding(db);
+		markSuggested(db, finding.id, { now: Date.now() });
+		const accepted = acceptFinding(db, finding.id, { now: Date.now() });
+		expect(accepted.ok).toBe(true);
+
+		deleteFinding(db, finding.id);
+
+		// Deleting the note about a pattern is not a request to delete the
+		// automation the user already asked for.
+		expect(smartFunctionsStore.getRule(db, accepted.rule.id)).toBeTruthy();
+	});
+
+	it("never touches the events its evidence referenced", async () => {
+		const db = await createDb();
+		insertEvent(db, { id: 1, ts: "2026-01-01T09:00:00.000Z", type: "app.focus", subject: "Editor" });
+		insertEvent(db, { id: 2, ts: "2026-01-01T09:05:00.000Z", type: "app.focus", subject: "Server" });
+		insertEvent(db, { id: 3, ts: "2026-01-02T09:00:00.000Z", type: "app.focus", subject: "Editor" });
+		insertEvent(db, { id: 4, ts: "2026-01-02T09:05:00.000Z", type: "app.focus", subject: "Server" });
+		const finding = seedFinding(db);
+
+		deleteFinding(db, finding.id);
+
+		expect(db.first("SELECT COUNT(*) AS count FROM events").count).toBe(4);
+	});
+
+	it("rejects an unknown finding id rather than silently reporting success", async () => {
+		const db = await createDb();
+		expect(deleteFinding(db, "nope").ok).toBe(false);
+	});
+});
+
+describe("moveFinding (WP-3.6)", () => {
+	it("relocates a live finding between two connected environments", async () => {
+		const db = await createDb();
+		insertEnvironment(db, "env-a");
+		insertEnvironment(db, "env-b");
+		const finding = seedFinding(db);
+
+		const result = moveFinding(db, finding.id, "env-b");
+		expect(result.ok).toBe(true);
+		expect(result.moved).toBe(true);
+		expect(patternMinerStore.getFinding(db, finding.id).environmentId).toBe("env-b");
+		expect(patternMinerStore.listFindingsForEnvironment(db, "env-b")).toHaveLength(1);
+		expect(patternMinerStore.listFindingsForEnvironment(db, "env-a")).toHaveLength(0);
+	});
+
+	// THE isolation test. A finding mined from an enclosed environment carries
+	// that environment's signal; letting it land anywhere else is the exact
+	// leak enclosure exists to prevent, so this must fail at the database
+	// level and not merely be hidden in the UI.
+	it("refuses to move a finding OUT of an enclosed environment, and writes nothing", async () => {
+		const db = await createDb();
+		insertEnvironment(db, "env-a", "enclosed");
+		insertEnvironment(db, "env-b", "connected");
+		const finding = seedFinding(db);
+
+		const result = moveFinding(db, finding.id, "env-b");
+		expect(result.ok).toBe(false);
+		expect(result.reason).toBe("isolation_blocked");
+		expect(patternMinerStore.getFinding(db, finding.id).environmentId).toBe("env-a");
+		expect(patternMinerStore.listFindingsForEnvironment(db, "env-b")).toHaveLength(0);
+		// The evidence must also survive a refused move -- a rejected operation
+		// that still destroyed data would be worse than one that did nothing.
+		expect(patternMinerStore.getFindingEvidence(db, finding.id)).toHaveLength(2);
+	});
+
+	it("refuses to move a finding INTO an enclosed environment", async () => {
+		const db = await createDb();
+		insertEnvironment(db, "env-a", "connected");
+		insertEnvironment(db, "env-b", "enclosed");
+		const finding = seedFinding(db);
+
+		const result = moveFinding(db, finding.id, "env-b");
+		expect(result.ok).toBe(false);
+		expect(result.reason).toBe("isolation_blocked");
+		expect(patternMinerStore.getFinding(db, finding.id).environmentId).toBe("env-a");
+	});
+
+	// The weaker guarantee for the moves that ARE allowed: the finding's raw
+	// evidence points at the SOURCE environment's event rows, and environment B
+	// must never be able to drill down into environment A's events.
+	it("purges the evidence trail on every permitted move", async () => {
+		const db = await createDb();
+		insertEnvironment(db, "env-a");
+		insertEnvironment(db, "env-b");
+		const finding = seedFinding(db);
+		expect(patternMinerStore.getFindingEvidence(db, finding.id)).toHaveLength(2);
+
+		const result = moveFinding(db, finding.id, "env-b");
+		expect(result.purgedEvidenceCount).toBe(2);
+		expect(patternMinerStore.getFindingEvidence(db, finding.id)).toHaveLength(0);
+	});
+
+	it("keeps every mined statistic across the move -- the finding stays meaningful", async () => {
+		const db = await createDb();
+		insertEnvironment(db, "env-a");
+		insertEnvironment(db, "env-b");
+		const finding = seedFinding(db);
+
+		const moved = moveFinding(db, finding.id, "env-b").finding;
+		expect(moved.occurrences).toBe(finding.occurrences);
+		expect(moved.confidence).toBe(finding.confidence);
+		expect(moved.lift).toBe(finding.lift);
+	});
+
+	it("refuses to move an accepted finding, whose rule is already scoped elsewhere", async () => {
+		const db = await createDb();
+		insertEnvironment(db, "env-a");
+		insertEnvironment(db, "env-b");
+		const finding = seedFinding(db);
+		markSuggested(db, finding.id, { now: Date.now() });
+		acceptFinding(db, finding.id, { now: Date.now() });
+
+		const result = moveFinding(db, finding.id, "env-b");
+		expect(result.ok).toBe(false);
+		expect(result.reason).toBe("invalid_transition");
+		expect(patternMinerStore.getFinding(db, finding.id).environmentId).toBe("env-a");
+	});
+
+	it("refuses a destination that does not exist", async () => {
+		const db = await createDb();
+		insertEnvironment(db, "env-a");
+		const finding = seedFinding(db);
+
+		const result = moveFinding(db, finding.id, "env-nope");
+		expect(result.ok).toBe(false);
+		expect(result.reason).toBe("invalid_environment");
+	});
+
+	// Fail closed, not open: an environment row deleted out from under a
+	// finding leaves an unreadable source mode, which must not read as "no
+	// enclosure involved, go ahead".
+	it("refuses when the source environment row no longer exists", async () => {
+		const db = await createDb();
+		insertEnvironment(db, "env-b");
+		const finding = seedFinding(db);
+
+		const result = moveFinding(db, finding.id, "env-b");
+		expect(result.ok).toBe(false);
+		expect(result.reason).toBe("isolation_blocked");
+	});
+
+	it("treats a move to the finding's own environment as a no-op that destroys nothing", async () => {
+		const db = await createDb();
+		insertEnvironment(db, "env-a");
+		const finding = seedFinding(db);
+
+		const result = moveFinding(db, finding.id, "env-a");
+		expect(result.ok).toBe(true);
+		expect(result.moved).toBe(false);
+		expect(result.purgedEvidenceCount).toBe(0);
+		expect(patternMinerStore.getFindingEvidence(db, finding.id)).toHaveLength(2);
+	});
+
+	it("rejects an unknown finding id and a missing destination", async () => {
+		const db = await createDb();
+		insertEnvironment(db, "env-a");
+		const finding = seedFinding(db);
+
+		expect(moveFinding(db, "nope", "env-a").reason).toBe("not_found");
+		expect(moveFinding(db, finding.id, "").reason).toBe("invalid_environment");
+		expect(moveFinding(db, finding.id, null).reason).toBe("invalid_environment");
 	});
 });

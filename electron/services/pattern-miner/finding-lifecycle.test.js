@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
 	STATES,
 	TRANSITIONS,
+	MOVABLE_STATUSES,
 	canTransition,
+	canMoveFinding,
 	computeBackoffMs,
 	computeSuppressedUntilIso,
 	isResurfaceDue,
@@ -15,13 +17,34 @@ const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 
 describe("STATES / TRANSITIONS", () => {
-	it("has exactly the five states the product vision's flow names", () => {
-		expect([...STATES].sort()).toEqual(["accepted", "expired", "ignored", "new", "suggested"]);
+	it("has exactly the six states the product vision's flow names", () => {
+		expect([...STATES].sort()).toEqual(["accepted", "expired", "ignored", "new", "paused", "suggested"]);
 	});
 
 	it("accepted and expired are terminal -- no outgoing edges at all", () => {
 		expect(TRANSITIONS.accepted).toEqual([]);
 		expect(TRANSITIONS.expired).toEqual([]);
+	});
+
+	// WP-3.6. Pausing is the ONE deliberate hold in the machine, so its edges
+	// are deliberately asymmetric: it can be entered from anything still live,
+	// but leaving it goes back through "suggested" and nowhere else.
+	it("paused leads back to suggested and nothing else -- never straight to a decision", () => {
+		expect(TRANSITIONS.paused).toEqual(["suggested"]);
+		expect(canTransition("paused", "accepted")).toBe(false);
+		expect(canTransition("paused", "ignored")).toBe(false);
+	});
+
+	it("paused has no edge to expired -- a deliberate hold must never time out", () => {
+		expect(canTransition("paused", "expired")).toBe(false);
+	});
+
+	it("can be entered from every live state, but from neither terminal one", () => {
+		expect(canTransition("new", "paused")).toBe(true);
+		expect(canTransition("suggested", "paused")).toBe(true);
+		expect(canTransition("ignored", "paused")).toBe(true);
+		expect(canTransition("accepted", "paused")).toBe(false);
+		expect(canTransition("expired", "paused")).toBe(false);
 	});
 });
 
@@ -183,5 +206,46 @@ describe("isFindingExpired", () => {
 		expect(isFindingExpired({ status: "new", suggestedAt: null, createdAt: null }, nowMs, config)).toBe(false);
 		expect(isFindingExpired({ status: "new", suggestedAt: "garbage", createdAt: "garbage" }, nowMs, config)).toBe(false);
 		expect(isFindingExpired(null, nowMs, config)).toBe(false);
+	});
+
+	// WP-3.6: this is the property that makes "pause" mean what the word says.
+	// Opposing fixture on purpose -- 200 days against a 14-day window would
+	// expire any other non-terminal status by a factor of fourteen.
+	it("is NEVER true for a paused finding, no matter how long it has been held", () => {
+		const suggestedAt = new Date(nowMs - 200 * DAY).toISOString();
+		expect(isFindingExpired({ status: "paused", suggestedAt }, nowMs, config)).toBe(false);
+		// The same fixture in the state it was paused FROM does expire, which is
+		// what proves the exemption above is the paused check doing the work and
+		// not the fixture being too short to trip the threshold.
+		expect(isFindingExpired({ status: "suggested", suggestedAt }, nowMs, config)).toBe(true);
+	});
+});
+
+describe("canMoveFinding (WP-3.6)", () => {
+	it("allows every live state -- a decision still in progress can be relocated", () => {
+		expect(canMoveFinding({ status: "new" })).toBe(true);
+		expect(canMoveFinding({ status: "suggested" })).toBe(true);
+		expect(canMoveFinding({ status: "ignored" })).toBe(true);
+		expect(canMoveFinding({ status: "paused" })).toBe(true);
+	});
+
+	it("refuses an accepted finding -- the rule it produced is scoped to the old environment", () => {
+		expect(canMoveFinding({ status: "accepted" })).toBe(false);
+	});
+
+	it("refuses an expired finding", () => {
+		expect(canMoveFinding({ status: "expired" })).toBe(false);
+	});
+
+	it("refuses garbage rather than assuming it is movable", () => {
+		expect(canMoveFinding(null)).toBe(false);
+		expect(canMoveFinding({})).toBe(false);
+		expect(canMoveFinding({ status: "not-a-state" })).toBe(false);
+	});
+
+	it("MOVABLE_STATUSES and canMoveFinding never disagree", () => {
+		for (const status of STATES) {
+			expect(canMoveFinding({ status })).toBe(MOVABLE_STATUSES.includes(status));
+		}
 	});
 });

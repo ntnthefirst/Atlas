@@ -9,6 +9,7 @@ import {
 	CROSS_ENVIRONMENT_SIGNAL_LABELS,
 	isAllowlistedSignal,
 	isCrossEnvironmentReadAllowed,
+	isFindingMoveAllowed,
 	describeAllowlist,
 } from "./isolation.cjs";
 
@@ -194,5 +195,45 @@ describe("isCrossEnvironmentReadAllowed() -- the single decision point", () => {
 	it("fails closed when called with no arguments at all", () => {
 		expect(isCrossEnvironmentReadAllowed()).toBe(false);
 		expect(isCrossEnvironmentReadAllowed({})).toBe(false);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// WP-3.6: relocating a mined finding between environments. The rule under test
+// is deliberately stricter than "don't read out of an enclosed environment" --
+// it is symmetric, because a finding arriving INTO an enclosed environment is
+// outside signal reaching it, which the isolation model forbids just as
+// absolutely as signal escaping.
+// ---------------------------------------------------------------------------
+
+describe("isFindingMoveAllowed", () => {
+	const { CONNECTED, ENCLOSED } = ISOLATION_MODES;
+
+	it("allows connected -> connected, the only combination with no enclosure in it", () => {
+		expect(isFindingMoveAllowed({ sourceMode: CONNECTED, destinationMode: CONNECTED })).toBe(true);
+	});
+
+	it("refuses moving a finding OUT of an enclosed environment", () => {
+		expect(isFindingMoveAllowed({ sourceMode: ENCLOSED, destinationMode: CONNECTED })).toBe(false);
+	});
+
+	it("refuses moving a finding INTO an enclosed environment", () => {
+		expect(isFindingMoveAllowed({ sourceMode: CONNECTED, destinationMode: ENCLOSED })).toBe(false);
+	});
+
+	it("refuses enclosed -> enclosed as well -- two enclosures are still two environments", () => {
+		expect(isFindingMoveAllowed({ sourceMode: ENCLOSED, destinationMode: ENCLOSED })).toBe(false);
+	});
+
+	it("fails closed on an unrecognised mode on either side", () => {
+		expect(isFindingMoveAllowed({ sourceMode: "open", destinationMode: CONNECTED })).toBe(false);
+		expect(isFindingMoveAllowed({ sourceMode: CONNECTED, destinationMode: "open" })).toBe(false);
+	});
+
+	it("fails closed on a missing mode -- a deleted source environment must not read as permitted", () => {
+		expect(isFindingMoveAllowed({ sourceMode: undefined, destinationMode: CONNECTED })).toBe(false);
+		expect(isFindingMoveAllowed({ sourceMode: null, destinationMode: CONNECTED })).toBe(false);
+		expect(isFindingMoveAllowed({})).toBe(false);
+		expect(isFindingMoveAllowed()).toBe(false);
 	});
 });

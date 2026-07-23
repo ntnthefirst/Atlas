@@ -1,15 +1,21 @@
 "use strict";
 
 // ---------------------------------------------------------------------------
-// Finding lifecycle IPC handlers (findings:*) -- WP-3.4.
+// Finding lifecycle IPC handlers (findings:*) -- WP-3.4, completed by WP-3.6.
 //
-// No preload/renderer wiring yet -- the same precedent electron/ipc/
-// smart-functions.cjs (WP-3.1) and electron/ipc/pattern-miner.cjs (WP-3.3)
-// already set: WP-3.5 ("Suggestion surfacing") and WP-3.6 ("Findings
-// management") are the packages that build the UI these channels back.
-// Registering the handlers now keeps accept/ignore/expire real and testable
-// through the same seam every other domain uses, without building UI this WP
-// was never asked to build.
+// WP-3.4 registered accept/ignore/sweep here with no renderer wiring at all;
+// WP-3.5 gave accept/ignore the Notch's one-click buttons, and WP-3.6 adds the
+// remaining management operations plus the full surface that calls them (see
+// src/components/settings-window/FindingsPanel.tsx). The seven operations the
+// vision names map onto these channels as:
+//
+//   accept  -> findings:accept      reject -> findings:ignore
+//   convert -> findings:convert     pause  -> findings:pause / findings:unpause
+//   delete  -> findings:delete      move   -> findings:move
+//   edit    -> findings:setLabel
+//
+// findings:list and findings:getEvidence are the two reads that surface needs
+// (the second is the vision's "see the evidence behind a finding").
 //
 // `manager` is a plain value (never reassigned after main.cjs constructs it,
 // exactly like `patternMiner`/`smartFunctionsEngine`); `engine` is the smart
@@ -79,6 +85,50 @@ function register(ipcMain, deps) {
 		}
 		return result;
 	});
+
+	// -- WP-3.6 --------------------------------------------------------------
+	ipcMain.handle("findings:list", (_event, environmentId) => manager.listFindings(environmentId));
+
+	ipcMain.handle("findings:getEvidence", (_event, findingId) => manager.getFindingEvidence(findingId));
+
+	// Convert is accept with the resulting rule created disabled -- see
+	// finding-lifecycle-service.cjs#acceptFinding's header for why that is one
+	// flag and not a second write path. It logs the same `suggestion.accepted`
+	// event for the same reason WP-3.7 needs it: from the feedback loop's point
+	// of view the user said yes to this pattern, and how live the rule started
+	// says nothing about that.
+	ipcMain.handle("findings:convert", (_event, findingId) => {
+		const db = getDb?.();
+		const findingForLog = db ? patternMinerStore.getFinding(db, findingId) : null;
+
+		const result = manager.convertFinding(findingId);
+		if (result.ok) {
+			engine?.refreshRules?.();
+			getEventLog?.()?.record?.("suggestion.accepted", {
+				environmentId: findingForLog?.environmentId ?? result.rule?.environmentId ?? null,
+				subject: findingId,
+				payload: { patternType: findingForLog?.patternType ?? null, converted: true },
+			});
+		}
+		return result;
+	});
+
+	// Pause/unpause are deliberately NOT logged as accept/dismiss. A pause is
+	// the user declining to decide, and feeding it to WP-3.7's feedback loop as
+	// a rejection would teach Atlas to suppress a category the user only ever
+	// asked it to wait on.
+	ipcMain.handle("findings:pause", (_event, findingId) => manager.pauseFinding(findingId));
+
+	ipcMain.handle("findings:unpause", (_event, findingId) => manager.unpauseFinding(findingId));
+
+	ipcMain.handle("findings:setLabel", (_event, findingId, label) => manager.setFindingLabel(findingId, label));
+
+	ipcMain.handle("findings:delete", (_event, findingId) => manager.deleteFinding(findingId));
+
+	// The isolation decision is made in finding-lifecycle-service.cjs#moveFinding
+	// against modes read from the database, never against anything the renderer
+	// passed -- this handler forwards two ids and nothing else, on purpose.
+	ipcMain.handle("findings:move", (_event, findingId, environmentId) => manager.moveFinding(findingId, environmentId));
 
 	// Bulk sweeps -- never run automatically (see finding-lifecycle-manager.cjs's
 	// own header); exposed here for an explicit "check now" affordance (and for

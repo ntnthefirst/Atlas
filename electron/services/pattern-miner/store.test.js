@@ -11,6 +11,8 @@ import {
 	getFindingEvidence,
 	purgeFindingEvidence,
 	deleteFinding,
+	updateFindingLabel,
+	moveFindingEnvironment,
 } from "./store.cjs";
 
 const tmpDirs = [];
@@ -220,5 +222,117 @@ describe("deleteFinding", () => {
 	it("returns false for an id that doesn't exist", async () => {
 		const db = await createDb();
 		expect(deleteFinding(db, "not-a-real-id")).toBe(false);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// WP-3.6's two new raw writes, plus what migration 014 promises about the
+// column they touch.
+// ---------------------------------------------------------------------------
+
+
+function seedFinding(db, overrides = {}) {
+	const finding = sampleFinding(overrides);
+	upsertFindings(db, [finding]);
+	return listFindingsForEnvironment(db, finding.environmentId)[0];
+}
+
+describe("updateFindingLabel (WP-3.6, migration 014)", () => {
+	it("defaults to null on a freshly mined finding -- never a placeholder to clean up", async () => {
+		const db = await createDb();
+		const finding = seedFinding(db);
+		expect(finding.label).toBeNull();
+	});
+
+	it("stores a label and reads it straight back", async () => {
+		const db = await createDb();
+		const finding = seedFinding(db);
+
+		const updated = updateFindingLabel(db, finding.id, "My own name");
+		expect(updated.label).toBe("My own name");
+		expect(getFinding(db, finding.id).label).toBe("My own name");
+	});
+
+	it("caps a runaway label rather than storing it unbounded", async () => {
+		const db = await createDb();
+		const finding = seedFinding(db);
+
+		const updated = updateFindingLabel(db, finding.id, "x".repeat(5000));
+		expect(updated.label).toHaveLength(200);
+	});
+
+	it("normalises blank, whitespace and non-string input to null", async () => {
+		const db = await createDb();
+		const finding = seedFinding(db);
+		updateFindingLabel(db, finding.id, "Set");
+
+		expect(updateFindingLabel(db, finding.id, "").label).toBeNull();
+		expect(updateFindingLabel(db, finding.id, "   ").label).toBeNull();
+		expect(updateFindingLabel(db, finding.id, 42).label).toBeNull();
+		expect(updateFindingLabel(db, finding.id, null).label).toBeNull();
+	});
+
+	it("survives the next mining run -- re-detecting a pattern refreshes stats, never the name", async () => {
+		const db = await createDb();
+		const finding = seedFinding(db);
+		updateFindingLabel(db, finding.id, "My own name");
+
+		// The same pattern identity, re-mined with fresh numbers.
+		seedFinding(db, { occurrences: 40, trials: 44, confidence: 0.91 });
+
+		const stored = getFinding(db, finding.id);
+		expect(stored.occurrences).toBe(40);
+		expect(stored.label).toBe("My own name");
+	});
+
+	it("returns null for an unknown id instead of inventing a row", async () => {
+		const db = await createDb();
+		expect(updateFindingLabel(db, "nope", "x")).toBeNull();
+	});
+});
+
+describe("moveFindingEnvironment (WP-3.6)", () => {
+	it("rewrites only the environment, leaving every mined column alone", async () => {
+		const db = await createDb();
+		const finding = seedFinding(db);
+
+		const moved = moveFindingEnvironment(db, finding.id, "env-b");
+		expect(moved.environmentId).toBe("env-b");
+		expect(moved.occurrences).toBe(finding.occurrences);
+		expect(moved.trials).toBe(finding.trials);
+		expect(moved.confidence).toBe(finding.confidence);
+		expect(moved.baselineProbability).toBe(finding.baselineProbability);
+		expect(moved.lift).toBe(finding.lift);
+		expect(moved.pValue).toBe(finding.pValue);
+		expect(moved.status).toBe(finding.status);
+		expect(moved.trigger).toEqual(finding.trigger);
+		expect(moved.follow).toEqual(finding.follow);
+	});
+
+	it("moves the finding between the two environment listings", async () => {
+		const db = await createDb();
+		const finding = seedFinding(db);
+
+		moveFindingEnvironment(db, finding.id, "env-b");
+		expect(listFindingsForEnvironment(db, "env-a")).toHaveLength(0);
+		expect(listFindingsForEnvironment(db, "env-b")).toHaveLength(1);
+	});
+
+	// This is a RAW write with no isolation opinion of its own, exactly like
+	// every other write in this module -- the check lives one layer up in
+	// finding-lifecycle-service.cjs#moveFinding, which is the only legal
+	// caller. Pinning that down here stops a future caller from reading this
+	// function's permissiveness as permission.
+	it("does not purge evidence by itself -- the service's move is what does that", async () => {
+		const db = await createDb();
+		const finding = seedFinding(db);
+
+		moveFindingEnvironment(db, finding.id, "env-b");
+		expect(getFindingEvidence(db, finding.id)).toHaveLength(2);
+	});
+
+	it("returns null for an unknown id", async () => {
+		const db = await createDb();
+		expect(moveFindingEnvironment(db, "nope", "env-b")).toBeNull();
 	});
 });

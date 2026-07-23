@@ -5,6 +5,7 @@ import {
 	ArrowPathIcon,
 	CommandLineIcon,
 	FolderIcon,
+	LightBulbIcon,
 	PaintBrushIcon,
 	RectangleGroupIcon,
 	SparklesIcon,
@@ -15,6 +16,7 @@ import { AccentPicker, Select, ThemeModePicker, Toggle } from "../ui";
 import { useAccent } from "../../hooks";
 import { describeIpcError } from "../../utils/ipcError";
 import { NotchTabsEditor } from "./NotchTabsEditor";
+import { FindingsPanel } from "./FindingsPanel";
 import type {
 	AiProvider,
 	AiPublicConfig,
@@ -35,7 +37,15 @@ import type {
 } from "../../types";
 import logo from "../../assets/logosmall.png";
 
-type SettingsTab = "general" | "appearance" | "notch" | "files" | "integrations" | "keybindings" | "updates";
+type SettingsTab =
+	| "general"
+	| "appearance"
+	| "notch"
+	| "files"
+	| "findings"
+	| "integrations"
+	| "keybindings"
+	| "updates";
 
 type ThemeOption = "dark" | "light" | "system";
 
@@ -48,6 +58,11 @@ const settingsTabs: Array<{
 	{ id: "appearance", label: "Appearance", icon: PaintBrushIcon },
 	{ id: "notch", label: "Smart Notch", icon: RectangleGroupIcon },
 	{ id: "files", label: "File Index", icon: FolderIcon },
+	// WP-3.6: the patterns Atlas has mined, and everything the user can do
+	// with them. Its own tab rather than a section under "Smart Notch": the
+	// Notch is only where a suggestion happens to appear, while this is the
+	// full record, including findings the Notch has never surfaced.
+	{ id: "findings", label: "Findings", icon: LightBulbIcon },
 	{ id: "integrations", label: "Integrations", icon: SparklesIcon },
 	{ id: "keybindings", label: "Keybindings", icon: CommandLineIcon },
 	{ id: "updates", label: "Updates", icon: ArrowPathIcon },
@@ -812,6 +827,8 @@ export function SettingsWindowApp() {
 										</button>
 									) : activeTab === "integrations" ? (
 										<span>Stored on this device</span>
+									) : activeTab === "findings" ? (
+										<span>Nothing acts on its own</span>
 									) : (
 										<span>Applies instantly</span>
 									)}
@@ -1263,6 +1280,8 @@ export function SettingsWindowApp() {
 										</div>
 									</div>
 								)}
+
+								{activeTab === "findings" && <FindingsPanel environments={environments} />}
 
 								{activeTab === "integrations" && (
 									<div className="flex flex-col gap-4">
