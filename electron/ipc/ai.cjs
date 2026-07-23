@@ -16,20 +16,81 @@
 // ---------------------------------------------------------------------------
 
 const { getPublicAiConfig, setAiConfig, aiComplete, aiStream, describeProviders } = require("../ai.cjs");
+const { buildEnvironmentContext } = require("../services/ai/ai-context.cjs");
+const memoryStore = require("../services/ai/memory-store.cjs");
 
 let nextStreamId = 0;
 
-function register(ipcMain) {
+// WP-4.2: builds the environment's context and folds it into the system
+// prompt. Returns BOTH the args to send and the context that was built, so
+// every path that sends context can also report exactly what it sent -- which
+// is the acceptance criterion, and is only trustworthy if the inspected value
+// is the same object that was used rather than a second build.
+function withEnvironmentContext(db, args) {
+	const request = args && typeof args === "object" ? args : {};
+	const environmentId = typeof request.environmentId === "string" ? request.environmentId : null;
+	if (!db || !environmentId || request.includeContext === false) {
+		return { args: request, context: null };
+	}
+	const environment = db.getEnvironment?.(environmentId) ?? null;
+	const context = buildEnvironmentContext(db, environmentId, {
+		environmentName: environment?.name ?? null,
+		budget: request.contextBudget,
+	});
+	if (!context.text) {
+		return { args: request, context };
+	}
+	// Prepended, not replacing: a caller's own system prompt still applies.
+	const system = request.system ? `${context.text}\n\n${request.system}` : context.text;
+	return { args: { ...request, system }, context };
+}
+
+function register(ipcMain, deps = {}) {
+	const getDb = deps.getDb ?? (() => null);
 	ipcMain.handle("ai:getConfig", () => getPublicAiConfig());
 	ipcMain.handle("ai:setConfig", (_event, patch) => setAiConfig(patch));
 	ipcMain.handle("ai:complete", async (_event, args) => {
 		try {
-			const result = await aiComplete(args);
-			return { ok: true, ...result };
+			const { args: prepared, context } = withEnvironmentContext(getDb(), args);
+			const result = await aiComplete(prepared);
+			// The context is returned with the answer, so "what was sent" is
+			// always answerable for the request that was actually made.
+			return { ok: true, ...result, context };
 		} catch (error) {
 			return { ok: false, error: error instanceof Error ? error.message : "AI request failed." };
 		}
 	});
+
+	// -- WP-4.2: scoped context and memory -----------------------------------
+
+	// The exact context that WOULD be sent for this environment, built the same
+	// way ai:complete builds it. This is the inspection surface: it is the same
+	// function, not a re-implementation, so it cannot drift from what is really
+	// sent.
+	ipcMain.handle("ai:getContext", (_event, environmentId, budget) => {
+		const db = getDb();
+		if (!db || !environmentId) {
+			return { text: "", sections: [], truncated: false, chars: 0, environmentId: environmentId ?? null };
+		}
+		const environment = db.getEnvironment?.(environmentId) ?? null;
+		return buildEnvironmentContext(db, environmentId, { environmentName: environment?.name ?? null, budget });
+	});
+
+	// Memory is environment-scoped in every channel: there is no "list all"
+	// variant, because memory-store.cjs cannot express one.
+	ipcMain.handle("ai:listMemories", (_event, environmentId) => memoryStore.listMemories(getDb(), environmentId));
+
+	ipcMain.handle("ai:addMemory", (_event, environmentId, content) =>
+		memoryStore.createMemory(getDb(), environmentId, content),
+	);
+
+	ipcMain.handle("ai:updateMemory", (_event, environmentId, id, content) =>
+		memoryStore.updateMemory(getDb(), environmentId, id, content),
+	);
+
+	ipcMain.handle("ai:deleteMemory", (_event, environmentId, id) =>
+		memoryStore.deleteMemory(getDb(), environmentId, id),
+	);
 
 	// WP-4.1: which providers exist and what each can do. Built by
 	// services/ai/registry.cjs from the modules it discovered, so a provider
@@ -53,12 +114,13 @@ function register(ipcMain) {
 			typeof args?.streamId === "string" && args.streamId ? args.streamId : `stream-${++nextStreamId}`;
 		const sender = event.sender;
 		try {
-			const result = await aiStream(args, (chunk) => {
+			const { args: prepared, context } = withEnvironmentContext(getDb(), args);
+			const result = await aiStream(prepared, (chunk) => {
 				if (!sender.isDestroyed()) {
 					sender.send("ai:streamChunk", { streamId, chunk });
 				}
 			});
-			return { ok: true, streamId, ...result };
+			return { ok: true, streamId, ...result, context };
 		} catch (error) {
 			return {
 				ok: false,

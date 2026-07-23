@@ -4,6 +4,9 @@ import type {
 	ActivityBlock,
 	AiCompleteArgs,
 	AiCompleteResult,
+	AiContext,
+	AiContextBudget,
+	AiMemory,
 	AiProviderDescription,
 	AiStreamResult,
 	AiConfigPatch,
@@ -182,6 +185,12 @@ declare global {
 			aiComplete: (args: AiCompleteArgs) => Promise<AiCompleteResult>;
 			// WP-4.1: provider capabilities, and streaming.
 			listAiProviders: () => Promise<AiProviderDescription[]>;
+			// WP-4.2: context inspection and per-environment memory.
+			getAiContext: (environmentId: string, budget?: Partial<AiContextBudget>) => Promise<AiContext>;
+			listAiMemories: (environmentId: string) => Promise<AiMemory[]>;
+			addAiMemory: (environmentId: string, content: string) => Promise<AiMemory | null>;
+			updateAiMemory: (environmentId: string, id: string, content: string) => Promise<AiMemory | null>;
+			deleteAiMemory: (environmentId: string, id: string) => Promise<boolean>;
 			aiStream: (args: AiCompleteArgs, onChunk: (chunk: string) => void) => Promise<AiStreamResult>;
 
 			pickAppFile: () => Promise<string | null>;

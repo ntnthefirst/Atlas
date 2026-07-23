@@ -985,7 +985,10 @@ function wireIpc() {
 		saveDashboardPreferences,
 	});
 
-	registerAiIpc(ipcMain);
+	// WP-4.2: the AI handlers now build environment-scoped context, so they need
+	// the database. A getter, for the usual reason -- `db` is assigned during
+	// startup, after this module is required.
+	registerAiIpc(ipcMain, { getDb: () => db });
 
 	registerIsolationIpc(ipcMain);
 

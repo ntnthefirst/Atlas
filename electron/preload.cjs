@@ -200,6 +200,14 @@ contextBridge.exposeInMainWorld("atlas", {
 	// WP-4.1: which providers are registered and what each supports, so a
 	// caller can degrade instead of assuming they all behave alike.
 	listAiProviders: () => ipcRenderer.invoke("ai:listProviders"),
+	// WP-4.2: the exact context that would be sent for one environment, and the
+	// per-environment memory that feeds it. Every one of these takes an
+	// environment id -- there is no unscoped variant anywhere in the chain.
+	getAiContext: (environmentId, budget) => ipcRenderer.invoke("ai:getContext", environmentId, budget),
+	listAiMemories: (environmentId) => ipcRenderer.invoke("ai:listMemories", environmentId),
+	addAiMemory: (environmentId, content) => ipcRenderer.invoke("ai:addMemory", environmentId, content),
+	updateAiMemory: (environmentId, id, content) => ipcRenderer.invoke("ai:updateMemory", environmentId, id, content),
+	deleteAiMemory: (environmentId, id) => ipcRenderer.invoke("ai:deleteMemory", environmentId, id),
 	// WP-4.1: streaming. `onChunk` fires per fragment; the promise settles with
 	// the final normalized result. The subscription is set up BEFORE the invoke
 	// and torn down when it settles, so no chunk can arrive unlistened and no

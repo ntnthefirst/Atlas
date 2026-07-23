@@ -4,6 +4,7 @@ import { ChevronDownIcon, ChevronUpIcon, MinusIcon, XMarkIcon } from "@heroicons
 import {
 	ArrowPathIcon,
 	BoltIcon,
+	BookOpenIcon,
 	CommandLineIcon,
 	FolderIcon,
 	LightBulbIcon,
@@ -19,6 +20,7 @@ import { describeIpcError } from "../../utils/ipcError";
 import { NotchTabsEditor } from "./NotchTabsEditor";
 import { FindingsPanel } from "./FindingsPanel";
 import { SmartFunctionsPanel } from "./SmartFunctionsPanel";
+import { AiContextPanel } from "./AiContextPanel";
 import { WorkContextCard } from "./WorkContextCard";
 import type {
 	AiProvider,
@@ -47,6 +49,7 @@ type SettingsTab =
 	| "files"
 	| "rules"
 	| "findings"
+	| "ai-context"
 	| "integrations"
 	| "keybindings"
 	| "updates";
@@ -71,6 +74,11 @@ const settingsTabs: Array<{
 	// Notch is only where a suggestion happens to appear, while this is the
 	// full record, including findings the Notch has never surfaced.
 	{ id: "findings", label: "Findings", icon: LightBulbIcon },
+	// WP-4.2: what the AI is told about an environment, and the memory that
+	// feeds it. Its own tab rather than a section under Integrations, which is
+	// about provider keys -- this is about your data, which is a different
+	// question and the one people actually want answered.
+	{ id: "ai-context", label: "AI Context", icon: BookOpenIcon },
 	{ id: "integrations", label: "Integrations", icon: SparklesIcon },
 	{ id: "keybindings", label: "Keybindings", icon: CommandLineIcon },
 	{ id: "updates", label: "Updates", icon: ArrowPathIcon },
@@ -838,6 +846,8 @@ export function SettingsWindowApp() {
 										<span>Stored on this device</span>
 									) : activeTab === "findings" ? (
 										<span>Nothing acts on its own</span>
+									) : activeTab === "ai-context" ? (
+										<span>This environment only</span>
 									) : activeTab === "rules" ? (
 										<span>Only what you turn on</span>
 									) : (
@@ -1321,6 +1331,8 @@ export function SettingsWindowApp() {
 								{activeTab === "rules" && <SmartFunctionsPanel environments={environments} />}
 
 								{activeTab === "findings" && <FindingsPanel environments={environments} />}
+
+								{activeTab === "ai-context" && <AiContextPanel environments={environments} />}
 
 								{activeTab === "integrations" && (
 									<div className="flex flex-col gap-4">

@@ -326,17 +326,79 @@ export type AiCompleteArgs = {
 	maxTokens?: number;
 	/** WP-4.1: tools the model may call. Refused by a provider lacking `tools`. */
 	tools?: AiToolSpec[];
+	/**
+	 * WP-4.2: build this environment's context and prepend it to the system
+	 * prompt. Omitted means no context at all — never "every environment".
+	 */
+	environmentId?: string;
+	/** Set false to send the prompt with no context even when an id is given. */
+	includeContext?: boolean;
+	contextBudget?: Partial<AiContextBudget>;
+};
+
+// WP-4.2: what was actually assembled for one environment. Returned alongside
+// every answer AND available on its own, built by the same function, so "what
+// did you send" can always be answered exactly rather than approximately.
+export type AiContextSection = {
+	id: "memory" | "tasks" | "findings" | "notes" | "activity";
+	title: string;
+	lines: string[];
+	includedCount: number;
+	totalCount: number;
+	/** True when items were dropped — by the per-section cap or the budget. */
+	truncated: boolean;
+};
+
+export type AiContextBudget = {
+	maxChars: number;
+	maxItems: Record<AiContextSection["id"], number>;
+	maxItemChars: number;
+};
+
+export type AiContext = {
+	/** Exactly the text prepended to the system prompt. */
+	text: string;
+	sections: AiContextSection[];
+	truncated: boolean;
+	chars: number;
+	environmentId: string | null;
+	budget?: AiContextBudget;
+};
+
+/** One durable fact the user taught the assistant, inside one environment. */
+export type AiMemory = {
+	id: string;
+	environmentId: string;
+	content: string;
+	createdAt: string;
+	updatedAt: string;
 };
 
 export type AiCompleteResult =
-	| { ok: true; text: string; toolCalls: AiToolCall[]; provider: AiProvider; model: string }
+	| {
+			ok: true;
+			text: string;
+			toolCalls: AiToolCall[];
+			provider: AiProvider;
+			model: string;
+			/** WP-4.2: exactly the context that was sent, or null when none was. */
+			context: AiContext | null;
+	  }
 	| { ok: false; error: string };
 
 // WP-4.1: the same shape, plus whether it genuinely streamed. `streamed:false`
 // means the provider lacks the capability and delivered its whole answer as a
 // single chunk — a degrade, not a failure.
 export type AiStreamResult =
-	| { ok: true; text: string; toolCalls: AiToolCall[]; provider: AiProvider; model: string; streamed: boolean }
+	| {
+			ok: true;
+			text: string;
+			toolCalls: AiToolCall[];
+			provider: AiProvider;
+			model: string;
+			streamed: boolean;
+			context: AiContext | null;
+	  }
 	| { ok: false; error: string };
 
 // What the notch's separate capture popup should collect, and the context it
