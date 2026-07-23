@@ -19,6 +19,7 @@ import { describeIpcError } from "../../utils/ipcError";
 import { NotchTabsEditor } from "./NotchTabsEditor";
 import { FindingsPanel } from "./FindingsPanel";
 import { SmartFunctionsPanel } from "./SmartFunctionsPanel";
+import { WorkContextCard } from "./WorkContextCard";
 import type {
 	AiProvider,
 	AiPublicConfig,
@@ -1114,6 +1115,10 @@ export function SettingsWindowApp() {
 												<div className="atlas-settings-card-stack grid gap-3">
 													<NotchTabsEditor />
 												</div>
+
+												{/* WP-2.8's control surface -- see WorkContextCard's own header
+												    for why it belongs here and not on a tab of its own. */}
+												<WorkContextCard />
 
 												<div className="atlas-settings-card-stack grid gap-2">
 													<span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
