@@ -223,6 +223,39 @@ scene editor edits a scene inside a Notch placement's `config` JSON string — a
 storage model from `smart_functions` rows. All acceptance criteria are met, but see the open
 issue below.
 
+### 3a. The two-engines defect, found after Phase 3 closed (`e741467`)
+
+Worth reading before trusting any "criteria met" claim in this document.
+
+**WP-3.1's acceptance criteria all passed while its goal was not achieved.** The goal
+was *"scenes become a special case of [the engine]"*. `migrate-scenes` copied every
+scene into a `smart_functions` row — and nothing ever invoked those rows. The Notch
+button kept calling `NotchApp.tsx#runScene`, a **complete second implementation of the
+same five actions**, in the renderer. The criteria passed on a technicality: scenes
+were *expressible*, they did *migrate*, and they *still worked* — down the old path.
+
+Consequences while it stood:
+
+- editing a scene changed the button but not the rule;
+- editing the rule changed neither;
+- a bug fixed in one engine stayed broken in the other;
+- a sixth action type in `model.cjs` could never reach a scene button.
+
+That is precisely the half-migrated state spanning a gap that **D5** forbids, and it
+would have hardened the moment WP-4.5 began exposing "create a smart function" as an
+AI tool.
+
+**Fixed by** `scene-bridge.cjs`: the renderer executes nothing, and `runManually` is
+the single path. The scene config remains the source of truth — a migrated rule is
+*derived*, so its label and actions re-sync from the scene on every run. `enabled` and
+`environmentId` deliberately do not re-sync; those are decisions about the rule, and
+reverting them on a button press would be a new bug.
+
+**The lesson worth carrying:** acceptance criteria can be satisfied by a technicality
+while the goal is missed entirely. When a package's goal is "X becomes a special case
+of Y", the check is not "does X still work" — it is **"is there still a second
+implementation of X"**. Grep for the old path before believing a migration.
+
 ### Verification performed beyond the test suite
 
 - **FTS5 availability** was confirmed empirically against the project's actual
@@ -269,7 +302,7 @@ correctness-critical pure logic directly.
 
 | Issue | Detail |
 |---|---|
-| **Two editors for one concept** | `SceneConfigEditor.tsx` is still wired into `NotchTabGridEditor.tsx:997`, and `migrate-scenes` **copies** scenes into smart functions without removing them. The same automation can be edited in two places, and editing one will not change the other. Created by Phase 3, not closed by it. |
+| **Two editors for one concept** | *Execution was unified in `e741467` — see §3a.* What remains is editing: `SceneConfigEditor.tsx` is still wired into `NotchTabGridEditor.tsx:997`, so a scene can be edited there and the same automation edited again in the Smart Functions panel. The scene config now wins on every run, so they cannot silently disagree about behaviour, but two front doors to one thing is still confusing. |
 | **No renderer verification** | See §1. Nothing built in these phases has been observed rendering. |
 | **Findings outside any environment are unreachable** | Migration 012 made `findings.environment_id` `NOT NULL`. A pattern mined outside any environment can never be stored or surfaced. Fixing it needs a table rebuild. |
 | **Composed file query is 64–99ms** | Against a stated 50ms target. Inside the launcher's 200ms timeout. |
