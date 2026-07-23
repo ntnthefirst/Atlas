@@ -252,6 +252,10 @@ declare global {
 			deleteSmartFunction: (id: string) => Promise<boolean>;
 			runSmartFunction: (id: string) => Promise<{ ok: boolean; error?: string; summary?: unknown }>;
 			dryRunSmartFunction: (id: string) => Promise<SmartFunctionDryRun>;
+			runNotchScene: (
+				placementId: string,
+				environmentId: string | null,
+			) => Promise<{ ok: boolean; error?: string; reason?: string }>;
 		};
 	}
 }

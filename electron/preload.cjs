@@ -312,4 +312,11 @@ contextBridge.exposeInMainWorld("atlas", {
 	// Runs the rule for real. `dryRunSmartFunction` is the one that doesn't.
 	runSmartFunction: (id) => ipcRenderer.invoke("smartFunctions:runNow", id),
 	dryRunSmartFunction: (id) => ipcRenderer.invoke("smartFunctions:dryRun", id),
+	// A Notch scene button. The renderer used to execute a scene's actions
+	// itself; it no longer executes anything -- see
+	// electron/services/smart-functions/scene-bridge.cjs for why there is now
+	// exactly one execution path. Only the placement id is needed: the layout
+	// is resolved in the main process from the active environment.
+	runNotchScene: (placementId, environmentId) =>
+		ipcRenderer.invoke("smartFunctions:runNotchScene", placementId, environmentId),
 });

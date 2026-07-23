@@ -109,7 +109,9 @@ import {
 	sortTasksByOrder,
 } from "../../utils";
 import { TASK_COLUMNS_KEY, TASK_ORDER_KEY, THEME_KEY, defaultTaskColumns } from "../../constants";
-import { parseSceneConfig, type NotchSceneConfig } from "../../scenes";
+// Only the parser is needed now: the Notch reads a scene to render its icon
+// and label, and never to execute it.
+import { parseSceneConfig } from "../../scenes";
 import { PRIORITY_META } from "../main-content/taskMeta";
 
 // How often to re-poll for environment/task/dashboard changes made in another
@@ -1082,64 +1084,31 @@ export function NotchApp() {
 		if (next) onSwitchEnvironment(next.id);
 	};
 
-	// Runs a saved scene: switches environment, toggles the timer, drops preset
-	// tasks onto the board, then launches apps and opens URLs. Each step is
-	// guarded and best-effort so one failing action (e.g. a missing app) never
-	// stops the rest of the scene.
-	const runScene = async (scene: NotchSceneConfig) => {
-		let targetEnvId = environment?.id;
-		if (scene.environmentId && environments.some((env) => env.id === scene.environmentId)) {
-			onSwitchEnvironment(scene.environmentId);
-			targetEnvId = scene.environmentId;
-		}
+	// Runs a saved scene. The Notch executes NOTHING itself any more.
+	//
+	// This function used to be a complete second implementation of the same
+	// five actions the smart functions engine already runs in the main process
+	// (switch environment, timer, tasks, launch apps, open URLs). Two engines
+	// for one vocabulary could not agree: editing a scene changed this path but
+	// not the migrated rule, editing the rule changed neither, and a bug fixed
+	// in one stayed broken in the other. Everything now dispatches through
+	// `smartFunctions:runNotchScene` -- see
+	// electron/services/smart-functions/scene-bridge.cjs.
+	//
+	// Only the placement id is sent: the main process resolves which layout is
+	// showing from the active environment, so the Notch never has to know its
+	// own layout id.
+	const runScene = async (placementId: string) => {
+		await window.atlas.runNotchScene(placementId, environment?.id ?? null).catch(() => null);
 
-		if (scene.timer === "start" && targetEnvId) {
-			const live = await window.atlas.getActiveSession().catch(() => null);
-			if (live) {
-				setActiveSession(live);
-			} else {
-				try {
-					const session = await window.atlas.startSession(targetEnvId);
-					setActiveSession(session);
-				} catch {
-					// Ignore: scene continues; adopt whatever the DB reports.
-					setActiveSession(await window.atlas.getActiveSession().catch(() => null));
-				}
-			}
-		} else if (scene.timer === "stop") {
-			const live = (await window.atlas.getActiveSession().catch(() => null)) ?? activeSession;
-			if (live) {
-				try {
-					await window.atlas.stopSession(live.id);
-				} catch {
-					// Ignore.
-				}
-				setActiveSession(await window.atlas.getActiveSession().catch(() => null));
-			}
-		}
-
-		for (const task of scene.tasks) {
-			const title = task.title.trim();
-			if (!title || !targetEnvId) continue;
-			try {
-				const created = await window.atlas.createTask(targetEnvId, title);
-				if (task.column && created.status !== task.column) {
-					await window.atlas.updateTaskStatus(created.id, task.column);
-				}
-				const status = task.column || created.status;
-				setTasks((current) => [...current, { ...created, status }]);
-			} catch {
-				// Ignore a single failed task creation.
-			}
-		}
-
-		for (const command of scene.apps) {
-			if (command.trim()) void window.atlas.launchApp(command);
-		}
-		for (const url of scene.urls) {
-			const trimmed = url.trim();
-			if (trimmed) void window.atlas.launchApp(`start "" "${trimmed}"`);
-		}
+		// The actions ran out of process, so local state is stale. Only the
+		// active session is re-read here: it is global, so it is correct
+		// whether or not the scene also switched environment. Tasks are
+		// deliberately left to the existing poll -- a scene that switched
+		// environment would make an immediate read here fetch the OLD
+		// environment's tasks, and being right a second later beats being
+		// wrong now.
+		setActiveSession(await window.atlas.getActiveSession().catch(() => null));
 	};
 
 	const onToggleTheme = () => {
@@ -1674,7 +1643,7 @@ export function NotchApp() {
 							className={`${ICON_BUTTON_CLASSES} h-full w-full gap-1.5 px-1`}
 							title={scene.label || "Run scene"}
 							aria-label={scene.label || "Run scene"}
-							onClick={() => void runScene(scene)}
+							onClick={() => void runScene(placement.id)}
 						>
 							<SceneIcon className="h-5 w-5 shrink-0" />
 							{showLabel ? <span className="truncate text-[11px]">{scene.label}</span> : null}

@@ -213,3 +213,95 @@ describe("smartFunctions:dryRun (WP-3.2)", () => {
 		expect(ipcMain.invoke("smartFunctions:dryRun", "rule-1")).toMatchObject({ ok: false });
 	});
 });
+
+// ---------------------------------------------------------------------------
+// The Notch scene button's channel. The point of these is that the button
+// reaches the ENGINE -- before this, the renderer executed scenes itself and
+// the migrated rules were dormant.
+// ---------------------------------------------------------------------------
+
+describe("smartFunctions:runNotchScene", () => {
+	function seedSceneLayout(db, config) {
+		const existing = db.getEffectiveNotchPreferences(null).preferences;
+		db.setNotchLayout("default", {
+			...existing,
+			tabs: [
+				{
+					id: "tab-1",
+					label: "Scenes",
+					icon: "RocketLaunchIcon",
+					gridCols: 5,
+					gridRows: 1,
+					placements: [{ id: "scene-1", widget: "scene", x: 0, y: 0, w: 2, h: 1, config }],
+				},
+			],
+		});
+	}
+
+	const WORK_SCENE = JSON.stringify({
+		label: "Work setup",
+		icon: "RocketLaunchIcon",
+		apps: ["figma.exe"],
+		urls: [],
+		timer: "none",
+		environmentId: "",
+		tasks: [],
+	});
+
+	it("runs the scene through the engine, by the rule id it resolved", async () => {
+		const { db, ipcMain, engine } = await setup();
+		seedSceneLayout(db, WORK_SCENE);
+		engine.runManually = vi.fn(async () => ({ ok: true }));
+
+		const result = await ipcMain.invoke("smartFunctions:runNotchScene", "scene-1", null);
+
+		expect(result.ok).toBe(true);
+		expect(engine.runManually).toHaveBeenCalledOnce();
+		// It ran the rule that now exists for this scene, not some other id.
+		const rule = store.listAllRules(db)[0];
+		expect(engine.runManually).toHaveBeenCalledWith(rule.id);
+	});
+
+	it("refreshes the engine's cache first, since the rule may have just changed", async () => {
+		const { db, ipcMain, engine } = await setup();
+		seedSceneLayout(db, WORK_SCENE);
+		engine.runManually = vi.fn(async () => ({ ok: true }));
+
+		await ipcMain.invoke("smartFunctions:runNotchScene", "scene-1", null);
+
+		expect(engine.refreshRules).toHaveBeenCalled();
+	});
+
+	it("creates exactly one rule however many times the button is pressed", async () => {
+		const { db, ipcMain, engine } = await setup();
+		seedSceneLayout(db, WORK_SCENE);
+		engine.runManually = vi.fn(async () => ({ ok: true }));
+
+		await ipcMain.invoke("smartFunctions:runNotchScene", "scene-1", null);
+		await ipcMain.invoke("smartFunctions:runNotchScene", "scene-1", null);
+		await ipcMain.invoke("smartFunctions:runNotchScene", "scene-1", null);
+
+		expect(store.listAllRules(db)).toHaveLength(1);
+	});
+
+	it("reports a scene that is no longer on the notch, without running anything", async () => {
+		const { db, ipcMain, engine } = await setup();
+		seedSceneLayout(db, WORK_SCENE);
+		engine.runManually = vi.fn(async () => ({ ok: true }));
+
+		const result = await ipcMain.invoke("smartFunctions:runNotchScene", "scene-gone", null);
+
+		expect(result.ok).toBe(false);
+		expect(result.reason).toBe("not_found");
+		expect(engine.runManually).not.toHaveBeenCalled();
+	});
+
+	it("degrades cleanly with no engine", async () => {
+		const db = await createDb();
+		const ipcMain = createFakeIpcMain();
+		register(ipcMain, { getDb: () => db, engine: null });
+
+		const result = await ipcMain.invoke("smartFunctions:runNotchScene", "scene-1", null);
+		expect(result.ok).toBe(false);
+	});
+});

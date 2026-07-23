@@ -22,6 +22,7 @@
 const store = require("../services/smart-functions/store.cjs");
 const { migrateScenes } = require("../services/smart-functions/migrate-scenes.cjs");
 const { describeRule } = require("../services/smart-functions/describe.cjs");
+const { resolveSceneRule } = require("../services/smart-functions/scene-bridge.cjs");
 
 function register(ipcMain, deps) {
 	const { getDb, engine } = deps;
@@ -149,6 +150,30 @@ function register(ipcMain, deps) {
 			return { ok: false, error: "Smart functions engine not available." };
 		}
 		return engine.dryRun(id);
+	});
+
+	// A Notch scene button. This is the ONLY way a scene runs -- the renderer
+	// used to execute the actions itself, which meant Atlas had two engines for
+	// one action vocabulary that could not agree; see scene-bridge.cjs's header.
+	// The layout id is resolved in the main process from the active
+	// environment, so the Notch only has to know which placement was pressed.
+	ipcMain.handle("smartFunctions:runNotchScene", async (_event, placementId, environmentId) => {
+		const db = getDb();
+		if (!db) {
+			return { ok: false, error: "Database not ready." };
+		}
+		if (!engine) {
+			return { ok: false, error: "Smart functions engine not available." };
+		}
+		const resolved = resolveSceneRule(db, { placementId, environmentId });
+		if (!resolved.ok) {
+			return resolved;
+		}
+		// The rule may have just been created or re-synced, and the engine
+		// evaluates against an in-memory cache -- same refresh every other
+		// mutating handler here performs.
+		engine.refreshRules?.();
+		return engine.runManually(resolved.rule.id);
 	});
 
 	// Re-runnable on demand (Settings' own "Re-check for scenes" button, once
