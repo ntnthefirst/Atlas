@@ -29,42 +29,57 @@ days. Calendar time depends entirely on the burst pattern (see section 4).
 
 ## 1b. Status
 
-Last updated: 2026-07-22. Keep this current — it is what a fresh session reads first.
+Last updated: 2026-07-23. Keep this current — it is what a fresh session reads first.
 
-**Phase 0: complete (8/8). Phase 1: complete (5/5).** Suite at 724 tests.
-Next unstarted work is Phase 2 (the launcher). Everything through WP-1.5 is
-committed and pushed to `dev`; the working tree is clean.
+**Phases 0–3 are complete (8/8, 5/5, 9/9, 7/7).** Suite at **1664 tests across 99
+files**. Next unstarted work is **Phase 4 (AI and MCP)**. Everything is committed
+and pushed to `dev` (`be1356d`); the working tree is clean apart from the
+permanently-untracked `memory/` and `.claude/`.
+
+**Read [BUILD-LOG.md](BUILD-LOG.md) before starting Phase 4.** It records what
+Phases 2 and 3 actually did — the mistakes and their corrections, decisions the
+plan did not anticipate, working rules the user set during the work, and the
+issues left open on purpose. None of that is recoverable from this document or
+from the code.
 
 | Package | State |
 |---|---|
-| WP-1.1 Environment config | **Done.** Versioned per-environment config document. |
-| WP-1.2 Isolation UI | **Done.** Connected/Enclosed control; shared-list rendered from the allowlist. |
-| WP-1.3 Per-environment Notch | **Done.** Layout store; existing config preserved as the default. |
-| WP-1.4 Environment switching | **Done.** Atomic, <2ms, rebindable global hotkey, startupBehaviour. |
-| WP-1.5 Environment management | **Done.** Create/edit/duplicate/archive/delete with real counts. |
-| WP-0.1 Test harness | **Done.** Vitest + 3-OS CI matrix. |
-| WP-0.2 Split main.cjs | **Substantially done.** 2455 → 746 lines (−70%), ~30 modules. All 73 IPC handlers, all config, the updater, focus engine, notch windows and tray extracted. See the note below on the remaining 746 lines. |
-| WP-0.3 Database engine swap | **Done.** `node-sqlite3-wasm` (see D9), migration framework, verified legacy import. |
-| WP-0.4 Secret vault | **Done.** Keys encrypted, legacy plaintext migrated. |
-| WP-0.5 Event log | **Done.** Batched writer, retention, privacy-constrained.  |
-| WP-0.6 Platform adapter (Windows) | **Done.** Rescoped by D10; powershell now confined to one file. |
-| WP-0.7 maps → environments | **Done.** Migration 002, plus a localStorage key migration. |
-| WP-0.8 Scoped data layer | **Done.** Two modes, frozen allowlist, leak-tested. |
+| Phase 0 (WP-0.1 → 0.8) | **Done.** Test harness, main.cjs split, `node-sqlite3-wasm` + migrations, secret vault, event log, Windows platform adapter, maps → environments, scoped data layer. WP-0.2 is *substantially* done — see the note below. |
+| Phase 1 (WP-1.1 → 1.5) | **Done.** Per-environment config, isolation UI, per-environment Notch layout, atomic switching, full environment lifecycle. |
+| WP-2.1 → 2.4, 2.9 | **Done.** Launcher input surface, provider registry, in-app data, installed apps, command provider. |
+| WP-2.5 File index: crawler | **Done.** Schema, preferences, crawler, IPC, files provider, settings surface. |
+| WP-2.6 File index: watcher | **Done.** Plus a 4-hour safety-net re-crawl. |
+| WP-2.7 Ranking and filters | **Done.** Blended score, `ext:`/`in:` filters. Composed queries measure 64–99ms against a 50ms target — inside the 200ms launcher timeout. |
+| WP-2.8 Context adaptation | **Done.** Service shipped in Phase 2; its Settings surface landed later in `be1356d`. |
+| WP-3.1 Smart Functions engine | **Done.** Triggers/conditions/actions, scenes migrated with a `manual` trigger, loop prevention. |
+| WP-3.2 Smart Function editor | **Done.** CRUD, duplicate, main-process plain-language preview, side-effect-free dry run. Built as a new panel rather than extending `SceneConfigEditor.tsx` — see BUILD-LOG §3. |
+| WP-3.3 Pattern miner | **Done.** Sequential co-occurrence on a worker thread. 875ms for 151,800 events / 90 days / 10 environments. |
+| WP-3.4 Finding lifecycle | **Done.** All seven steps, purge verifiable in the database. |
+| WP-3.5 Suggestion surfacing | **Done.** Quiet Notch affordance, rate-limited, never focus-stealing. |
+| WP-3.6 Findings management | **Done.** Seven operations, isolation-safe moves, evidence drill-down (migration 014). |
+| WP-3.7 Feedback loop | **Done.** Consecutive-dismissal suppression, inspectable and resettable. |
 
-**Suite: 504 tests, ~9s.** Verification commands now available:
+**Suite: 1664 tests across 99 files, ~35s.** Run all of these before committing
+anything that touches `electron/`:
 
 ```
-npm test               # 504 unit/integration tests, ~13s
-npm run lint           # now covers electron/ and scripts/ too
+npx vitest run         # 1664 tests across 99 files, ~35s
+npm run lint           # covers electron/ and scripts/ too
+npm run build          # tsc -b && vite build
 npm run smoke          # boots the real Electron main process, fails on crash
 npm run smoke:windows  # opens every window type, fails if any does not
 npm run verify:secrets # runs inside Electron; proves the vault encrypts
 ```
 
-Run all five before committing anything that touches `electron/`. The two
-smoke tests exist because vitest cannot construct a BrowserWindow and cannot
-reach `safeStorage` — between them they cover the failure modes unit tests
+The smoke tests exist because vitest cannot construct a BrowserWindow and cannot
+reach `safeStorage` — between them they cover failure modes unit tests
 structurally cannot see.
+
+**What the gates do not cover: renderer rendering.** `vitest.config.ts` is
+node-only (jsdom deliberately off), and the panels cannot be driven in a browser
+because `window.atlas` is preload-injected. Every decision behind every control is
+tested; no control has been observed rendering. Anything added to
+`src/components/` needs manual checking in the running app.
 
 ### WP-0.2: what is left, and why the 250-line target was not chased
 
