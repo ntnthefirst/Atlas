@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDownIcon, ChevronUpIcon, MinusIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import {
 	ArrowPathIcon,
+	BoltIcon,
 	CommandLineIcon,
 	FolderIcon,
 	LightBulbIcon,
@@ -17,6 +18,7 @@ import { useAccent } from "../../hooks";
 import { describeIpcError } from "../../utils/ipcError";
 import { NotchTabsEditor } from "./NotchTabsEditor";
 import { FindingsPanel } from "./FindingsPanel";
+import { SmartFunctionsPanel } from "./SmartFunctionsPanel";
 import type {
 	AiProvider,
 	AiPublicConfig,
@@ -42,6 +44,7 @@ type SettingsTab =
 	| "appearance"
 	| "notch"
 	| "files"
+	| "rules"
 	| "findings"
 	| "integrations"
 	| "keybindings"
@@ -58,6 +61,10 @@ const settingsTabs: Array<{
 	{ id: "appearance", label: "Appearance", icon: PaintBrushIcon },
 	{ id: "notch", label: "Smart Notch", icon: RectangleGroupIcon },
 	{ id: "files", label: "File Index", icon: FolderIcon },
+	// WP-3.2: the rules the user builds by hand. Sits next to Findings, which
+	// is where the rules Atlas proposes come from -- the two are the same
+	// destination reached from opposite directions.
+	{ id: "rules", label: "Smart Functions", icon: BoltIcon },
 	// WP-3.6: the patterns Atlas has mined, and everything the user can do
 	// with them. Its own tab rather than a section under "Smart Notch": the
 	// Notch is only where a suggestion happens to appear, while this is the
@@ -830,6 +837,8 @@ export function SettingsWindowApp() {
 										<span>Stored on this device</span>
 									) : activeTab === "findings" ? (
 										<span>Nothing acts on its own</span>
+									) : activeTab === "rules" ? (
+										<span>Only what you turn on</span>
 									) : (
 										<span>Applies instantly</span>
 									)}
@@ -1303,6 +1312,8 @@ export function SettingsWindowApp() {
 										</div>
 									</div>
 								)}
+
+								{activeTab === "rules" && <SmartFunctionsPanel environments={environments} />}
 
 								{activeTab === "findings" && <FindingsPanel environments={environments} />}
 

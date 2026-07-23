@@ -294,4 +294,22 @@ contextBridge.exposeInMainWorld("atlas", {
 	// main process from the database's own isolation modes, never from
 	// anything the renderer could pass in here.
 	moveFinding: (findingId, environmentId) => ipcRenderer.invoke("findings:move", findingId, environmentId),
+
+	// WP-3.2: the Smart Function editor. Every read comes back with the
+	// plain-language `description` already built in the main process from the
+	// same predicates the engine evaluates -- see electron/ipc/
+	// smart-functions.cjs's header for why it is not assembled here.
+	listSmartFunctions: (environmentId) =>
+		environmentId
+			? ipcRenderer.invoke("smartFunctions:listForEnvironment", environmentId)
+			: ipcRenderer.invoke("smartFunctions:listAll"),
+	getSmartFunction: (id) => ipcRenderer.invoke("smartFunctions:get", id),
+	createSmartFunction: (input) => ipcRenderer.invoke("smartFunctions:create", input),
+	updateSmartFunction: (id, patch) => ipcRenderer.invoke("smartFunctions:update", id, patch),
+	duplicateSmartFunction: (id) => ipcRenderer.invoke("smartFunctions:duplicate", id),
+	setSmartFunctionEnabled: (id, enabled) => ipcRenderer.invoke("smartFunctions:setEnabled", id, enabled),
+	deleteSmartFunction: (id) => ipcRenderer.invoke("smartFunctions:delete", id),
+	// Runs the rule for real. `dryRunSmartFunction` is the one that doesn't.
+	runSmartFunction: (id) => ipcRenderer.invoke("smartFunctions:runNow", id),
+	dryRunSmartFunction: (id) => ipcRenderer.invoke("smartFunctions:dryRun", id),
 });

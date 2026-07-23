@@ -38,6 +38,9 @@ import type {
 	NotchInputPayload,
 	NotchLayoutResolution,
 	NotchPreferences,
+	SmartFunction,
+	SmartFunctionDryRun,
+	SmartFunctionInput,
 	SuggestionPreferences,
 	SuggestionFeedbackCategory,
 	SurfacedSuggestion,
@@ -236,6 +239,19 @@ declare global {
 			setFindingLabel: (findingId: string, label: string | null) => Promise<FindingActionResult>;
 			deleteFinding: (findingId: string) => Promise<FindingActionResult>;
 			moveFinding: (findingId: string, environmentId: string) => Promise<FindingActionResult>;
+
+			// WP-3.2: the Smart Function editor. Passing no environment id lists
+			// every rule; passing one lists that environment's rules plus the
+			// global ones, exactly as the engine scopes them.
+			listSmartFunctions: (environmentId?: string | null) => Promise<SmartFunction[]>;
+			getSmartFunction: (id: string) => Promise<SmartFunction | null>;
+			createSmartFunction: (input: SmartFunctionInput) => Promise<SmartFunction>;
+			updateSmartFunction: (id: string, patch: SmartFunctionInput) => Promise<SmartFunction>;
+			duplicateSmartFunction: (id: string) => Promise<SmartFunction>;
+			setSmartFunctionEnabled: (id: string, enabled: boolean) => Promise<SmartFunction>;
+			deleteSmartFunction: (id: string) => Promise<boolean>;
+			runSmartFunction: (id: string) => Promise<{ ok: boolean; error?: string; summary?: unknown }>;
+			dryRunSmartFunction: (id: string) => Promise<SmartFunctionDryRun>;
 		};
 	}
 }

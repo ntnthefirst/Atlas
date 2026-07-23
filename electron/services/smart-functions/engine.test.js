@@ -427,3 +427,126 @@ describe("runManually", () => {
 		expect(db.listTasksByEnvironment(environment.id)).toEqual([]);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// WP-3.2's dry-run. The acceptance criterion is "shows what would happen
+// WITHOUT doing it", so the assertions that carry it are all negative: no
+// action executor ran, no task appeared, no `smart_function.fired` event was
+// logged, and the rate cap a later real run depends on was not consumed.
+// ---------------------------------------------------------------------------
+
+describe("dryRun (WP-3.2)", () => {
+	async function setup({ enabled = true, conditions = [], platform } = {}) {
+		const db = await createDb();
+		const environment = db.createEnvironment("Env A");
+		const rule = createRule(db, {
+			label: "Start the timer on session start",
+			environmentId: environment.id,
+			enabled,
+			trigger: { type: "session.started" },
+			conditions,
+			actions: [
+				{ type: "launchApp", command: "figma.exe" },
+				{ type: "createTask", title: "Auto task" },
+			],
+		});
+		const eventLog = new EventLog({ getDb: () => db });
+		const launcher = platform ?? fakePlatform();
+		const engine = createSmartFunctionsEngine({
+			getDb: () => db,
+			getEventLog: () => eventLog,
+			getCurrentEnvironmentId: () => environment.id,
+			platform: launcher,
+		});
+		engine.refreshRules();
+		return { db, environment, rule, engine, launcher, eventLog };
+	}
+
+	it("reports that an eligible rule would fire, and says what it would do", async () => {
+		const { engine, rule } = await setup();
+
+		const result = engine.dryRun(rule.id);
+
+		expect(result.ok).toBe(true);
+		expect(result.wouldFire).toBe(true);
+		expect(result.reason).toBe("matched");
+		expect(result.actions).toEqual(["open figma.exe", 'add a task "Auto task"']);
+	});
+
+	// THE criterion.
+	it("executes absolutely nothing -- no app launched, no task created", async () => {
+		const { engine, rule, launcher, db, environment } = await setup();
+
+		engine.dryRun(rule.id);
+
+		expect(launcher.launch).not.toHaveBeenCalled();
+		expect(db.listTasksByEnvironment(environment.id)).toEqual([]);
+	});
+
+	it("logs no smart_function.fired event, so a dry run leaves no trace of having run", async () => {
+		const { engine, rule, db } = await setup();
+
+		engine.dryRun(rule.id);
+
+		// The event log is batched, but a fired event would have been buffered;
+		// flushing proves nothing was there to write.
+		expect(db.first("SELECT COUNT(*) AS count FROM events WHERE type = 'smart_function.fired'").count).toBe(0);
+	});
+
+	// A dry run that consumed the rate cap would make checking a rule change
+	// whether it can then actually run -- the opposite of "without doing it".
+	it("does not consume the per-rule rate cap", async () => {
+		const { engine, rule } = await setup();
+
+		// Far more dry runs than the default cap of 5 per window.
+		for (let i = 0; i < 20; i += 1) {
+			engine.dryRun(rule.id);
+		}
+
+		expect(engine.dryRun(rule.id).reason).toBe("matched");
+		const real = await engine.runManually(rule.id);
+		expect(real.ok).toBe(true);
+	});
+
+	it("reports a disabled rule as disabled rather than pretending it would run", async () => {
+		const { engine, rule } = await setup({ enabled: false });
+
+		const result = engine.dryRun(rule.id);
+		expect(result.wouldFire).toBe(false);
+		expect(result.reason).toBe("disabled");
+	});
+
+	it("reports an unmet condition as the reason, using the engine's own verdict", async () => {
+		const { engine, rule } = await setup({
+			conditions: [{ type: "app_running", processName: "SomethingNotInFront" }],
+		});
+
+		const result = engine.dryRun(rule.id);
+		expect(result.wouldFire).toBe(false);
+		expect(result.reason).toBe("condition_failed");
+	});
+
+	it("includes the live values the verdict was measured against", async () => {
+		const { engine, rule, environment } = await setup();
+
+		const result = engine.dryRun(rule.id);
+		expect(result.context.currentEnvironmentId).toBe(environment.id);
+		expect(typeof result.context.now).toBe("number");
+	});
+
+	it("carries the same plain-language description the list shows", async () => {
+		const { engine, rule } = await setup();
+
+		const result = engine.dryRun(rule.id);
+		expect(result.description).toContain("When a session starts");
+		expect(result.description).toContain("open figma.exe");
+	});
+
+	it("refuses an unknown rule id without throwing", async () => {
+		const { engine } = await setup();
+
+		const result = engine.dryRun("no-such-rule");
+		expect(result.ok).toBe(false);
+		expect(result.error).toBeTruthy();
+	});
+});

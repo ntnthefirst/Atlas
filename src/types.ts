@@ -829,6 +829,83 @@ export type SuggestionPreferences = {
 	suppressAfterDismissals: number;
 };
 
+// WP-3.1/3.2: the Smart Function vocabulary, mirroring
+// electron/services/smart-functions/model.cjs exactly. Kept as literal unions
+// rather than `string` so the editor can only ever offer a type the engine
+// actually understands -- adding one there and forgetting here is a type
+// error, not a rule that silently never fires.
+export type SmartFunctionTrigger =
+	| { type: "manual" }
+	| { type: "environment.switched"; environmentId: string | null }
+	| { type: "session.started" }
+	| { type: "session.stopped" }
+	| { type: "app.launched"; processName: string | null }
+	| { type: "time.of_day"; time: string }
+	| { type: "display.connected" }
+	| { type: "file.changed"; pattern: string | null; kind: "created" | "modified" | "removed" | null };
+
+export type SmartFunctionCondition =
+	| { type: "environment"; environmentId: string }
+	| { type: "time_window"; start: string; end: string }
+	| { type: "app_running"; processName: string };
+
+export type SmartFunctionAction =
+	| { type: "launchApp"; command: string }
+	| { type: "openUrl"; url: string }
+	| { type: "timer"; mode: "start" | "stop" }
+	| { type: "switchEnvironment"; environmentId: string }
+	| { type: "createTask"; title: string; column: string | null };
+
+export type SmartFunction = {
+	id: string;
+	/** null means the rule applies whichever environment is active. */
+	environmentId: string | null;
+	label: string;
+	enabled: boolean;
+	trigger: SmartFunctionTrigger;
+	conditions: SmartFunctionCondition[];
+	actions: SmartFunctionAction[];
+	source: "user" | "migrated-scene";
+	migratedFrom: string | null;
+	createdAt: string | null;
+	updatedAt: string | null;
+	/**
+	 * The plain-language preview, built in the main process from the same
+	 * predicates the engine evaluates (describe.cjs). Never re-derived here --
+	 * a second copy could drift from the behaviour it claims to describe.
+	 */
+	description: string;
+};
+
+/** What you send to create or update one; every field optional on update. */
+export type SmartFunctionInput = {
+	label?: string;
+	environmentId?: string | null;
+	enabled?: boolean;
+	trigger?: SmartFunctionTrigger;
+	conditions?: SmartFunctionCondition[];
+	actions?: SmartFunctionAction[];
+};
+
+// WP-3.2's dry-run: what WOULD happen, computed through the engine's own
+// decide() and then stopped before anything executes. `reason` is decide()'s
+// own verdict ("matched", "disabled", "condition_failed", "rate_limited",
+// "loop_prevented", "no_trigger_match"), so a "no" is always explainable.
+export type SmartFunctionDryRun = {
+	ok: boolean;
+	error?: string;
+	wouldFire?: boolean;
+	reason?: string;
+	description?: string;
+	/** Each action in the same words the preview uses. */
+	actions?: string[];
+	context?: {
+		currentEnvironmentId: string | null;
+		foregroundProcessName: string | null;
+		now: number;
+	};
+};
+
 // WP-3.7's feedback loop, made inspectable: one row per category the user has
 // given Atlas any answer about, in ONE environment. The counts are included
 // deliberately -- "why has Atlas stopped offering this" should always have an

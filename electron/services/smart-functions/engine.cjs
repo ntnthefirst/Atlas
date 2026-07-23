@@ -77,6 +77,7 @@
 const store = require("./store.cjs");
 const { decide } = require("./evaluate.cjs");
 const { runActions } = require("./runner.cjs");
+const { describeRule, describeAction } = require("./describe.cjs");
 
 const DEFAULT_MAX_DISPATCH_DEPTH = 5;
 const DEFAULT_MAX_FIRES_PER_WINDOW = 5;
@@ -323,6 +324,51 @@ function createSmartFunctionsEngine(deps = {}) {
 		return { ok: summary.failedCount === 0, summary };
 	}
 
+	// WP-3.2's "dry-run shows what would happen without doing it". Asks
+	// evaluate.cjs#decide the EXACT question runManually asks -- same synthetic
+	// manual event, same buildContext(0) -- and then stops, before
+	// executeRule. Nothing else in this function has a side effect of any kind:
+	// no action runs, no `smart_function.fired` event is logged, and
+	// recordFire() is never called, so a dry run cannot consume the rate cap
+	// that a later real run depends on. Reusing decide() rather than
+	// re-deriving the answer is the whole point: a dry run that computed
+	// eligibility its own way could disagree with the engine, which is exactly
+	// what the user is trying to find out.
+	//
+	// A disabled rule reports `wouldFire: false, reason: "disabled"` rather
+	// than "what it would do if it were on" -- the criterion is that this
+	// matches actual behaviour, and actual behaviour is that a disabled rule
+	// does not run.
+	function dryRun(ruleId) {
+		const db = getDb();
+		if (!db) {
+			return { ok: false, error: "Database not ready." };
+		}
+		const rule = store.getRule(db, ruleId);
+		if (!rule) {
+			return { ok: false, error: "Smart function not found." };
+		}
+		const event = { type: "manual", environmentId: null, subject: null, payload: null, sessionId: null };
+		const ctx = buildContext(0);
+		const decision = decide(rule, event, ctx);
+		return {
+			ok: true,
+			wouldFire: decision.fire,
+			reason: decision.reason,
+			description: describeRule(rule),
+			// What it WOULD do, in the same words the preview uses -- an empty
+			// list is itself the answer for a rule with no actions.
+			actions: rule.actions.map((action) => describeAction(action)),
+			// The live values the verdict was measured against, so a "no" is
+			// explainable rather than mysterious.
+			context: {
+				currentEnvironmentId: ctx.currentEnvironmentId ?? null,
+				foregroundProcessName: ctx.foregroundProcessName ?? null,
+				now: ctx.now,
+			},
+		};
+	}
+
 	function start() {
 		refreshRules();
 		const eventLog = getEventLog();
@@ -356,6 +402,7 @@ function createSmartFunctionsEngine(deps = {}) {
 		handleEvent,
 		handleFileEvent,
 		runManually,
+		dryRun,
 		getStatus,
 		// Test/inspection seams -- mirror context-service.cjs's own
 		// getStatus()/waitForIdle() convention for exposing otherwise-private
