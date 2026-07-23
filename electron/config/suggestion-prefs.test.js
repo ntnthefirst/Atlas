@@ -5,6 +5,7 @@ import {
 	DEFAULT_ENABLED,
 	DEFAULT_MAX_PER_SESSION,
 	DEFAULT_MAX_PER_DAY,
+	DEFAULT_SUPPRESS_AFTER_DISMISSALS,
 } from "./suggestion-prefs.cjs";
 
 describe("defaultSuggestionPreferences", () => {
@@ -13,7 +14,15 @@ describe("defaultSuggestionPreferences", () => {
 			enabled: DEFAULT_ENABLED,
 			maxPerSession: DEFAULT_MAX_PER_SESSION,
 			maxPerDay: DEFAULT_MAX_PER_DAY,
+			suppressAfterDismissals: DEFAULT_SUPPRESS_AFTER_DISMISSALS,
 		});
+	});
+
+	// WP-3.7. Pinned to the literal alongside the constant for the same reason
+	// maxPerSession is below: the number is a product decision, and a test that
+	// only compared it to its own constant would happily accept any change.
+	it("defaults to suppressing a category after three dismissals in a row", () => {
+		expect(defaultSuggestionPreferences().suppressAfterDismissals).toBe(3);
 	});
 
 	it("defaults maxPerSession to exactly 1 -- the plan's own hard rule", () => {
@@ -29,7 +38,7 @@ describe("normalizeSuggestionPreferences", () => {
 	});
 
 	it("keeps every valid, in-range field as given", () => {
-		const input = { enabled: false, maxPerSession: 2, maxPerDay: 5 };
+		const input = { enabled: false, maxPerSession: 2, maxPerDay: 5, suppressAfterDismissals: 2 };
 		expect(normalizeSuggestionPreferences(input)).toEqual(input);
 	});
 
@@ -37,6 +46,22 @@ describe("normalizeSuggestionPreferences", () => {
 		const prefs = normalizeSuggestionPreferences({ maxPerSession: 999, maxPerDay: -5 });
 		expect(prefs.maxPerSession).toBeLessThanOrEqual(10);
 		expect(prefs.maxPerDay).toBeGreaterThanOrEqual(1);
+	});
+
+	// WP-3.7: zero would suppress a category that has never been dismissed at
+	// all, which is why the floor is 1 and not 0.
+	it("never lets suppressAfterDismissals fall below one dismissal", () => {
+		expect(normalizeSuggestionPreferences({ suppressAfterDismissals: 0 }).suppressAfterDismissals).toBe(1);
+		expect(normalizeSuggestionPreferences({ suppressAfterDismissals: -3 }).suppressAfterDismissals).toBe(1);
+	});
+
+	it("caps an absurd suppressAfterDismissals rather than effectively disabling the loop", () => {
+		expect(normalizeSuggestionPreferences({ suppressAfterDismissals: 9999 }).suppressAfterDismissals).toBe(20);
+	});
+
+	it("falls back to the default when suppressAfterDismissals is missing or not a number", () => {
+		expect(normalizeSuggestionPreferences({}).suppressAfterDismissals).toBe(3);
+		expect(normalizeSuggestionPreferences({ suppressAfterDismissals: "three" }).suppressAfterDismissals).toBe(3);
 	});
 
 	it("falls back to a single field's default when only that field is malformed", () => {

@@ -42,6 +42,16 @@
 // manager.test.js's own "global switch" suite, which proves this with a
 // fixture that WOULD otherwise definitely produce a suggestion.
 //
+// -- WP-3.7: the feedback loop, wired in as a sixth check --------------------
+// Between checks 4 and 5, any candidate whose CATEGORY (pattern type, in this
+// environment) the user has dismissed `suppressAfterDismissals` times in a row
+// is dropped -- see ./feedback.cjs for the rule and why the counter resets on
+// an accept. The filter runs before selection rather than after, so a
+// suppressed category never starves a live one out of the single slot. Nothing
+// about it is hidden: getFeedback() returns the counts behind every verdict,
+// and resetFeedback() clears one category (or all of them in one environment)
+// by stamping a watermark, never by deleting a single event row.
+//
 // -- Why sessionStartMs is fixed once, here, at construction -----------------
 // "A new session resets the per-session limit" (this WP's own rate-limit
 // rule) means, concretely, "a new run of the Atlas process" -- there is no
@@ -66,9 +76,16 @@ const {
 	defaultSuggestionPreferences,
 	normalizeSuggestionPreferences,
 } = require("../../config/suggestion-prefs.cjs");
+const {
+	SUGGESTION_FEEDBACK_FILE,
+	defaultSuggestionFeedbackState,
+	normalizeSuggestionFeedbackState,
+} = require("../../config/suggestion-feedback.cjs");
 const { canSurfaceSuggestion } = require("./rate-limit.cjs");
 const { selectFindingToSurface } = require("./selection.cjs");
+const { FEEDBACK_EVENT_TYPES, categoryKey, summarizeFeedback, suppressedPatternTypes } = require("./feedback.cjs");
 const patternMinerStore = require("../pattern-miner/store.cjs");
+const { listEventsByEnvironmentAndTypes } = require("../event-log.cjs");
 const { buildFindingRuleLabel } = require("../pattern-miner/finding-translator.cjs");
 
 function createSuggestionManager(deps = {}) {
@@ -84,7 +101,14 @@ function createSuggestionManager(deps = {}) {
 	// See this file's header -- fixed exactly once, never reassigned.
 	const sessionStartMs = Number.isFinite(deps.sessionStartMs) ? deps.sessionStartMs : now();
 
+	// WP-3.7: the feedback loop's own state file (which categories the user has
+	// explicitly reset, and when). Separate path, separate normalizer, same
+	// never-throw discipline -- see electron/config/suggestion-feedback.cjs.
+	const resolveFeedbackPath =
+		deps.getFeedbackPath ?? (() => path.join(app.getPath("userData"), SUGGESTION_FEEDBACK_FILE));
+
 	let preferences = defaultSuggestionPreferences();
+	let feedbackState = defaultSuggestionFeedbackState();
 
 	function loadPreferences() {
 		try {
@@ -93,7 +117,35 @@ function createSuggestionManager(deps = {}) {
 		} catch {
 			preferences = defaultSuggestionPreferences();
 		}
+		try {
+			const raw = fs.readFileSync(resolveFeedbackPath(), "utf8");
+			feedbackState = normalizeSuggestionFeedbackState(JSON.parse(raw));
+		} catch {
+			feedbackState = defaultSuggestionFeedbackState();
+		}
 		return preferences;
+	}
+
+	function persistFeedbackState() {
+		try {
+			fs.writeFileSync(resolveFeedbackPath(), JSON.stringify(feedbackState, null, 2), "utf8");
+		} catch {
+			// Same non-blocking policy as persist() below: a reset the user just
+			// made still applies for the rest of this run even if it can't be
+			// written to disk.
+		}
+	}
+
+	// Reads the outcome events for ONE environment only (see
+	// listEventsByEnvironmentAndTypes' own header for why it refuses to run
+	// unscoped) and hands them to the pure summarizer.
+	function readFeedback(environmentId) {
+		const db = getDb();
+		if (!db || !environmentId) {
+			return [];
+		}
+		const events = listEventsByEnvironmentAndTypes(db, environmentId, FEEDBACK_EVENT_TYPES);
+		return summarizeFeedback(events, environmentId, { config: preferences, resets: feedbackState.resets });
 	}
 
 	function persist() {
@@ -133,7 +185,19 @@ function createSuggestionManager(deps = {}) {
 		const allFindings = patternMinerStore.listAllFindings(db);
 		const lifecycleConfig = lifecycleManager?.getPreferences?.() ?? {};
 
-		const candidate = selectFindingToSurface(allFindings, environmentId, nowMs, lifecycleConfig);
+		// WP-3.7: drop any candidate whose category the user has consistently
+		// rejected in THIS environment, before selection picks one. Filtering
+		// here rather than inside selection.cjs keeps that module a pure function
+		// of the findings themselves -- suppression is a fact about the user's
+		// past answers, which lives in the event log, not on the finding.
+		const suppressed = suppressedPatternTypes(
+			listEventsByEnvironmentAndTypes(db, environmentId, FEEDBACK_EVENT_TYPES),
+			environmentId,
+			{ config: preferences, resets: feedbackState.resets },
+		);
+		const eligible = suppressed.size === 0 ? allFindings : allFindings.filter((f) => !suppressed.has(f.patternType));
+
+		const candidate = selectFindingToSurface(eligible, environmentId, nowMs, lifecycleConfig);
 		if (!candidate) {
 			return null;
 		}
@@ -183,11 +247,42 @@ function createSuggestionManager(deps = {}) {
 		};
 	}
 
+	// -- WP-3.7's "inspectable and resettable" -------------------------------
+	// getFeedback returns the counts behind every verdict, not just the
+	// verdicts, so "why has Atlas stopped offering this" always has an answer
+	// the user can read.
+	function getFeedback(environmentId) {
+		return readFeedback(environmentId);
+	}
+
+	// Resetting stamps a watermark, never deletes an event -- see
+	// electron/config/suggestion-feedback.cjs's header. `patternType` omitted
+	// resets every category in that environment at once ("start over"), which
+	// is the affordance a user who has suppressed several by accident actually
+	// wants; it still touches no other environment.
+	function resetFeedback(environmentId, patternType) {
+		if (!environmentId) {
+			return [];
+		}
+		const stamp = new Date(now()).toISOString();
+		if (patternType) {
+			feedbackState.resets[categoryKey(environmentId, patternType)] = stamp;
+		} else {
+			for (const entry of readFeedback(environmentId)) {
+				feedbackState.resets[categoryKey(environmentId, entry.patternType)] = stamp;
+			}
+		}
+		persistFeedbackState();
+		return readFeedback(environmentId);
+	}
+
 	return {
 		loadPreferences,
 		getPreferences,
 		setPreferences,
 		getSuggestionToSurface,
+		getFeedback,
+		resetFeedback,
 	};
 }
 

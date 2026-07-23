@@ -127,6 +127,23 @@ export function describeFindingState(finding: Finding, nowMs: number): string | 
 	return null;
 }
 
+/**
+ * WP-3.7: a pattern type as the user should read it. The stored values are the
+ * miner's own identifiers (`sequential_co_occurrence`), which are the right
+ * thing in the database and the wrong thing on screen. An unknown type falls
+ * back to its own identifier with the underscores softened, so a pattern kind
+ * added later shows up as something readable instead of vanishing from the
+ * feedback list.
+ */
+export function formatPatternType(patternType: string): string {
+	switch (patternType) {
+		case "sequential_co_occurrence":
+			return "One thing usually follows another";
+		default:
+			return patternType.replace(/_/g, " ");
+	}
+}
+
 /** e.g. 0.8421 -> "84%". */
 export function formatConfidence(confidence: number): string {
 	if (!Number.isFinite(confidence)) {

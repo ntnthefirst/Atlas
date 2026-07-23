@@ -822,6 +822,32 @@ export type SuggestionPreferences = {
 	enabled: boolean;
 	maxPerSession: number;
 	maxPerDay: number;
+	/**
+	 * WP-3.7: how many times in a row one category (a pattern type, in one
+	 * environment) has to be dismissed before Atlas stops offering it.
+	 */
+	suppressAfterDismissals: number;
+};
+
+// WP-3.7's feedback loop, made inspectable: one row per category the user has
+// given Atlas any answer about, in ONE environment. The counts are included
+// deliberately -- "why has Atlas stopped offering this" should always have an
+// answer the user can read, not just a boolean they have to trust.
+export type SuggestionFeedbackCategory = {
+	environmentId: string;
+	patternType: string;
+	shown: number;
+	accepted: number;
+	dismissed: number;
+	/** Dismissals since the last accept -- the number the verdict is made on. */
+	consecutiveDismissals: number;
+	/** The `suppressAfterDismissals` this verdict was measured against. */
+	threshold: number;
+	suppressed: boolean;
+	lastAcceptedAt: string | null;
+	lastDismissedAt: string | null;
+	/** When the user last reset this category, or null if they never have. */
+	resetAt: string | null;
 };
 
 // What the Notch actually renders for a currently-surfaced suggestion --

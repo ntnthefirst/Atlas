@@ -39,6 +39,7 @@ import type {
 	NotchLayoutResolution,
 	NotchPreferences,
 	SuggestionPreferences,
+	SuggestionFeedbackCategory,
 	SurfacedSuggestion,
 	Finding,
 	FindingActionResult,
@@ -215,6 +216,12 @@ declare global {
 			getSuggestionPreferences: () => Promise<SuggestionPreferences>;
 			setSuggestionPreferences: (patch: Partial<SuggestionPreferences>) => Promise<SuggestionPreferences>;
 			getCurrentSuggestion: (environmentId: string) => Promise<SurfacedSuggestion | null>;
+			// WP-3.7: the feedback loop, inspectable and resettable.
+			getSuggestionFeedback: (environmentId: string) => Promise<SuggestionFeedbackCategory[]>;
+			resetSuggestionFeedback: (
+				environmentId: string,
+				patternType?: string | null,
+			) => Promise<SuggestionFeedbackCategory[]>;
 			acceptFinding: (findingId: string) => Promise<FindingActionResult>;
 			dismissFinding: (findingId: string) => Promise<FindingActionResult>;
 

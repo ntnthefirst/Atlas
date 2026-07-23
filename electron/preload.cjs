@@ -271,6 +271,11 @@ contextBridge.exposeInMainWorld("atlas", {
 	getSuggestionPreferences: () => ipcRenderer.invoke("suggestions:getPreferences"),
 	setSuggestionPreferences: (patch) => ipcRenderer.invoke("suggestions:setPreferences", patch),
 	getCurrentSuggestion: (environmentId) => ipcRenderer.invoke("suggestions:getCurrent", environmentId),
+	// WP-3.7: the feedback loop. Both environment-scoped -- a verdict in one
+	// environment is never shown as, or applied to, another's.
+	getSuggestionFeedback: (environmentId) => ipcRenderer.invoke("suggestions:getFeedback", environmentId),
+	resetSuggestionFeedback: (environmentId, patternType) =>
+		ipcRenderer.invoke("suggestions:resetFeedback", environmentId, patternType ?? null),
 	acceptFinding: (findingId) => ipcRenderer.invoke("findings:accept", findingId),
 	dismissFinding: (findingId) => ipcRenderer.invoke("findings:ignore", findingId),
 

@@ -28,6 +28,18 @@ function register(ipcMain, deps) {
 	// Called on a poll from the Notch (src/components/notch/NotchApp.tsx),
 	// never on a timer main.cjs itself owns.
 	ipcMain.handle("suggestions:getCurrent", (_event, environmentId) => manager.getSuggestionToSurface(environmentId));
+
+	// -- WP-3.7: the feedback loop, made inspectable and resettable ----------
+	// Both are environment-scoped, and neither has an "all environments"
+	// variant: a verdict computed in one environment says nothing about
+	// another, and reading them together would be exactly the cross-environment
+	// aggregate the isolation model forbids. `patternType` omitted on a reset
+	// means "every category in THIS environment", never every environment.
+	ipcMain.handle("suggestions:getFeedback", (_event, environmentId) => manager.getFeedback(environmentId));
+
+	ipcMain.handle("suggestions:resetFeedback", (_event, environmentId, patternType) =>
+		manager.resetFeedback(environmentId, patternType ?? null),
+	);
 }
 
 module.exports = { register };

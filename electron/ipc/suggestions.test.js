@@ -74,3 +74,54 @@ describe("suggestions:getCurrent", () => {
 		expect(ipcMain.invoke("suggestions:getCurrent", "env-a")).toBeNull();
 	});
 });
+
+// ---------------------------------------------------------------------------
+// WP-3.7's two channels. Both are environment-scoped by construction, and the
+// reset channel normalizes a missing pattern type to an explicit null so the
+// manager never has to guess whether "undefined" meant "all of them" or a
+// dropped argument.
+// ---------------------------------------------------------------------------
+
+describe("suggestions:getFeedback / suggestions:resetFeedback (WP-3.7)", () => {
+	function createFeedbackManager(overrides = {}) {
+		return {
+			getPreferences: vi.fn(() => ({})),
+			setPreferences: vi.fn((patch) => patch),
+			getSuggestionToSurface: vi.fn(() => null),
+			getFeedback: vi.fn(() => [{ patternType: "sequential_co_occurrence", suppressed: true }]),
+			resetFeedback: vi.fn(() => []),
+			...overrides,
+		};
+	}
+
+	it("forwards the environment id to getFeedback and returns its rows", () => {
+		const manager = createFeedbackManager();
+		const ipcMain = createFakeIpcMain();
+		register(ipcMain, { manager });
+
+		const rows = ipcMain.invoke("suggestions:getFeedback", "env-a");
+
+		expect(manager.getFeedback).toHaveBeenCalledWith("env-a");
+		expect(rows[0].suppressed).toBe(true);
+	});
+
+	it("resets one named category", () => {
+		const manager = createFeedbackManager();
+		const ipcMain = createFakeIpcMain();
+		register(ipcMain, { manager });
+
+		ipcMain.invoke("suggestions:resetFeedback", "env-a", "sequential_co_occurrence");
+
+		expect(manager.resetFeedback).toHaveBeenCalledWith("env-a", "sequential_co_occurrence");
+	});
+
+	it("normalizes a missing pattern type to an explicit null, never undefined", () => {
+		const manager = createFeedbackManager();
+		const ipcMain = createFakeIpcMain();
+		register(ipcMain, { manager });
+
+		ipcMain.invoke("suggestions:resetFeedback", "env-a");
+
+		expect(manager.resetFeedback).toHaveBeenCalledWith("env-a", null);
+	});
+});

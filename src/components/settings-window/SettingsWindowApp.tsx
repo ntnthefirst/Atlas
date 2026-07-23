@@ -219,6 +219,7 @@ export function SettingsWindowApp() {
 		enabled: true,
 		maxPerSession: 1,
 		maxPerDay: 3,
+		suppressAfterDismissals: 3,
 	});
 	const [displays, setDisplays] = useState<DisplaySummary[]>([]);
 	const [environments, setEnvironments] = useState<Environment[]>([]);
@@ -1120,17 +1121,39 @@ export function SettingsWindowApp() {
 														onChange={(value) => updateSuggestionPrefs({ enabled: value })}
 													/>
 													{suggestionPrefs.enabled && (
-														<Select
-															label="Daily limit"
-															value={String(suggestionPrefs.maxPerDay)}
-															onChange={(value) => updateSuggestionPrefs({ maxPerDay: Number(value) })}
-															options={[
-																{ value: "1", label: "1 per day", description: "The quietest setting" },
-																{ value: "2", label: "2 per day" },
-																{ value: "3", label: "3 per day" },
-																{ value: "5", label: "5 per day" },
-															]}
-														/>
+														<>
+															<Select
+																label="Daily limit"
+																value={String(suggestionPrefs.maxPerDay)}
+																onChange={(value) => updateSuggestionPrefs({ maxPerDay: Number(value) })}
+																options={[
+																	{ value: "1", label: "1 per day", description: "The quietest setting" },
+																	{ value: "2", label: "2 per day" },
+																	{ value: "3", label: "3 per day" },
+																	{ value: "5", label: "5 per day" },
+																]}
+															/>
+															{/* WP-3.7: how quickly Atlas takes no for an answer. What it
+															    has concluded so far, and the reset for it, live on the
+															    Findings tab next to the patterns themselves. */}
+															<Select
+																label="Stop offering a kind of pattern after"
+																value={String(suggestionPrefs.suppressAfterDismissals)}
+																onChange={(value) =>
+																	updateSuggestionPrefs({ suppressAfterDismissals: Number(value) })
+																}
+																options={[
+																	{
+																		value: "1",
+																		label: "1 dismissal",
+																		description: "Takes the first no as final",
+																	},
+																	{ value: "2", label: "2 in a row" },
+																	{ value: "3", label: "3 in a row" },
+																	{ value: "5", label: "5 in a row" },
+																]}
+															/>
+														</>
 													)}
 												</div>
 											</>

@@ -485,6 +485,35 @@ function listEventsByIds(db, ids) {
 	return db.all(`SELECT * FROM events WHERE id IN (${placeholders})`, unique).map(parseEventRow);
 }
 
+// WP-3.7: one environment's events, narrowed to a known set of types --
+// electron/services/suggestion-surfacing/feedback.cjs's only read. Deliberately
+// NOT listEventsByType (which is type-scoped but environment-WIDE): the
+// feedback loop's verdict is per (environment, pattern type), so reading every
+// environment's outcomes and filtering in JavaScript afterwards would pull an
+// enclosed environment's rows into memory to answer a question about a
+// different environment. `environmentId` is required for the same reason
+// countEventsBySubject requires it -- refusing to aggregate unscoped is
+// cheaper to enforce here than to audit at every call site.
+function listEventsByEnvironmentAndTypes(db, environmentId, types, options = {}) {
+	if (!environmentId) {
+		throw new Error("listEventsByEnvironmentAndTypes() requires an environmentId; refusing to read unscoped.");
+	}
+	const wanted = (Array.isArray(types) ? types : []).filter((type) => typeof type === "string" && type);
+	if (wanted.length === 0) {
+		return [];
+	}
+	const placeholders = wanted.map(() => "?").join(", ");
+	const params = [environmentId, ...wanted];
+	let sql = `SELECT * FROM events WHERE environment_id = ? AND type IN (${placeholders})`;
+	if (options.startIso) {
+		sql += " AND ts >= ?";
+		params.push(options.startIso);
+	}
+	sql += " ORDER BY ts ASC, id ASC LIMIT ?";
+	params.push(normalizeLimit(options.limit));
+	return db.all(sql, params).map(parseEventRow);
+}
+
 module.exports = {
 	EventLog,
 	pruneEvents,
@@ -493,6 +522,7 @@ module.exports = {
 	listEventsByEnvironment,
 	listEventsFollowing,
 	listEventsByIds,
+	listEventsByEnvironmentAndTypes,
 	countEventsBySubject,
 	listDistinctEventEnvironmentIds,
 	listEventsForMining,

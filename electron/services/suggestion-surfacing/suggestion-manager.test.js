@@ -74,15 +74,19 @@ function createTestLifecycleManager(db, nowFn) {
 function createTestSuggestionManager(overrides = {}) {
 	const dir = makeTempDir();
 	const prefsPath = overrides.prefsPath ?? path.join(dir, "suggestion-prefs.json");
+	// WP-3.7's own state file, kept inside the same temp dir so no test ever
+	// touches %APPDATA%/Atlas.
+	const feedbackPath = overrides.feedbackPath ?? path.join(dir, "suggestion-feedback.json");
 	const manager = createSuggestionManager({
 		getPrefsPath: () => prefsPath,
+		getFeedbackPath: () => feedbackPath,
 		getDb: overrides.getDb ?? (() => null),
 		now: overrides.now,
 		sessionStartMs: overrides.sessionStartMs,
 		lifecycleManager: overrides.lifecycleManager,
 		getEventLog: overrides.getEventLog,
 	});
-	return { manager, prefsPath, dir };
+	return { manager, prefsPath, feedbackPath, dir };
 }
 
 describe("createSuggestionManager -- preferences", () => {
@@ -352,5 +356,219 @@ describe("createSuggestionManager -- rate limits", () => {
 		manager2.loadPreferences();
 
 		expect(manager2.getSuggestionToSurface("env-a")).toBeNull();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// WP-3.7 -- the feedback loop, end to end against a real temp-file database.
+// The point of testing it here rather than only in feedback.test.js is that
+// the acceptance criterion is about SUGGESTIONS, not about counts: "repeated
+// rejection of a pattern type visibly reduces its suggestions". So these
+// assert on what getSuggestionToSurface actually returns.
+// ---------------------------------------------------------------------------
+
+function recordOutcome(db, type, { environmentId = "env-a", patternType = "sequential_co_occurrence", ts } = {}) {
+	db.run(
+		"INSERT INTO events (ts, environment_id, type, subject, payload, session_id) VALUES (?, ?, ?, ?, ?, NULL)",
+		[ts, environmentId, type, "finding-1", JSON.stringify({ patternType })],
+	);
+}
+
+function createFeedbackFixture(db, nowMs) {
+	const lifecycleManager = createTestLifecycleManager(db, () => nowMs);
+	const { manager, feedbackPath } = createTestSuggestionManager({
+		getDb: () => db,
+		now: () => nowMs,
+		sessionStartMs: nowMs - 1000,
+		lifecycleManager,
+	});
+	manager.loadPreferences();
+	return { manager, feedbackPath };
+}
+
+describe("createSuggestionManager -- the feedback loop (WP-3.7)", () => {
+	it("still surfaces a suggestion after two dismissals in a row", async () => {
+		const db = await createTestDb();
+		const nowMs = localTime(2026, 6, 10, 10, 0);
+		seedFinding(db);
+		recordOutcome(db, "suggestion.dismissed", { ts: new Date(nowMs - 3 * 86400000).toISOString() });
+		recordOutcome(db, "suggestion.dismissed", { ts: new Date(nowMs - 2 * 86400000).toISOString() });
+
+		const { manager } = createFeedbackFixture(db, nowMs);
+		expect(manager.getSuggestionToSurface("env-a")).not.toBeNull();
+	});
+
+	// THE acceptance criterion.
+	it("stops surfacing a category once it has been dismissed three times in a row", async () => {
+		const db = await createTestDb();
+		const nowMs = localTime(2026, 6, 10, 10, 0);
+		seedFinding(db);
+		for (let day = 3; day >= 1; day -= 1) {
+			recordOutcome(db, "suggestion.dismissed", { ts: new Date(nowMs - day * 86400000).toISOString() });
+		}
+
+		const { manager } = createFeedbackFixture(db, nowMs);
+		expect(manager.getSuggestionToSurface("env-a")).toBeNull();
+	});
+
+	it("an accept in that category brings it straight back", async () => {
+		const db = await createTestDb();
+		const nowMs = localTime(2026, 6, 10, 10, 0);
+		seedFinding(db);
+		for (let day = 4; day >= 2; day -= 1) {
+			recordOutcome(db, "suggestion.dismissed", { ts: new Date(nowMs - day * 86400000).toISOString() });
+		}
+		recordOutcome(db, "suggestion.accepted", { ts: new Date(nowMs - 86400000).toISOString() });
+
+		const { manager } = createFeedbackFixture(db, nowMs);
+		expect(manager.getSuggestionToSurface("env-a")).not.toBeNull();
+	});
+
+	it("suppresses only the rejected category, leaving another kind of pattern offerable", async () => {
+		const db = await createTestDb();
+		const nowMs = localTime(2026, 6, 10, 10, 0);
+		seedFinding(db, { patternType: "some_other_pattern" });
+		for (let day = 3; day >= 1; day -= 1) {
+			recordOutcome(db, "suggestion.dismissed", { ts: new Date(nowMs - day * 86400000).toISOString() });
+		}
+
+		const { manager } = createFeedbackFixture(db, nowMs);
+		// Three dismissals of sequential_co_occurrence; the only finding present
+		// is a different pattern type and must be unaffected.
+		expect(manager.getSuggestionToSurface("env-a")).not.toBeNull();
+	});
+
+	// The isolation boundary, at the level that matters to the user.
+	it("another environment's rejections never suppress this one", async () => {
+		const db = await createTestDb();
+		const nowMs = localTime(2026, 6, 10, 10, 0);
+		seedFinding(db);
+		for (let day = 3; day >= 1; day -= 1) {
+			recordOutcome(db, "suggestion.dismissed", {
+				environmentId: "env-b",
+				ts: new Date(nowMs - day * 86400000).toISOString(),
+			});
+		}
+
+		const { manager } = createFeedbackFixture(db, nowMs);
+		expect(manager.getSuggestionToSurface("env-a")).not.toBeNull();
+	});
+
+	// -- Inspectable and resettable ------------------------------------------
+
+	it("getFeedback reports the counts behind the verdict, not just the verdict", async () => {
+		const db = await createTestDb();
+		const nowMs = localTime(2026, 6, 10, 10, 0);
+		seedFinding(db);
+		recordOutcome(db, "suggestion.shown", { ts: new Date(nowMs - 4 * 86400000).toISOString() });
+		for (let day = 3; day >= 1; day -= 1) {
+			recordOutcome(db, "suggestion.dismissed", { ts: new Date(nowMs - day * 86400000).toISOString() });
+		}
+
+		const { manager } = createFeedbackFixture(db, nowMs);
+		const summary = manager.getFeedback("env-a");
+		expect(summary).toHaveLength(1);
+		expect(summary[0]).toMatchObject({
+			patternType: "sequential_co_occurrence",
+			shown: 1,
+			dismissed: 3,
+			consecutiveDismissals: 3,
+			suppressed: true,
+		});
+	});
+
+	it("getFeedback never reports another environment's categories", async () => {
+		const db = await createTestDb();
+		const nowMs = localTime(2026, 6, 10, 10, 0);
+		recordOutcome(db, "suggestion.dismissed", {
+			environmentId: "env-b",
+			ts: new Date(nowMs - 86400000).toISOString(),
+		});
+
+		const { manager } = createFeedbackFixture(db, nowMs);
+		expect(manager.getFeedback("env-a")).toEqual([]);
+	});
+
+	it("resetting a category un-suppresses it and lets the suggestion through again", async () => {
+		const db = await createTestDb();
+		const nowMs = localTime(2026, 6, 10, 10, 0);
+		seedFinding(db);
+		for (let day = 3; day >= 1; day -= 1) {
+			recordOutcome(db, "suggestion.dismissed", { ts: new Date(nowMs - day * 86400000).toISOString() });
+		}
+
+		const { manager } = createFeedbackFixture(db, nowMs);
+		expect(manager.getSuggestionToSurface("env-a")).toBeNull();
+
+		manager.resetFeedback("env-a", "sequential_co_occurrence");
+		expect(manager.getSuggestionToSurface("env-a")).not.toBeNull();
+	});
+
+	it("resetting destroys no events -- the activity log is left exactly as it was", async () => {
+		const db = await createTestDb();
+		const nowMs = localTime(2026, 6, 10, 10, 0);
+		seedFinding(db);
+		for (let day = 3; day >= 1; day -= 1) {
+			recordOutcome(db, "suggestion.dismissed", { ts: new Date(nowMs - day * 86400000).toISOString() });
+		}
+		const before = db.first("SELECT COUNT(*) AS count FROM events").count;
+
+		const { manager } = createFeedbackFixture(db, nowMs);
+		manager.resetFeedback("env-a", "sequential_co_occurrence");
+
+		expect(db.first("SELECT COUNT(*) AS count FROM events").count).toBe(before);
+	});
+
+	it("resetting with no pattern type clears every category in that environment", async () => {
+		const db = await createTestDb();
+		const nowMs = localTime(2026, 6, 10, 10, 0);
+		for (let day = 3; day >= 1; day -= 1) {
+			recordOutcome(db, "suggestion.dismissed", { ts: new Date(nowMs - day * 86400000).toISOString() });
+			recordOutcome(db, "suggestion.dismissed", {
+				patternType: "another_pattern",
+				ts: new Date(nowMs - day * 86400000).toISOString(),
+			});
+		}
+
+		const { manager } = createFeedbackFixture(db, nowMs);
+		expect(manager.getFeedback("env-a").filter((entry) => entry.suppressed)).toHaveLength(2);
+
+		manager.resetFeedback("env-a");
+		expect(manager.getFeedback("env-a")).toEqual([]);
+	});
+
+	it("a reset persists to its own file, separate from the preferences file", async () => {
+		const db = await createTestDb();
+		const nowMs = localTime(2026, 6, 10, 10, 0);
+		recordOutcome(db, "suggestion.dismissed", { ts: new Date(nowMs - 86400000).toISOString() });
+
+		const { manager, feedbackPath } = createFeedbackFixture(db, nowMs);
+		manager.resetFeedback("env-a", "sequential_co_occurrence");
+
+		expect(fs.existsSync(feedbackPath)).toBe(true);
+		const persisted = JSON.parse(fs.readFileSync(feedbackPath, "utf8"));
+		expect(persisted.resets["env-a::sequential_co_occurrence"]).toBeTruthy();
+	});
+
+	it("refuses to reset without an environment rather than clearing everything", async () => {
+		const db = await createTestDb();
+		const nowMs = localTime(2026, 6, 10, 10, 0);
+		for (let day = 3; day >= 1; day -= 1) {
+			recordOutcome(db, "suggestion.dismissed", { ts: new Date(nowMs - day * 86400000).toISOString() });
+		}
+
+		const { manager } = createFeedbackFixture(db, nowMs);
+		expect(manager.resetFeedback(null)).toEqual([]);
+		expect(manager.getFeedback("env-a")[0].suppressed).toBe(true);
+	});
+
+	it("the global off switch still short-circuits before any feedback work happens", async () => {
+		const db = await createTestDb();
+		const nowMs = localTime(2026, 6, 10, 10, 0);
+		seedFinding(db);
+
+		const { manager } = createFeedbackFixture(db, nowMs);
+		manager.setPreferences({ enabled: false });
+		expect(manager.getSuggestionToSurface("env-a")).toBeNull();
 	});
 });

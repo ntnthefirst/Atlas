@@ -10,6 +10,7 @@ import {
 	listEventsByType,
 	listEventsByEnvironment,
 	listEventsFollowing,
+	listEventsByEnvironmentAndTypes,
 	countEventsBySubject,
 	listDistinctEventEnvironmentIds,
 	listEventsForMining,
@@ -784,5 +785,74 @@ describe("listEventsForMining (WP-3.3)", () => {
 		const allSubjects = pages.flatMap((page) => page.map((row) => row.subject));
 		expect(allSubjects).toEqual(rows.map((_, i) => `s${i}`)); // exact order, no gaps, no repeats
 		expect(new Set(allSubjects).size).toBe(25); // never repeated across pages
+	});
+});
+
+// ---------------------------------------------------------------------------
+// WP-3.7's own read. The scoping assertion here is the one that actually keeps
+// the feedback loop inside an environment boundary: electron/services/
+// suggestion-surfacing/feedback.cjs re-filters by environment defensively, but
+// that only matters if something goes wrong -- in the normal path it is THIS
+// query that decides which rows are ever loaded at all.
+// ---------------------------------------------------------------------------
+
+describe("listEventsByEnvironmentAndTypes (WP-3.7)", () => {
+	async function seedTwoEnvironments(db) {
+		const t0 = Date.now();
+		seedEvents(db, [
+			{ ts: new Date(t0).toISOString(), type: "suggestion.shown", environmentId: "env-a", subject: "f1" },
+			{ ts: new Date(t0 + 1000).toISOString(), type: "suggestion.dismissed", environmentId: "env-a", subject: "f1" },
+			{ ts: new Date(t0 + 2000).toISOString(), type: "app.focus", environmentId: "env-a", subject: "chrome" },
+			{ ts: new Date(t0 + 3000).toISOString(), type: "suggestion.dismissed", environmentId: "env-b", subject: "f2" },
+			{ ts: new Date(t0 + 4000).toISOString(), type: "suggestion.accepted", environmentId: "env-b", subject: "f2" },
+		]);
+	}
+
+	it("returns only the requested types, and only for the requested environment", async () => {
+		const db = await createDb();
+		await seedTwoEnvironments(db);
+
+		const rows = listEventsByEnvironmentAndTypes(db, "env-a", ["suggestion.shown", "suggestion.dismissed"]);
+
+		expect(rows).toHaveLength(2);
+		expect(rows.every((row) => row.environmentId === "env-a")).toBe(true);
+		expect(rows.map((row) => row.type)).toEqual(["suggestion.shown", "suggestion.dismissed"]);
+	});
+
+	it("never returns another environment's rows, even for a type it shares", async () => {
+		const db = await createDb();
+		await seedTwoEnvironments(db);
+
+		const rows = listEventsByEnvironmentAndTypes(db, "env-a", ["suggestion.dismissed"]);
+
+		// env-b has a suggestion.dismissed of its own; asking for env-a's must
+		// not see it.
+		expect(rows).toHaveLength(1);
+		expect(rows[0].subject).toBe("f1");
+	});
+
+	it("returns rows in ascending time order, which the consecutive-dismissal rule depends on", async () => {
+		const db = await createDb();
+		await seedTwoEnvironments(db);
+
+		const rows = listEventsByEnvironmentAndTypes(db, "env-b", ["suggestion.dismissed", "suggestion.accepted"]);
+		expect(rows.map((row) => row.type)).toEqual(["suggestion.dismissed", "suggestion.accepted"]);
+	});
+
+	it("refuses to run unscoped rather than reading every environment at once", async () => {
+		const db = await createDb();
+		await seedTwoEnvironments(db);
+
+		expect(() => listEventsByEnvironmentAndTypes(db, null, ["suggestion.dismissed"])).toThrow(/environmentId/);
+		expect(() => listEventsByEnvironmentAndTypes(db, "", ["suggestion.dismissed"])).toThrow(/environmentId/);
+	});
+
+	it("returns nothing for an empty or garbage type list, rather than everything", async () => {
+		const db = await createDb();
+		await seedTwoEnvironments(db);
+
+		expect(listEventsByEnvironmentAndTypes(db, "env-a", [])).toEqual([]);
+		expect(listEventsByEnvironmentAndTypes(db, "env-a", null)).toEqual([]);
+		expect(listEventsByEnvironmentAndTypes(db, "env-a", [null, 42])).toEqual([]);
 	});
 });

@@ -29,6 +29,17 @@
 //                    restarts Atlas several times in one day does not get a
 //                    fresh per-session allowance each time, indefinitely --
 //                    see rate-limit.cjs's own header for how the two compose.
+//   suppressAfterDismissals:
+//                    WP-3.7's feedback loop: how many times in a row a
+//                    category (one pattern type, in one environment) has to be
+//                    dismissed before Atlas stops offering it. Lives here
+//                    rather than in its own prefs file because it is exactly
+//                    the same kind of thing as the two limits above -- a
+//                    tunable ceiling on how often the user is interrupted. The
+//                    feedback loop's own STATE (which categories the user has
+//                    reset, and when) is separate, in electron/config/
+//                    suggestion-feedback.cjs, because that is data and this is
+//                    a setting.
 // }
 //
 // Every threshold here is a genuine product decision this WP was asked to
@@ -44,17 +55,28 @@ const SUGGESTION_PREFS_FILE = "suggestion-prefs.json";
 const DEFAULT_ENABLED = true;
 const DEFAULT_MAX_PER_SESSION = 1;
 const DEFAULT_MAX_PER_DAY = 3;
+// Three in a row. Two is inside the range of ordinary "not right now"
+// dismissals; three is the point at which the user has plainly said no rather
+// than not-yet, and it is also small enough that the loop actually bites
+// within a week of normal use rather than in theory.
+const DEFAULT_SUPPRESS_AFTER_DISMISSALS = 3;
 
 const MIN_MAX_PER_SESSION = 1;
 const MAX_MAX_PER_SESSION = 10;
 const MIN_MAX_PER_DAY = 1;
 const MAX_MAX_PER_DAY = 50;
+// A floor of 1 ("suppress after a single dismissal") is a legitimate setting
+// for someone who wants Atlas to take the first no as final; 0 is not, because
+// it would suppress a category that has never been dismissed at all.
+const MIN_SUPPRESS_AFTER_DISMISSALS = 1;
+const MAX_SUPPRESS_AFTER_DISMISSALS = 20;
 
 function defaultSuggestionPreferences() {
 	return {
 		enabled: DEFAULT_ENABLED,
 		maxPerSession: DEFAULT_MAX_PER_SESSION,
 		maxPerDay: DEFAULT_MAX_PER_DAY,
+		suppressAfterDismissals: DEFAULT_SUPPRESS_AFTER_DISMISSALS,
 	};
 }
 
@@ -71,6 +93,12 @@ function normalizeSuggestionPreferences(raw) {
 		enabled: typeof raw.enabled === "boolean" ? raw.enabled : base.enabled,
 		maxPerSession: clampNumber(raw.maxPerSession, base.maxPerSession, MIN_MAX_PER_SESSION, MAX_MAX_PER_SESSION),
 		maxPerDay: clampNumber(raw.maxPerDay, base.maxPerDay, MIN_MAX_PER_DAY, MAX_MAX_PER_DAY),
+		suppressAfterDismissals: clampNumber(
+			raw.suppressAfterDismissals,
+			base.suppressAfterDismissals,
+			MIN_SUPPRESS_AFTER_DISMISSALS,
+			MAX_SUPPRESS_AFTER_DISMISSALS,
+		),
 	};
 }
 
@@ -79,6 +107,7 @@ module.exports = {
 	DEFAULT_ENABLED,
 	DEFAULT_MAX_PER_SESSION,
 	DEFAULT_MAX_PER_DAY,
+	DEFAULT_SUPPRESS_AFTER_DISMISSALS,
 	defaultSuggestionPreferences,
 	normalizeSuggestionPreferences,
 };

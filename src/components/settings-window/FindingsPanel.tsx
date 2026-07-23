@@ -8,9 +8,10 @@ import {
 	describeFindingState,
 	formatConfidence,
 	formatLift,
+	formatPatternType,
 	moveTargetsFor,
 } from "./findingActions";
-import type { Environment, Finding, FindingEvidence } from "../../types";
+import type { Environment, Finding, FindingEvidence, SuggestionFeedbackCategory } from "../../types";
 
 // ---------------------------------------------------------------------------
 // WP-3.6: the findings management surface -- the vision's full control panel
@@ -87,6 +88,9 @@ export function FindingsPanel({ environments }: { environments: Environment[] })
 	const [expandedId, setExpandedId] = useState<string | null>(null);
 	const [evidence, setEvidence] = useState<Record<string, EvidenceState>>({});
 	const [labelDrafts, setLabelDrafts] = useState<Record<string, string>>({});
+	// WP-3.7: what Atlas has concluded from the user's past answers, in this
+	// environment only.
+	const [feedback, setFeedback] = useState<SuggestionFeedbackCategory[]>([]);
 
 	useEffect(() => {
 		if (!environmentId && environments.length > 0) {
@@ -101,8 +105,12 @@ export function FindingsPanel({ environments }: { environments: Environment[] })
 		}
 		setLoading(true);
 		try {
-			const rows = await window.atlas.listFindings(environmentId);
+			const [rows, categories] = await Promise.all([
+				window.atlas.listFindings(environmentId),
+				window.atlas.getSuggestionFeedback(environmentId),
+			]);
 			setFindings(rows);
+			setFeedback(categories);
 			setError(null);
 		} catch (cause) {
 			setError(describeIpcError(cause, "Couldn't load findings."));
@@ -131,6 +139,21 @@ export function FindingsPanel({ environments }: { environments: Environment[] })
 			await reload();
 		},
 		[reload],
+	);
+
+	// Reset returns the refreshed summary directly, but is routed through
+	// runAction anyway so a failure surfaces the same way every other action's
+	// does, and so the findings list reloads alongside it -- unsuppressing a
+	// category can change what is offered.
+	const resetFeedbackFor = useCallback(
+		async (patternType: string | null) => {
+			if (!environmentId) {
+				return { ok: false, error: "No environment selected." };
+			}
+			await window.atlas.resetSuggestionFeedback(environmentId, patternType);
+			return { ok: true };
+		},
+		[environmentId],
 	);
 
 	const toggleEvidence = useCallback(async (findingId: string) => {
@@ -191,6 +214,56 @@ export function FindingsPanel({ environments }: { environments: Environment[] })
 
 			{error ? (
 				<p className="m-0 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-300">{error}</p>
+			) : null}
+
+			{/* WP-3.7: the feedback loop made inspectable. Shown above the findings
+			    themselves because it explains why the list below might be shorter
+			    than the user expects. */}
+			{feedback.length > 0 ? (
+				<div className="atlas-settings-card-stack grid gap-2">
+					<div className="flex items-center justify-between gap-3">
+						<span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-300">
+							What your answers have taught Atlas
+						</span>
+						<button
+							type="button"
+							className="action-btn"
+							onClick={() => void runAction(async () => resetFeedbackFor(null))}
+						>
+							Reset all
+						</button>
+					</div>
+					<p className="m-0 text-xs text-neutral-500 dark:text-neutral-300">
+						Dismissing the same kind of pattern several times in a row stops Atlas offering it here. Accepting one
+						clears that count on its own. Resetting never deletes anything from your activity history — it just
+						stops the answers so far from counting.
+					</p>
+					{feedback.map((category) => (
+						<div
+							key={category.patternType}
+							className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-neutral-100 px-2.5 py-2 dark:bg-neutral-700"
+						>
+							<div className="grid gap-0.5">
+								<span className="text-[11px] font-medium text-neutral-700 dark:text-neutral-50">
+									{formatPatternType(category.patternType)}
+								</span>
+								<span className="text-[11px] text-neutral-500 dark:text-neutral-300">
+									{category.suppressed
+										? `Not being offered — dismissed ${category.consecutiveDismissals} times in a row.`
+										: `Dismissed ${category.consecutiveDismissals} of ${category.threshold} times in a row.`}{" "}
+									{category.accepted} accepted, {category.dismissed} dismissed in total.
+								</span>
+							</div>
+							<button
+								type="button"
+								className="action-btn"
+								onClick={() => void runAction(async () => resetFeedbackFor(category.patternType))}
+							>
+								Reset
+							</button>
+						</div>
+					))}
+				</div>
 			) : null}
 
 			{loading ? <p className="m-0 text-xs text-neutral-500 dark:text-neutral-300">Loading…</p> : null}
