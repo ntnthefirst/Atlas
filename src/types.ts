@@ -265,10 +265,44 @@ export type NoteItem = {
 // process; the renderer only ever receives whether a key is set.
 export type AiProvider = "anthropic" | "google" | "openai";
 
+// WP-4.1: what a provider can do. Callers check these and degrade rather than
+// assuming every provider behaves alike — which is also what lets a local
+// model (D6) slot in later with a different set of answers.
+export type AiCapabilities = {
+	streaming: boolean;
+	tools: boolean;
+};
+
 export type AiProviderPublic = {
 	hasKey: boolean;
 	model: string;
 	label: string;
+	capabilities: AiCapabilities;
+};
+
+/** One registered provider, as `ai:listProviders` describes it. Never a key. */
+export type AiProviderDescription = {
+	id: AiProvider;
+	label: string;
+	defaultModel: string;
+	capabilities: AiCapabilities;
+};
+
+/** One tool offered to the model, in the canonical (provider-neutral) shape. */
+export type AiToolSpec = {
+	name: string;
+	description?: string;
+	/** A JSON Schema object describing the arguments. */
+	parameters?: Record<string, unknown>;
+};
+
+/** A call the model asked for. `arguments` is always a parsed object. */
+export type AiToolCall = {
+	id: string;
+	name: string;
+	arguments: Record<string, unknown>;
+	/** True when the model sent arguments that could not be parsed. */
+	malformedArguments: boolean;
 };
 
 export type AiPublicConfig = {
@@ -290,10 +324,19 @@ export type AiCompleteArgs = {
 	system?: string;
 	prompt: string;
 	maxTokens?: number;
+	/** WP-4.1: tools the model may call. Refused by a provider lacking `tools`. */
+	tools?: AiToolSpec[];
 };
 
 export type AiCompleteResult =
-	| { ok: true; text: string; provider: AiProvider; model: string }
+	| { ok: true; text: string; toolCalls: AiToolCall[]; provider: AiProvider; model: string }
+	| { ok: false; error: string };
+
+// WP-4.1: the same shape, plus whether it genuinely streamed. `streamed:false`
+// means the provider lacks the capability and delivered its whole answer as a
+// single chunk — a degrade, not a failure.
+export type AiStreamResult =
+	| { ok: true; text: string; toolCalls: AiToolCall[]; provider: AiProvider; model: string; streamed: boolean }
 	| { ok: false; error: string };
 
 // What the notch's separate capture popup should collect, and the context it

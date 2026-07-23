@@ -1,5 +1,4 @@
 const path = require("node:path");
-const https = require("node:https");
 const fs = require("node:fs");
 const { app } = require("electron");
 
@@ -15,24 +14,33 @@ const { app } = require("electron");
 // ai-preferences.json — that file now holds only the chosen provider and model
 // names. Older installs wrote keys into it in plaintext; those are migrated
 // into the vault on first load and stripped from the file (WP-0.4).
+//
+// -- WP-4.1: this file no longer knows any provider by name -------------------
+// Every provider-specific detail (endpoint, auth header, request body, how to
+// read an answer, how to read a stream) moved into its own module under
+// services/ai/providers/, discovered by services/ai/registry.cjs. What is left
+// here is preferences, the vault, and precedence — the things that are about
+// the USER's configuration rather than about any particular vendor.
+//
+// That is what makes "adding a provider requires no changes outside its own
+// module" true: the lists below are derived from the registry, so a new
+// provider file appears in the preferences shape, the public config, and
+// aiComplete's dispatch without a line changing here.
 // ---------------------------------------------------------------------------
 
 const secrets = require("./services/secrets.cjs");
+const registry = require("./services/ai/registry.cjs");
+const { supports } = require("./services/ai/contract.cjs");
 
 const AI_PREFS_FILE = "ai-preferences.json";
-const AI_PROVIDERS = ["anthropic", "google", "openai"];
-const AI_PROVIDER_LABELS = {
-	anthropic: "Claude (Anthropic)",
-	google: "Gemini (Google)",
-	openai: "OpenAI",
-};
-const DEFAULT_MODELS = {
-	anthropic: "claude-sonnet-5",
-	google: "gemini-1.5-flash",
-	openai: "gpt-4o-mini",
-};
 
-const emptyProvider = (provider) => ({ model: DEFAULT_MODELS[provider] });
+// Derived, never declared. `listProviderIds()` is the registry's scan of
+// services/ai/providers/.
+const AI_PROVIDERS = registry.listProviderIds();
+const labelFor = (provider) => registry.getProvider(provider)?.label ?? provider;
+const defaultModelFor = (provider) => registry.getProvider(provider)?.defaultModel ?? "";
+
+const emptyProvider = (provider) => ({ model: defaultModelFor(provider) });
 
 // Vault key for a provider's API key. Namespaced so the vault can hold
 // unrelated secrets (integration tokens, later) without collision.
@@ -45,12 +53,12 @@ const secretKeyFor = (provider) => `ai.${provider}.apiKey`;
 let legacyPlaintextKeys = {};
 
 const defaultAiPreferences = () => ({
-	defaultProvider: "anthropic",
-	providers: {
-		anthropic: emptyProvider("anthropic"),
-		google: emptyProvider("google"),
-		openai: emptyProvider("openai"),
-	},
+	// "anthropic" when it is registered (it is, and it is the shipped default),
+	// otherwise whatever the scan found first -- so a build with a different set
+	// of provider modules still boots with a usable default instead of naming
+	// one that isn't there.
+	defaultProvider: AI_PROVIDERS.includes("anthropic") ? "anthropic" : (AI_PROVIDERS[0] ?? null),
+	providers: Object.fromEntries(AI_PROVIDERS.map((provider) => [provider, emptyProvider(provider)])),
 });
 
 let aiPreferences = defaultAiPreferences();
@@ -104,7 +112,7 @@ function normalizeAiPreferences(raw) {
 				model:
 					typeof entry.model === "string" && entry.model.trim()
 						? entry.model.trim()
-						: DEFAULT_MODELS[provider],
+						: defaultModelFor(provider),
 			};
 		}
 	}
@@ -191,7 +199,11 @@ function getPublicAiConfig() {
 		providers[provider] = {
 			hasKey: Boolean(resolveKey(provider)),
 			model: aiPreferences.providers[provider].model,
-			label: AI_PROVIDER_LABELS[provider],
+			label: labelFor(provider),
+			// WP-4.1: what this provider can do, so the renderer can offer (or
+			// hide) streaming and tool-backed features per provider instead of
+			// assuming they all behave the same. Still no key, no endpoint.
+			capabilities: registry.describeProvider(registry.getProvider(provider))?.capabilities ?? {},
 		};
 	}
 	return {
@@ -232,111 +244,76 @@ function setAiConfig(patch) {
 	return getPublicAiConfig();
 }
 
-function httpsJson(url, { method = "POST", headers = {}, body } = {}) {
-	return new Promise((resolve, reject) => {
-		const target = new URL(url);
-		const data = body ? JSON.stringify(body) : null;
-		const request = https.request(
-			{
-				method,
-				hostname: target.hostname,
-				path: target.pathname + target.search,
-				headers: {
-					"Content-Type": "application/json",
-					...headers,
-					...(data ? { "Content-Length": Buffer.byteLength(data) } : {}),
-				},
-				timeout: 60000,
-			},
-			(response) => {
-				let payload = "";
-				response.on("data", (chunk) => {
-					payload += chunk;
-				});
-				response.on("end", () => {
-					const status = response.statusCode || 0;
-					let json = null;
-					try {
-						json = payload ? JSON.parse(payload) : null;
-					} catch {
-						// Non-JSON error body; surfaced via the raw payload below.
-					}
-					if (status < 200 || status >= 300) {
-						const message =
-							(json && json.error && (json.error.message || json.error)) ||
-							(payload && payload.slice(0, 300)) ||
-							`HTTP ${status}`;
-						reject(new Error(typeof message === "string" ? message : `HTTP ${status}`));
-						return;
-					}
-					resolve(json ?? {});
-				});
-			},
-		);
-		request.on("timeout", () => request.destroy(new Error("The request timed out.")));
-		request.on("error", reject);
-		if (data) request.write(data);
-		request.end();
-	});
-}
-
-async function completeAnthropic(key, model, system, prompt, maxTokens) {
-	const json = await httpsJson("https://api.anthropic.com/v1/messages", {
-		headers: { "x-api-key": key, "anthropic-version": "2023-06-01" },
-		body: {
-			model,
-			max_tokens: maxTokens,
-			...(system ? { system } : {}),
-			messages: [{ role: "user", content: prompt }],
-		},
-	});
-	return Array.isArray(json.content)
-		? json.content.filter((block) => block.type === "text").map((block) => block.text).join("")
-		: "";
-}
-
-async function completeGoogle(key, model, system, prompt) {
-	const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
-	const body = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
-	if (system) body.systemInstruction = { parts: [{ text: system }] };
-	const json = await httpsJson(url, { body });
-	const parts = json && json.candidates && json.candidates[0] && json.candidates[0].content?.parts;
-	return Array.isArray(parts) ? parts.map((part) => part.text || "").join("") : "";
-}
-
-async function completeOpenai(key, model, system, prompt) {
-	const messages = [];
-	if (system) messages.push({ role: "system", content: system });
-	messages.push({ role: "user", content: prompt });
-	const json = await httpsJson("https://api.openai.com/v1/chat/completions", {
-		headers: { Authorization: `Bearer ${key}` },
-		body: { model, messages },
-	});
-	return (json && json.choices && json.choices[0] && json.choices[0].message?.content) || "";
+// Everything a provider call needs, resolved once from the request, the stored
+// preferences and the vault. Throws the same friendly errors both aiComplete
+// and aiStream would otherwise each have to raise for themselves.
+function prepareRequest(args) {
+	const request = args && typeof args === "object" ? args : {};
+	const providerId = resolveRequestedProvider(request.provider);
+	const provider = registry.getProvider(providerId);
+	if (!provider) {
+		throw new Error("No AI provider is available.");
+	}
+	const config = aiPreferences.providers[providerId];
+	const key = resolveKey(providerId);
+	if (!config || !key) {
+		throw new Error(`No API key set for ${labelFor(providerId)}. Add it in Settings → Integrations.`);
+	}
+	const prompt = typeof request.prompt === "string" ? request.prompt : "";
+	if (!prompt.trim()) {
+		throw new Error("Prompt is empty.");
+	}
+	return {
+		provider,
+		key,
+		model: typeof request.model === "string" && request.model.trim() ? request.model.trim() : config.model,
+		system: typeof request.system === "string" ? request.system : "",
+		prompt,
+		maxTokens: Math.min(4096, Math.max(1, Math.round(Number(request.maxTokens) || 1024))),
+		// Passed through untouched; each provider translates the canonical spec
+		// into its own wire format (see services/ai/contract.cjs).
+		tools: Array.isArray(request.tools) ? request.tools : [],
+	};
 }
 
 // Runs a single prompt against the requested (or default) provider using the
-// locally stored key. Throws a friendly error if no key is configured.
+// locally stored key. The result is the normalized shape every provider
+// resolves to -- `text` plus any `toolCalls` -- so callers never branch on
+// which provider answered.
 async function aiComplete(args) {
-	const request = args && typeof args === "object" ? args : {};
-	const provider = resolveRequestedProvider(request.provider);
-	const config = aiPreferences.providers[provider];
-	const apiKey = resolveKey(provider);
-	if (!config || !apiKey) {
-		throw new Error(`No API key set for ${AI_PROVIDER_LABELS[provider]}. Add it in Settings → Integrations.`);
+	const { provider, key, model, system, prompt, maxTokens, tools } = prepareRequest(args);
+	if (tools.length > 0 && !supports(provider, "tools")) {
+		throw new Error(`${provider.label} does not support tool calling.`);
 	}
-	const model = typeof request.model === "string" && request.model.trim() ? request.model.trim() : config.model;
-	const system = typeof request.system === "string" ? request.system : "";
-	const prompt = typeof request.prompt === "string" ? request.prompt : "";
-	if (!prompt.trim()) throw new Error("Prompt is empty.");
-	const maxTokens = Math.min(4096, Math.max(1, Math.round(Number(request.maxTokens) || 1024)));
+	const result = await provider.complete({ key, model, system, prompt, maxTokens, tools });
+	return { ...result, provider: provider.id, model };
+}
 
-	let text = "";
-	if (provider === "anthropic") text = await completeAnthropic(apiKey, model, system, prompt, maxTokens);
-	else if (provider === "google") text = await completeGoogle(apiKey, model, system, prompt);
-	else text = await completeOpenai(apiKey, model, system, prompt);
+// The streaming counterpart. `onChunk(text)` is called with each fragment as
+// it arrives; the resolved value is the same normalized shape aiComplete
+// returns, so a caller that only wants the final answer can ignore the
+// callback entirely.
+//
+// Degrades rather than refusing: a provider without the `streaming` capability
+// runs the ordinary completion and delivers its whole answer as one chunk. That
+// is what makes the capability flag useful to check rather than mandatory --
+// see contract.cjs's header.
+async function aiStream(args, onChunk) {
+	const { provider, key, model, system, prompt, maxTokens, tools } = prepareRequest(args);
+	if (tools.length > 0 && !supports(provider, "tools")) {
+		throw new Error(`${provider.label} does not support tool calling.`);
+	}
 
-	return { text, provider, model };
+	if (!supports(provider, "streaming")) {
+		const result = await provider.complete({ key, model, system, prompt, maxTokens, tools });
+		if (result.text && typeof onChunk === "function") {
+			onChunk(result.text);
+		}
+		return { ...result, provider: provider.id, model, streamed: false };
+	}
+
+	const result = await provider.stream({ key, model, system, prompt, maxTokens, tools, onChunk });
+	return { ...result, provider: provider.id, model, streamed: true };
 }
 
 module.exports = {
@@ -345,7 +322,11 @@ module.exports = {
 	getPublicAiConfig,
 	setAiConfig,
 	aiComplete,
+	aiStream,
 	setActiveEnvironmentProvider,
 	getActiveEnvironmentProvider,
 	resolveRequestedProvider,
+	// WP-4.1: the renderer-safe provider descriptions (id, label, default
+	// model, capabilities) -- never a key, never an endpoint.
+	describeProviders: registry.describeAll,
 };

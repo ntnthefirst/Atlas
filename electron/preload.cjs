@@ -197,6 +197,29 @@ contextBridge.exposeInMainWorld("atlas", {
 	getAiConfig: () => ipcRenderer.invoke("ai:getConfig"),
 	setAiConfig: (patch) => ipcRenderer.invoke("ai:setConfig", patch),
 	aiComplete: (args) => ipcRenderer.invoke("ai:complete", args),
+	// WP-4.1: which providers are registered and what each supports, so a
+	// caller can degrade instead of assuming they all behave alike.
+	listAiProviders: () => ipcRenderer.invoke("ai:listProviders"),
+	// WP-4.1: streaming. `onChunk` fires per fragment; the promise settles with
+	// the final normalized result. The subscription is set up BEFORE the invoke
+	// and torn down when it settles, so no chunk can arrive unlistened and no
+	// listener outlives its request.
+	// The CALLER mints the id, not the main process. Chunks start arriving
+	// while `invoke` is still pending, so an id only learned from its resolved
+	// value would arrive too late to filter anything -- every chunk would have
+	// to be buffered until the end, which is not streaming at all.
+	aiStream: (args, onChunk) => {
+		const streamId = `stream-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+		const listener = (_event, payload) => {
+			if (payload?.streamId === streamId && typeof onChunk === "function") {
+				onChunk(payload.chunk);
+			}
+		};
+		ipcRenderer.on("ai:streamChunk", listener);
+		return ipcRenderer
+			.invoke("ai:stream", { ...(args || {}), streamId })
+			.finally(() => ipcRenderer.removeListener("ai:streamChunk", listener));
+	},
 
 	pickAppFile: () => ipcRenderer.invoke("app:pickFile"),
 	getFileIcon: (filePath) => ipcRenderer.invoke("app:getFileIcon", filePath),

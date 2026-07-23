@@ -4,6 +4,8 @@ import type {
 	ActivityBlock,
 	AiCompleteArgs,
 	AiCompleteResult,
+	AiProviderDescription,
+	AiStreamResult,
 	AiConfigPatch,
 	AiPublicConfig,
 	AppRelease,
@@ -178,6 +180,9 @@ declare global {
 			getAiConfig: () => Promise<AiPublicConfig>;
 			setAiConfig: (patch: AiConfigPatch) => Promise<AiPublicConfig>;
 			aiComplete: (args: AiCompleteArgs) => Promise<AiCompleteResult>;
+			// WP-4.1: provider capabilities, and streaming.
+			listAiProviders: () => Promise<AiProviderDescription[]>;
+			aiStream: (args: AiCompleteArgs, onChunk: (chunk: string) => void) => Promise<AiStreamResult>;
 
 			pickAppFile: () => Promise<string | null>;
 			getFileIcon: (filePath: string) => Promise<string | null>;
